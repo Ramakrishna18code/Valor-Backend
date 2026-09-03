@@ -12,7 +12,7 @@ services:
       - key: DB_URL
         sync: false
       - key: DB_USERNAME
-        sync: false
+        value: root
       - key: DB_PASSWORD
         sync: false
       - key: JWT_SECRET

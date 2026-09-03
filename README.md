@@ -42,7 +42,11 @@ flowchart LR
 
 ## Run locally
 1. Create a MySQL database named `valor_lift_db`
-2. Update credentials in `src/main/resources/application.properties`
+2. Set the values from `.env.example` in your local environment. The database
+   password must remain outside Git and should be entered in the Render secret
+   environment variables `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` for
+   deployment. `DB_URL` must use your hosted MySQL hostname, for example
+   `jdbc:mysql://<mysql-host>:3306/valor_lift_db`.
 3. Run:
    ```bash
    mvn spring-boot:run
