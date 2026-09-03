@@ -11,6 +11,7 @@ public interface LiftService {
     Lift updateLift(Long id, Lift lift);
     void deleteLift(Long id);
     Lift getLiftById(Long id);
+    List<Lift> getAllLifts();
     List<Lift> getCustomerLifts(Long customerId);
     List<Lift> getBuildingLifts(Long buildingId);
     List<Lift> searchLifts(String term);

@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
+import com.valor.enums.CustomerStatus;
 
 @Data
 public class CustomerDto {
@@ -21,6 +22,13 @@ public class CustomerDto {
     @Size(min = 6, max = 100, message = "Password must be at least 6 characters")
     private String password;
 
+    @NotBlank(message = "Phone is required")
     @Pattern(regexp = "^[0-9]{10}$", message = "Phone must be 10 digits")
     private String phone;
+
+    private String address;
+    private String city;
+    private String state;
+    private String pincode;
+    private CustomerStatus accountStatus = CustomerStatus.ACTIVE;
 }

@@ -20,6 +20,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -66,6 +67,15 @@ public class AdminController {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Admin created", AdminMapper.toResponse(adminRepository.save(admin)), HttpStatus.CREATED.value()));
     }
+
+        @Operation(summary = "Get the authenticated admin")
+        @GetMapping("/me")
+        public ResponseEntity<ApiResponse<AdminResponse>> getCurrentAdmin(Authentication authentication) {
+        Admin admin = adminRepository.findByEmail(authentication.getName())
+            .orElseThrow(() -> new IllegalArgumentException("Authenticated admin no longer exists"));
+        return ResponseEntity.ok(ApiResponse.success("Admin profile fetched successfully",
+            AdminMapper.toResponse(admin), HttpStatus.OK.value()));
+        }
 
     @Operation(summary = "Get admin by id")
     @GetMapping("/{id}")

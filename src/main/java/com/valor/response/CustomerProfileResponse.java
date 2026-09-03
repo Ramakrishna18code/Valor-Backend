@@ -9,10 +9,20 @@ public record CustomerProfileResponse(
         String email,
         String phone,
         String role,
-        boolean enabled
+        boolean enabled,
+        String address,
+        String city,
+        String state,
+        String pincode,
+        String accountStatus
 ) {
     public static CustomerProfileResponse from(Customer customer) {
         return new CustomerProfileResponse(customer.getId(), customer.getName(), customer.getEmail(),
-                customer.getPhone(), customer.getRole().name(), Boolean.TRUE.equals(customer.getEnabled()));
+            customer.getPhone(), customer.getRole().name(), Boolean.TRUE.equals(customer.getEnabled()),
+            customer.getAddress() == null ? null : customer.getAddress().getStreet(),
+            customer.getAddress() == null ? null : customer.getAddress().getCity(),
+            customer.getAddress() == null ? null : customer.getAddress().getState(),
+            customer.getAddress() == null ? null : customer.getAddress().getPincode(),
+            customer.getAccountStatus() == null ? null : customer.getAccountStatus().name());
     }
 }

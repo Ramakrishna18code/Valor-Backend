@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS customers (
     enabled BOOLEAN NOT NULL DEFAULT TRUE, account_status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
     rating DOUBLE, last_service_date DATE, next_scheduled_service_date DATE, total_previous_services INT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, created_by VARCHAR(255), updated_by VARCHAR(255),
-    deleted_at DATETIME, deleted_by VARCHAR(255), is_deleted BOOLEAN NOT NULL DEFAULT FALSE
+    deleted_at DATETIME, deleted_by VARCHAR(255), is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    INDEX idx_customers_account_status (account_status), INDEX idx_customers_enabled (enabled)
 );
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS buildings (
     number_of_lifts INT DEFAULT 0, emergency_contact_name VARCHAR(255), emergency_contact_phone VARCHAR(255),
     status VARCHAR(50) DEFAULT 'ACTIVE', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
     created_by VARCHAR(255), updated_by VARCHAR(255), deleted_at DATETIME, deleted_by VARCHAR(255), is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    INDEX idx_buildings_customer_status (customer_id, status),
     FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
 
@@ -49,6 +51,7 @@ CREATE TABLE IF NOT EXISTS lifts (
     last_maintenance_date DATE, next_maintenance_date DATE, total_breakdowns INT DEFAULT 0, health_score INT DEFAULT 100,
     machine_room VARCHAR(255), qr_code VARCHAR(255), specifications VARCHAR(255), created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
     created_by VARCHAR(255), updated_by VARCHAR(255), deleted_at DATETIME, deleted_by VARCHAR(255), is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    INDEX idx_lifts_customer_building (customer_id, building_id), INDEX idx_lifts_status (current_status),
     FOREIGN KEY (customer_id) REFERENCES customers(id), FOREIGN KEY (building_id) REFERENCES buildings(id)
 );
 
@@ -64,7 +67,8 @@ CREATE TABLE IF NOT EXISTS technicians (
     password VARCHAR(255), phone VARCHAR(255), assigned_area VARCHAR(255), specialization VARCHAR(255),
     current_workload INT DEFAULT 0, pending_jobs INT DEFAULT 0, rating DOUBLE, last_working_day DATE, last_active_at DATETIME,
     role VARCHAR(50) DEFAULT 'TECHNICIAN', availability_status VARCHAR(50) DEFAULT 'AVAILABLE', created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL, created_by VARCHAR(255), updated_by VARCHAR(255), deleted_at DATETIME, deleted_by VARCHAR(255), is_deleted BOOLEAN NOT NULL DEFAULT FALSE
+    updated_at DATETIME NOT NULL, created_by VARCHAR(255), updated_by VARCHAR(255), deleted_at DATETIME, deleted_by VARCHAR(255), is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    UNIQUE KEY uk_technicians_email (email), INDEX idx_technicians_availability (availability_status)
 );
 
 CREATE TABLE IF NOT EXISTS service_requests (
@@ -74,6 +78,7 @@ CREATE TABLE IF NOT EXISTS service_requests (
     internal_admin_notes VARCHAR(255), assigned_at DATETIME, started_at DATETIME, paused_at DATETIME, resumed_at DATETIME, completed_at DATETIME,
     customer_signature_path VARCHAR(255), service_report_path VARCHAR(255), estimated_completion_minutes INT, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
     created_by VARCHAR(255), updated_by VARCHAR(255), deleted_at DATETIME, deleted_by VARCHAR(255), is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    INDEX idx_service_requests_customer_status (customer_id, status), INDEX idx_service_requests_lift_status (lift_id, status),
     FOREIGN KEY (customer_id) REFERENCES customers(id), FOREIGN KEY (lift_id) REFERENCES lifts(id), FOREIGN KEY (assigned_technician_id) REFERENCES technicians(id)
 );
 

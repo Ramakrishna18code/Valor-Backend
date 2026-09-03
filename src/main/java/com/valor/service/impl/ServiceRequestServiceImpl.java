@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.util.List;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.time.Year;
 
 @Service
 public class ServiceRequestServiceImpl implements ServiceRequestService {
@@ -49,7 +50,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     public ServiceRequest createServiceRequest(ServiceRequest serviceRequest) {
         if (serviceRequest.getServiceId() == null || serviceRequest.getServiceId().isBlank()) {
-            serviceRequest.setServiceId("VAL-SRQ-" + UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase());
+            serviceRequest.setServiceId("VAL-SRQ-" + Year.now() + "-" + UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase());
         }
         if (serviceRequest.getServiceRequestedAt() == null) serviceRequest.setServiceRequestedAt(LocalDateTime.now());
         if (serviceRequest.getStatus() == null) serviceRequest.setStatus(JobStatus.PENDING);

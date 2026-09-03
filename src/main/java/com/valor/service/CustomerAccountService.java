@@ -5,12 +5,14 @@ import com.valor.dto.CustomerProfileUpdateDto;
 import com.valor.entity.Customer;
 import com.valor.enums.CustomerStatus;
 import com.valor.enums.RoleName;
+import com.valor.entity.Address;
 import com.valor.exception.DuplicateResourceException;
 import com.valor.repository.CustomerRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
+import java.util.List;
 
 @Service
 public class CustomerAccountService {
@@ -37,6 +39,9 @@ public class CustomerAccountService {
                 .password(passwordEncoder.encode(customerDto.getPassword()))
                 .phone(customerDto.getPhone())
                 .role(RoleName.CUSTOMER)
+                .address(Address.builder().street(customerDto.getAddress()).city(customerDto.getCity())
+                    .state(customerDto.getState()).pincode(customerDto.getPincode()).build())
+                .accountStatus(customerDto.getAccountStatus() == null ? CustomerStatus.ACTIVE : customerDto.getAccountStatus())
                 .enabled(true)
                 .build();
 
@@ -62,6 +67,10 @@ public class CustomerAccountService {
 
     public Optional<Customer> getCustomerById(Long id) {
         return customerRepository.findById(id);
+    }
+
+    public List<Customer> getAllCustomers() {
+        return customerRepository.findAll();
     }
 
     public Optional<Customer> getCustomerByEmail(String email) {

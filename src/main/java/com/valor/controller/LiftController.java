@@ -47,6 +47,15 @@ public class LiftController {
         return ResponseEntity.ok(ApiResponse.success("Lift fetched successfully", LiftMapper.toResponse(lift), HttpStatus.OK.value()));
     }
 
+    @Operation(summary = "List all lifts")
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<LiftResponse>>> getAllLifts() {
+        List<LiftResponse> response = liftService.getAllLifts().stream()
+                .map(LiftMapper::toResponse)
+                .toList();
+        return ResponseEntity.ok(ApiResponse.success("Lifts fetched successfully", response, HttpStatus.OK.value()));
+    }
+
     @Operation(summary = "Get customer lifts")
     @GetMapping("/customer/{customerId}")
     public ResponseEntity<ApiResponse<List<LiftResponse>>> getCustomerLifts(@PathVariable Long customerId) {

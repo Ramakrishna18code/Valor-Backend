@@ -101,6 +101,11 @@ public class LiftServiceImpl implements LiftService {
     }
 
     @Override
+    public List<Lift> getAllLifts() {
+        return liftRepository.findAll();
+    }
+
+    @Override
     public List<Lift> getCustomerLifts(Long customerId) {
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));

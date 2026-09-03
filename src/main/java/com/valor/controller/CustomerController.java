@@ -2,6 +2,7 @@ package com.valor.controller;
 
 
 import com.valor.dto.CustomerProfileUpdateDto;
+import com.valor.dto.CustomerDto;
 import com.valor.entity.Customer;
 import com.valor.response.ApiResponse;
 import com.valor.response.CustomerProfileResponse;
@@ -47,6 +48,24 @@ public class CustomerController {
                 .or(() -> customerService.getCustomerByPhone(authentication.getName()))
                 .orElseThrow(() -> new com.valor.exception.ResourceNotFoundException("Customer not found"));
         return ResponseEntity.ok(ApiResponse.success("Profile fetched successfully", CustomerProfileResponse.from(customer), HttpStatus.OK.value()));
+    }
+
+    @Operation(summary = "Create customer from the admin portal")
+    @PostMapping
+    public ResponseEntity<ApiResponse<CustomerProfileResponse>> createCustomer(
+            @Valid @RequestBody CustomerDto request) {
+        Customer customer = customerService.registerCustomer(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(
+                "Customer created successfully", CustomerProfileResponse.from(customer), HttpStatus.CREATED.value()));
+    }
+
+    @Operation(summary = "List customers for the admin portal")
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<CustomerProfileResponse>>> getAllCustomers() {
+        List<CustomerProfileResponse> response = customerService.getAllCustomers().stream()
+                .map(CustomerProfileResponse::from)
+                .toList();
+        return ResponseEntity.ok(ApiResponse.success("Customers fetched successfully", response, HttpStatus.OK.value()));
     }
 
     @Operation(summary = "Get buildings owned by a customer")
