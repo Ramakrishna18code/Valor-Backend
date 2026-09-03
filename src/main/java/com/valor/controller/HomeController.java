@@ -10,4 +10,9 @@ public class HomeController {
     public String home() {
         return "Valor Backend is running.";
     }
+
+    @GetMapping("/api/health")
+    public String health() {
+        return "OK";
+    }
 }
