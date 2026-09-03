@@ -1,0 +1,68 @@
+{
+  "auth": {
+    "register": {
+      "request": {
+        "name": "John Doe",
+        "email": "john@example.com",
+        "password": "secret123",
+        "phone": "9876543210"
+      },
+      "response": {
+        "success": true,
+        "message": "Customer registered successfully",
+        "data": {
+          "id": 1,
+          "name": "John Doe",
+          "email": "john@example.com",
+          "phone": "9876543210",
+          "role": "CUSTOMER"
+        },
+        "status": 201
+      }
+    },
+    "login": {
+      "request": {
+        "email": "john@example.com",
+        "password": "secret123"
+      },
+      "response": {
+        "success": true,
+        "message": "Login successful",
+        "data": {
+          "accessToken": "jwt-token",
+          "refreshToken": "refresh-token-placeholder",
+          "tokenType": "Bearer",
+          "role": "CUSTOMER",
+          "email": "john@example.com"
+        },
+        "status": 200
+      }
+    }
+  },
+  "lifts": {
+    "create": {
+      "request": {
+        "name": "Lift A",
+        "manufacturer": "Otis",
+        "capacity": 8,
+        "floorCount": 10,
+        "installationDate": "2024-01-01",
+        "location": "Downtown Tower",
+        "status": "ACTIVE",
+        "qrCode": "QR-001",
+        "specifications": "High-speed service lift"
+      },
+      "response": {
+        "success": true,
+        "message": "Lift registered successfully",
+        "data": {
+          "id": 1,
+          "name": "Lift A",
+          "manufacturer": "Otis",
+          "status": "ACTIVE"
+        },
+        "status": 201
+      }
+    }
+  }
+}

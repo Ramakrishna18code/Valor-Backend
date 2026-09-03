@@ -1,0 +1,351 @@
+{
+  "info": {
+    "name": "Valor Lift Services API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register Customer",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"password\": \"secret123\",\n  \"phone\": \"9876543210\"\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/auth/register", "host": ["http://localhost:8080"], "path": ["api", "auth", "register"]}
+          }
+        },
+        {
+          "name": "Login Customer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData && jsonData.data && jsonData.data.accessToken) {",
+                  "  pm.environment.set('accessToken', jsonData.data.accessToken);",
+                  "  pm.test('accessToken saved', function() { pm.expect(jsonData.data.accessToken).to.be.a('string'); });",
+                  "} else {",
+                  "  pm.test('accessToken missing', function() { pm.expect.fail('accessToken not found in response'); });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/auth/login", "host": ["http://localhost:8080"], "path": ["api", "auth", "login"]}
+          }
+        },
+        {
+          "name": "Get Current Profile",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/auth/me", "host": ["http://localhost:8080"], "path": ["api", "auth", "me"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Customers",
+      "item": [
+        {
+          "name": "Legacy Sign Up",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane@example.com\",\n  \"password\": \"secret123\",\n  \"phone\": \"9988776655\"\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/customers/signup", "host": ["http://localhost:8080"], "path": ["api", "customers", "signup"]}
+          }
+        },
+        {
+          "name": "Legacy Sign In",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData && jsonData.data && jsonData.data.accessToken) {",
+                  "  pm.environment.set('accessToken', jsonData.data.accessToken);",
+                  "  pm.test('legacy accessToken saved', function() { pm.expect(jsonData.data.accessToken).to.be.a('string'); });",
+                  "} else {",
+                  "  pm.test('legacy accessToken missing', function() { pm.expect.fail('accessToken not found in legacy signin response'); });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/customers/signin", "host": ["http://localhost:8080"], "path": ["api", "customers", "signin"]}
+          }
+        },
+        {
+          "name": "Get Customer Profile",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/customers/1", "host": ["http://localhost:8080"], "path": ["api", "customers", "1"]}
+          }
+        },
+        {
+          "name": "Update Customer Profile",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Updated\",\n  \"email\": \"john.updated@example.com\",\n  \"password\": \"newsecret123\",\n  \"phone\": \"9876543211\"\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/customers/1", "host": ["http://localhost:8080"], "path": ["api", "customers", "1"]}
+          }
+        },
+        {
+          "name": "Delete Customer",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/customers/1", "host": ["http://localhost:8080"], "path": ["api", "customers", "1"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Create Admin",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Admin User\",\n  \"email\": \"admin@example.com\",\n  \"password\": \"admin123\"\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/admin", "host": ["http://localhost:8080"], "path": ["api", "admin"]}
+          }
+        },
+        {
+          "name": "List Admins",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "http://localhost:8080/api/admin", "host": ["http://localhost:8080"], "path": ["api", "admin"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Technicians",
+      "item": [
+        {
+          "name": "Create Technician",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Tech One\",\n  \"email\": \"tech@example.com\",\n  \"password\": \"tech123\",\n  \"phone\": \"9090909090\",\n  \"availabilityStatus\": \"AVAILABLE\"\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/technicians", "host": ["http://localhost:8080"], "path": ["api", "technicians"]}
+          }
+        },
+        {
+          "name": "List Technicians",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "http://localhost:8080/api/technicians", "host": ["http://localhost:8080"], "path": ["api", "technicians"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Lifts",
+      "item": [
+        {
+          "name": "Create Lift",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lift A\",\n  \"model\": \"Premium-8\",\n  \"manufacturer\": \"Otis\",\n  \"capacity\": 8,\n  \"floorCount\": 10,\n  \"installationDate\": \"2024-01-01\",\n  \"location\": \"Downtown Tower\",\n  \"status\": \"ACTIVE\",\n  \"qrCode\": \"QR-001\",\n  \"specifications\": \"High-speed service lift\",\n  \"customer\": {\n    \"id\": 1\n  }\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/lifts", "host": ["http://localhost:8080"], "path": ["api", "lifts"]}
+          }
+        },
+        {
+          "name": "Get Lift By Id",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/lifts/1", "host": ["http://localhost:8080"], "path": ["api", "lifts", "1"]}
+          }
+        },
+        {
+          "name": "Get Customer Lifts",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/lifts/customer/1", "host": ["http://localhost:8080"], "path": ["api", "lifts", "customer", "1"]}
+          }
+        },
+        {
+          "name": "Search Lifts",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/lifts/search?term=Lift", "host": ["http://localhost:8080"], "path": ["api", "lifts", "search"], "query": [{"key": "term", "value": "Lift"}]}
+          }
+        },
+        {
+          "name": "Update Lift",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lift A Updated\",\n  \"model\": \"Premium-8\",\n  \"manufacturer\": \"Otis\",\n  \"capacity\": 10,\n  \"floorCount\": 12,\n  \"installationDate\": \"2024-02-01\",\n  \"location\": \"Downtown Tower\",\n  \"status\": \"MAINTENANCE\",\n  \"qrCode\": \"QR-001\",\n  \"specifications\": \"Updated high-speed service lift\",\n  \"customer\": {\n    \"id\": 1\n  }\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/lifts/1", "host": ["http://localhost:8080"], "path": ["api", "lifts", "1"]}
+          }
+        },
+        {
+          "name": "Delete Lift",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/lifts/1", "host": ["http://localhost:8080"], "path": ["api", "lifts", "1"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "AMC",
+      "item": [
+        {
+          "name": "Create AMC",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"PREMIUM\",\n  \"coverageDetails\": \"Annual maintenance and emergency support\",\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2025-01-01\",\n  \"status\": \"ACTIVE\",\n  \"lift\": {\n    \"id\": 1\n  }\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/amcs", "host": ["http://localhost:8080"], "path": ["api", "amcs"]}
+          }
+        },
+        {
+          "name": "Renew AMC",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"PREMIUM\",\n  \"coverageDetails\": \"Renewed annual maintenance and emergency support\",\n  \"startDate\": \"2025-01-01\",\n  \"endDate\": \"2026-01-01\",\n  \"status\": \"ACTIVE\",\n  \"lift\": {\n    \"id\": 1\n  }\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/amcs/1/renew", "host": ["http://localhost:8080"], "path": ["api", "amcs", "1", "renew"]}
+          }
+        },
+        {
+          "name": "Cancel AMC",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/amcs/1", "host": ["http://localhost:8080"], "path": ["api", "amcs", "1"]}
+          }
+        },
+        {
+          "name": "Get AMC By Id",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/amcs/1", "host": ["http://localhost:8080"], "path": ["api", "amcs", "1"]}
+          }
+        },
+        {
+          "name": "List AMCs",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/amcs", "host": ["http://localhost:8080"], "path": ["api", "amcs"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Service Requests",
+      "item": [
+        {
+          "name": "Create Service Request",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Lift not moving\",\n  \"description\": \"The lift stops at random floors and needs urgent service.\",\n  \"priority\": \"HIGH\",\n  \"status\": \"OPEN\",\n  \"requestType\": \"MAINTENANCE\",\n  \"customerRemarks\": \"Please inspect the brake system.\",\n  \"technicianRemarks\": \"Awaiting field visit.\",\n  \"customer\": {\n    \"id\": 1\n  },\n  \"lift\": {\n    \"id\": 1\n  }\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/service-requests", "host": ["http://localhost:8080"], "path": ["api", "service-requests"]}
+          }
+        },
+        {
+          "name": "Get Service Request",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/service-requests/1", "host": ["http://localhost:8080"], "path": ["api", "service-requests", "1"]}
+          }
+        },
+        {
+          "name": "List Service Requests",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/service-requests", "host": ["http://localhost:8080"], "path": ["api", "service-requests"]}
+          }
+        },
+        {
+          "name": "Update Service Request",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Lift not moving\",\n  \"description\": \"The lift stops at random floors and needs urgent service.\",\n  \"priority\": \"CRITICAL\",\n  \"status\": \"IN_PROGRESS\",\n  \"requestType\": \"MAINTENANCE\",\n  \"customerRemarks\": \"Please inspect the brake system.\",\n  \"technicianRemarks\": \"Technician assigned and route confirmed.\",\n  \"customer\": {\n    \"id\": 1\n  },\n  \"lift\": {\n    \"id\": 1\n  }\n}"
+            },
+            "url": {"raw": "http://localhost:8080/api/service-requests/1", "host": ["http://localhost:8080"], "path": ["api", "service-requests", "1"]}
+          }
+        },
+        {
+          "name": "Delete Service Request",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{accessToken}}"}],
+            "url": {"raw": "http://localhost:8080/api/service-requests/1", "host": ["http://localhost:8080"], "path": ["api", "service-requests", "1"]}
+          }
+        }
+      ]
+    }
+  ]
+}
