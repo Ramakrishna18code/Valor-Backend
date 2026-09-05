@@ -58,6 +58,7 @@ public class LiftController {
 
     @Operation(summary = "Get customer lifts")
     @GetMapping("/customer/{customerId}")
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'ADMIN', 'SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<List<LiftResponse>>> getCustomerLifts(@PathVariable Long customerId) {
         List<Lift> lifts = liftService.getCustomerLifts(customerId);
         return ResponseEntity.ok(ApiResponse.success("Customer lifts fetched", lifts.stream().map(LiftMapper::toResponse).collect(Collectors.toList()), HttpStatus.OK.value()));
