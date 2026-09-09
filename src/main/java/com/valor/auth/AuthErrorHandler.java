@@ -8,6 +8,14 @@ import java.util.Map;
 
 @RestControllerAdvice(basePackages = "com.valor.auth")
 class AuthErrorHandler {
+  @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
+  ResponseEntity<ApiResponse<Object>> authentication(Exception ignored) {
+    return ResponseEntity.status(401).body(ApiResponse.error("Authentication required", 401));
+  }
+  @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+  ResponseEntity<ApiResponse<Object>> denied(Exception ignored) {
+    return ResponseEntity.status(403).body(ApiResponse.error("Access denied", 403));
+  }
   @ExceptionHandler(IllegalArgumentException.class)
   ResponseEntity<ApiResponse<Map<String,Object>>> illegal(IllegalArgumentException ex) {
     int status=ex.getMessage()!=null && (ex.getMessage().contains("Registration unavailable")||ex.getMessage().contains("already exists"))?409:400;

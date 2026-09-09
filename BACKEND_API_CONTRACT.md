@@ -13,6 +13,13 @@ Implemented on `main`:
 - `POST /api/v1/auth/refresh` — rotates and revokes the previous refresh token.
 - `POST /api/v1/auth/logout` — revokes the supplied refresh token.
 - `GET /api/v1/me`
+- `GET /api/v1/health` — public; returns `ApiResponse` with generic `Healthy` message and `data.status=UP` only.
+
+Swagger is public at `/swagger-ui.html` (redirects to `/swagger-ui/index.html`), `/swagger-ui/**`, `/v3/api-docs`, and `/v3/api-docs/**`. These paths and the health endpoint are verified with MockMvc without authentication.
+
+Spring Security uses a canonical database-backed `UserDetailsService`: email lookup trims and lowercases; normalized international phone lookup is CUSTOMER-only. It returns the stored BCrypt hash internally and maps the single role to `ROLE_<role>`. Unknown, inactive, locked, temporarily locked, and passwordless identities are rejected generically. No fallback `InMemoryUserDetailsManager` is created; no hash is returned by a public endpoint.
+
+Only registration, login, OTP, and refresh auth paths are public. Logout and other `/api/v1/**` routes require authentication; `/api/v1/admin/**` requires SUPER_ADMIN. Security 401/403 responses serialize `ApiResponse<T>`, including its timestamp, without exception details.
 
 Stage 1 uses one canonical `users` table, one role per user, one-to-one customer/technician profiles, BCrypt passwords, hashed OTPs, hashed refresh tokens, signed BIGINT identifiers, Flyway V1, and Hibernate `validate`. Responses use `ApiResponse<T>`.
 
