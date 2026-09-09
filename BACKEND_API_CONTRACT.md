@@ -1,6 +1,6 @@
-# Stage 1–4 implementation contract
+# Phase-1 backend implementation contract
 
-Implemented on branch `main`. Stage 4 adds in-app notification records only. V1–V3 were reported verified on real MySQL before this stage and their migration files are unchanged. Stage-4 verification uses H2/MockMvc; V4 has not been run against MySQL here. Backend Phase-1 schema/API implementation is not marked complete until real MySQL V4 verification succeeds.
+Implemented on branch `main`. V1-V4 were reported verified against real MySQL by the user. Phase-1 operational closure adds staff provisioning and deactivation without migration changes. The new code has H2/MockMvc coverage; real-MySQL endpoint verification remains required.
 
 Implemented on `main`:
 
@@ -136,4 +136,19 @@ Flat notification views expose only `id`, `recipientUserId`, `title`, `message`,
 
 V4 creates only `notifications`: signed BIGINT keys, recipient FK with ON DELETE RESTRICT, named VARCHAR checks, IN_APP/PENDING defaults, microsecond timestamps and the required `(recipient_user_id,status,created_at)` and `(status,scheduled_at)` indexes. Hibernate scans the canonical notifications package; old notification entities/controllers remain outside runtime scans. Flyway and Hibernate validate remain the schema controls. The existing H2 adapter changes only V3's STORED keyword, leaving V4 SQL unchanged during tests.
 
-External notification providers remain unimplemented. Visits, checklist items, parts, attachments, payments, inventory, invoices, audit, exports, settings, website forms and client changes remain out of scope. `Valor-technician` was not changed. `valor_lift_db` remains untouched. Next step is real MySQL V4 verification before marking backend Phase-1 complete.
+External notification providers remain unimplemented. Visits, checklist items, parts, attachments, payments, inventory, invoices, audit, exports, settings, website forms and client changes remain out of scope. `Valor-technician` was not changed. `valor_lift_db` remains untouched. V4 was subsequently reported verified against real MySQL by the user; operational closure endpoint verification is tracked below.
+
+## Phase-1 operational closure: staff provisioning
+
+Implemented on main using existing canonical users and technician_profiles tables. No migration added or changed. The user reports V1-V4 verified against real MySQL; these new endpoints have only been verified with the isolated test database so far.
+
+| Method | Path | Authorization | Behavior |
+|---|---|---|---|
+| POST | `/api/v1/admin/users` | SUPER_ADMIN only | Creates ADMIN or TECHNICIAN; returns a flat staff summary in ApiResponse, HTTP 200 |
+| DELETE | `/api/v1/admin/users/{userId}` | SUPER_ADMIN only | Idempotently deactivates ADMIN or TECHNICIAN; retains rows; returns a staff summary, HTTP 200 |
+
+POST requires email, password and role. Email is trimmed/lowercased; passwords are BCrypt-hashed with a 72-byte maximum. Only ADMIN and TECHNICIAN are accepted. Technician employeeId (50), assignedArea (160), specialization (160) are optional as in V1; availabilityStatus defaults to AVAILABLE and accepts AVAILABLE, BUSY, OFF_DUTY, ON_LEAVE. Blank optional strings become null; employee IDs are trimmed and unique when present. ADMIN requests cannot carry technician fields and create no profile. Technician user/profile insertion is atomic; a duplicate employee ID rolls back both. New accounts/profiles default active, unlocked with zero failed attempts.
+
+Responses contain userId, email, role, active, technicianProfileId, employeeId, assignedArea, specialization and availabilityStatus; no credentials or tokens. Unknown fields and invalid payloads return safe 400 envelopes, duplicates 409, missing staff 404. Anonymous callers receive 401; other roles receive 403. Customer and SUPER_ADMIN management are not supported, including self-deactivation. Deactivation locks the target user and sets the technician profile inactive in the same transaction. Repeated calls are safe; no related records are deleted. Deactivated users cannot log in, use existing JWTs for protected operations, or obtain a new session by refreshing. A future customer deactivation implementation must deactivate its customer profile transactionally; no customer management route is added here.
+
+Client repositories remain unchanged. External notification providers and all other deferred features remain unimplemented. Phase-1 operational closure implementation is complete; real-MySQL endpoint verification remains required for this code-only change.

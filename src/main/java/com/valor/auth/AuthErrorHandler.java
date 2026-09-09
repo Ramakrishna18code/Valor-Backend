@@ -8,6 +8,19 @@ import java.util.Map;
 
 @RestControllerAdvice(basePackages = "com.valor.auth")
 class AuthErrorHandler {
+  @ExceptionHandler(StaffNotFoundException.class)
+  ResponseEntity<ApiResponse<Object>> missingStaff(Exception ignored) {
+    return ResponseEntity.status(404).body(ApiResponse.error("Staff not found", 404));
+  }
+  @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+  ResponseEntity<ApiResponse<Object>> duplicate(Exception ignored) {
+    return ResponseEntity.status(409).body(ApiResponse.error("Identity already exists", 409));
+  }
+  @ExceptionHandler({org.springframework.web.bind.MethodArgumentNotValidException.class,
+      org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
+  ResponseEntity<ApiResponse<Object>> invalid(Exception ignored) {
+    return ResponseEntity.status(400).body(ApiResponse.error("Invalid request", 400));
+  }
   @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
   ResponseEntity<ApiResponse<Object>> authentication(Exception ignored) {
     return ResponseEntity.status(401).body(ApiResponse.error("Authentication required", 401));
