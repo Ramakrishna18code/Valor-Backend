@@ -1,0 +1,2 @@
+package com.valor.workflow;
+public enum WorkflowServiceType { ROUTINE_MAINTENANCE, BREAKDOWN, EMERGENCY, INSPECTION, INSTALLATION, MODERNIZATION }

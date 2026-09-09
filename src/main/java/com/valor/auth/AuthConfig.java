@@ -39,6 +39,14 @@ class AuthConfig {
                         .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login/**",
                                 "/api/v1/auth/otp/**", "/api/v1/auth/refresh").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
+                        .requestMatchers("/api/v1/technician/**").hasRole("TECHNICIAN")
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/service-requests")
+                                .hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/service-requests")
+                                .hasAnyRole("CUSTOMER", "ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/service-requests/*/assignments/*/accept").hasRole("TECHNICIAN")
+                        .requestMatchers("/api/v1/service-requests/*/assignments").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/service-requests/*/status").hasAnyRole("ADMIN", "SUPER_ADMIN", "TECHNICIAN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/amc-contracts")
                                 .hasAnyRole("ADMIN", "SUPER_ADMIN", "CUSTOMER")
                         .requestMatchers("/api/v1/buildings", "/api/v1/buildings/**",

@@ -94,12 +94,11 @@ class Stage2AssetsTest {
     private void sql(String sql, Object... args) { em.flush(); db.update(sql, args); em.clear(); }
 
     @Test void v2RunsWithHibernateValidateAndOnlyCanonicalAssetMappings() {
-        assertEquals("2", flyway.info().current().getVersion().getVersion());
-        assertEquals(2, flyway.info().applied().length);
+        assertTrue(Arrays.stream(flyway.info().applied()).anyMatch(m -> "2".equals(m.getVersion().getVersion())));
         assertEquals("validate", environment.getProperty("spring.jpa.hibernate.ddl-auto"));
         assertEquals("never", environment.getProperty("spring.sql.init.mode", "never"));
         Set<Class<?>> entities = em.getMetamodel().getEntities().stream().map(e -> e.getJavaType()).collect(Collectors.toSet());
-        assertEquals(8, entities.size());
+        assertTrue(entities.size() >= 8); // Later canonical stages add entities without replacing Stage-2 mappings.
         assertTrue(entities.containsAll(Set.of(Building.class, Lift.class, AmcContract.class)));
         assertTrue(entities.stream().noneMatch(c -> c.getPackageName().equals("com.valor.entity")));
         assertEquals(3, db.queryForObject("select count(*) from information_schema.tables where table_schema='PUBLIC' and table_name in ('BUILDINGS','LIFTS','AMC_CONTRACTS')", Integer.class));

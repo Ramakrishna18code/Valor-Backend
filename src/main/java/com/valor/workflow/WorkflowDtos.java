@@ -1,0 +1,43 @@
+package com.valor.workflow;
+
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.validation.constraints.*;
+import java.time.*;
+import java.util.List;
+
+public final class WorkflowDtos {
+    private WorkflowDtos() {}
+    public interface StrictWrite {
+        @JsonAnySetter
+        default void rejectUnknown(String field, JsonNode value) { throw new IllegalArgumentException("Unsupported workflow field"); }
+    }
+    public record CreateRequest(
+            @Positive Long customerProfileId, @NotNull @Positive Long liftId,
+            @NotBlank @Size(max = 200) String title, @NotBlank String description,
+            @Size(max = 100) String issueCategory, RequestPriority priority,
+            @NotNull WorkflowServiceType serviceType,
+            @Size(max = 2000) String customerRemarks, LocalDate preferredVisitDate,
+            @Size(max = 80) String preferredTimeSlot, @Size(max = 2000) String internalAdminNotes,
+            @PositiveOrZero Integer estimatedCompletionMinutes) implements StrictWrite {}
+    public record AssignRequest(@NotNull @Positive Long technicianProfileId, @Size(max = 2000) String notes) implements StrictWrite {}
+    public record StatusRequest(@NotNull RequestStatus toStatus, @Size(max = 2000) String notes) implements StrictWrite {}
+    public record ReportRequest(@NotBlank String diagnosis, @NotBlank String workPerformed,
+            @NotBlank String testingResult, String completionNotes) implements StrictWrite {}
+
+    public record RequestView(Long id, String serviceId, Long customerProfileId, Long liftId,
+            String title, String description, String issueCategory, RequestPriority priority, RequestStatus status,
+            WorkflowServiceType serviceType, String customerRemarks, String technicianRemarks,
+            LocalDateTime serviceRequestedAt, LocalDate preferredVisitDate, String preferredTimeSlot,
+            String internalAdminNotes, LocalDateTime completedAt, Integer estimatedCompletionMinutes,
+            LocalDateTime createdAt, LocalDateTime updatedAt) {}
+    public record AssignmentView(Long id, Long serviceRequestId, Long technicianProfileId, AssignmentStatus status,
+            Long assignedByUserId, LocalDateTime assignedAt, LocalDateTime acceptedAt, LocalDateTime releasedAt, String notes) {}
+    public record HistoryView(Long id, RequestStatus fromStatus, RequestStatus toStatus,
+            Long changedByUserId, String notes, LocalDateTime changedAt) {}
+    public record ReportView(Long id, Long serviceRequestId, Long assignmentId, String diagnosis,
+            String workPerformed, String testingResult, String completionNotes, Long reportedByUserId,
+            LocalDateTime createdAt, LocalDateTime updatedAt) {}
+    public record Detail(RequestView request, AssignmentView activeAssignment, List<HistoryView> history, ReportView report) {}
+    public record PageView<T>(List<T> items, int page, int size, long totalElements, int totalPages) {}
+}
