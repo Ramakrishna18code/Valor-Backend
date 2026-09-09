@@ -111,10 +111,9 @@ class Stage3WorkflowTest {
     }
 
     @Test void v3AndHibernateValidateUseSignedCanonicalMappingsAndExactMysqlSql() throws Exception {
-        assertEquals("3", flyway.info().current().getVersion().getVersion());
-        assertEquals(3, flyway.info().applied().length);
+        assertTrue(Arrays.stream(flyway.info().applied()).anyMatch(m -> "3".equals(m.getVersion().getVersion())));
         assertEquals("validate", environment.getProperty("spring.jpa.hibernate.ddl-auto"));
-        assertEquals(12, em.getMetamodel().getEntities().size());
+        assertTrue(em.getMetamodel().getEntities().size() >= 12); // Later canonical stages add entities.
         assertTrue(em.getMetamodel().getEntities().stream().noneMatch(e -> e.getJavaType().getPackageName().equals("com.valor.entity")));
         for (Class<?> type : List.of(ServiceRequest.class, TechnicianAssignment.class, ServiceReport.class, ServiceStatusHistory.class)) {
             assertEquals(Long.class, em.getMetamodel().entity(type).getIdType().getJavaType());

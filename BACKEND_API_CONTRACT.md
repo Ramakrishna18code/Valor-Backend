@@ -1,6 +1,6 @@
-# Stage 1–3 implementation contract
+# Stage 1–4 implementation contract
 
-Implemented on branch `main`. Stage 2 covers assets; Stage 3 covers the service workflow below. Verification for Stage 3 uses H2 and MockMvc, with an explicit test-only adaptation for MySQL's STORED keyword. V1/V2 were reported verified on MySQL before this stage; V3 has not been run against MySQL during this implementation.
+Implemented on branch `main`. Stage 4 adds in-app notification records only. V1–V3 were reported verified on real MySQL before this stage and their migration files are unchanged. Stage-4 verification uses H2/MockMvc; V4 has not been run against MySQL here. Backend Phase-1 schema/API implementation is not marked complete until real MySQL V4 verification succeeds.
 
 Implemented on `main`:
 
@@ -116,4 +116,24 @@ V3 creates exactly `service_requests`, `technician_assignments`, `service_status
 
 The test-classpath-only `H2WorkflowMigrationAdapter` reads the original migration resources and removes only `STORED` from V3 for H2 execution. Generated expressions, uniqueness, FKs, Hibernate validation and workflow behavior are exercised there. The committed production migration retains the exact MySQL STORED strategy. H2 migration checksums therefore differ for V3; the adapter is absent from the application JAR and must never be used with MySQL. These tests do not establish MySQL V3 startup or storage-engine behavior.
 
-Notifications remain deferred until Stage 4. Visits, checklist items, parts, attachments, payments, inventory and client changes remain unimplemented. `Valor-technician` was not changed. `valor_lift_db` remains untouched.
+## Stage 4: in-app notification records
+
+All success/error responses use `ApiResponse<T>`. Success is HTTP 200. The only new runtime routes are:
+
+| Method | Path | Access | Behavior |
+|---|---|---|---|
+| GET | `/api/v1/notifications` | Any authenticated active user | Own due/unscheduled IN_APP records, paged with optional status filter |
+| POST | `/api/v1/notifications` | ADMIN, SUPER_ADMIN | Create PENDING IN_APP record for an active canonical user |
+| PUT | `/api/v1/notifications/{id}/read` | Recipient only | Mark due IN_APP record READ and set readAt once |
+
+Creation requires `recipientUserId` (positive Long), nonblank `title` (max 200), and nonblank `message` (max 2000). Optional `channel` defaults to IN_APP; EMAIL, SMS and PUSH are rejected with 400. Optional `scheduledAt` is an ISO local date-time interpreted in UTC. Unknown write fields, including client-supplied status, sentAt and readAt, are rejected. Inactive recipients return 400 and missing recipients 404. No external delivery is attempted or claimed; sentAt stays null.
+
+Inbox recipient identity always comes from JWT user ID, never query parameters. `page` defaults to 0, `size` to 20 and is limited to 1–100; ordering is createdAt descending then id descending. Optional `status` accepts PENDING, SENT, FAILED or READ, although this stage only creates PENDING and transitions to READ. The page DTO contains `items`, `page`, `size`, `totalElements`, `totalPages`.
+
+One service-supplied UTC time is used per inbox/read operation. Unscheduled records are immediately visible; scheduled records are visible when `scheduledAt <= asOf`. Reading a future or non-IN_APP record returns 404. Another user, including a nonrecipient admin, receives 403 when marking a record read. Repeated reads preserve the original readAt, protected by a row lock; no delivery status is inferred. There is no delete endpoint or notification worker, and all records are retained.
+
+Flat notification views expose only `id`, `recipientUserId`, `title`, `message`, `channel`, `status`, `scheduledAt`, `sentAt`, `readAt`, `createdAt`, `updatedAt`. User entities, credential hashes and token fields are never serialized. Missing authentication returns a safe 401; CUSTOMER/TECHNICIAN creation returns 403. Invalid payloads, filters and page bounds return 400; nonexistent records return 404. Errors use generic messages and do not expose internal exceptions.
+
+V4 creates only `notifications`: signed BIGINT keys, recipient FK with ON DELETE RESTRICT, named VARCHAR checks, IN_APP/PENDING defaults, microsecond timestamps and the required `(recipient_user_id,status,created_at)` and `(status,scheduled_at)` indexes. Hibernate scans the canonical notifications package; old notification entities/controllers remain outside runtime scans. Flyway and Hibernate validate remain the schema controls. The existing H2 adapter changes only V3's STORED keyword, leaving V4 SQL unchanged during tests.
+
+External notification providers remain unimplemented. Visits, checklist items, parts, attachments, payments, inventory, invoices, audit, exports, settings, website forms and client changes remain out of scope. `Valor-technician` was not changed. `valor_lift_db` remains untouched. Next step is real MySQL V4 verification before marking backend Phase-1 complete.
