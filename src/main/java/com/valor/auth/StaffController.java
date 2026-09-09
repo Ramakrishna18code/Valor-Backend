@@ -15,9 +15,20 @@ class StaffController {
     private final StaffService staff;
     StaffController(StaffService staff) { this.staff = staff; }
     @Schema(name="StaffCreateRequest")
-    record Create(@NotBlank @Size(max=254) String email, @NotBlank @Size(max=72) String password,
-                  @NotNull Role role, @Size(max=50) String employeeId, @Size(max=160) String assignedArea,
-                  @Size(max=160) String specialization, String availabilityStatus) {
+    record Create(@NotBlank @Size(max=254) String email,
+                  @Schema(accessMode=Schema.AccessMode.WRITE_ONLY, format="password")
+                  @NotBlank @Size(max=72) String password,
+                  @Schema(implementation=String.class, allowableValues={"ADMIN","TECHNICIAN"}, example="TECHNICIAN")
+                  @NotNull Role role,
+                  @Schema(description="Required for TECHNICIAN provisioning; inapplicable for ADMIN (omit). Current runtime permits omission.")
+                  @Size(max=50) String employeeId,
+                  @Schema(description="Required for TECHNICIAN provisioning; inapplicable for ADMIN (omit). Current runtime permits omission.")
+                  @Size(max=160) String assignedArea,
+                  @Schema(description="Required for TECHNICIAN provisioning; inapplicable for ADMIN (omit). Current runtime permits omission.")
+                  @Size(max=160) String specialization,
+                  @Schema(allowableValues={"AVAILABLE","BUSY","OFF_DUTY","ON_LEAVE"}, example="AVAILABLE",
+                          description="Required for TECHNICIAN provisioning; inapplicable for ADMIN (omit). Current runtime defaults omitted values to AVAILABLE.")
+                  String availabilityStatus) {
         @JsonAnySetter public void unknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); }
     }
     @Schema(name="StaffResponse")

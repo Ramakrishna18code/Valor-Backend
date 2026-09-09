@@ -33,6 +33,27 @@ class StaffOpenApiTest {
         assertEquals("createStaff",post.get("operationId").asText());
         assertEquals("deactivateStaff",doc.at("/paths/~1api~1v1~1admin~1users~1{userId}/delete/operationId").asText());
     }
+    @Test void staffRequestConstraintsExcludePrivilegedRolesAndProtectPassword() throws Exception {
+        JsonNode doc=docs();
+        JsonNode request=resolve(doc,content(doc.at("/paths/~1api~1v1~1admin~1users/post/requestBody")));
+        JsonNode role=request.at("/properties/role");
+        Set<String> roles=new HashSet<>();role.get("enum").forEach(v->roles.add(v.asText()));
+        assertEquals(Set.of("ADMIN","TECHNICIAN"),roles);
+        assertEquals("TECHNICIAN",role.get("example").asText());
+        assertTrue(request.at("/properties/password/writeOnly").asBoolean());
+        assertEquals("password",request.at("/properties/password/format").asText());
+        Set<String> availability=new HashSet<>();request.at("/properties/availabilityStatus/enum").forEach(v->availability.add(v.asText()));
+        assertEquals(Set.of("AVAILABLE","BUSY","OFF_DUTY","ON_LEAVE"),availability);
+        for(String field:List.of("employeeId","assignedArea","specialization","availabilityStatus")) {
+            String description=request.at("/properties/"+field+"/description").asText();
+            assertTrue(description.contains("Required for TECHNICIAN"));assertTrue(description.contains("inapplicable for ADMIN"));
+        }
+        for(JsonNode op:List.of(doc.at("/paths/~1api~1v1~1admin~1users/post"),doc.at("/paths/~1api~1v1~1admin~1users~1{userId}/delete"))) {
+            JsonNode envelope=resolve(doc,content(op.at("/responses/200")));
+            assertFalse(fields(envelope).contains("password"));
+            assertFalse(fields(resolve(doc,envelope.at("/properties/data"))).contains("password"));
+        }
+    }
     @Test void notificationSchemasRemainCorrectAndOperationIdsAreUnique() throws Exception {
         JsonNode doc=docs(),post=doc.at("/paths/~1api~1v1~1notifications/post");
         assertTrue(content(post.get("requestBody")).toString().contains("NotificationCreateRequest"));
