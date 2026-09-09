@@ -32,8 +32,8 @@ class StaffController {
         @JsonAnySetter public void unknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); }
     }
     @Schema(name="StaffResponse")
-    record View(Long userId, String email, Role role, boolean active, Long technicianProfileId,
-                String employeeId, String assignedArea, String specialization, String availabilityStatus) {}
+    record View(Long userId, String email, @Schema(implementation=String.class,allowableValues={"ADMIN","TECHNICIAN"},example="TECHNICIAN") Role role, boolean active, Long technicianProfileId,
+                String employeeId, String assignedArea, String specialization, @Schema(allowableValues={"AVAILABLE","BUSY","OFF_DUTY","ON_LEAVE"}) String availabilityStatus) {}
     @Operation(operationId="createStaff")
     @PostMapping ApiResponse<View> create(@Valid @RequestBody Create input) {
         return ApiResponse.success("Staff created", staff.create(input), 200);

@@ -26,6 +26,15 @@ public class WorkflowService {
         this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles;
     }
 
+    @Transactional(readOnly=true)
+    public PageView<RequestView> customerRequests(RequestStatus status,int page,int size) {
+        User actor=identities.actor();if(actor.getRole()!=Role.CUSTOMER)throw new org.springframework.security.access.AccessDeniedException("Access denied");
+        var profile=profiles.customer(actor);
+        if(page<0||size<1||size>100)throw new WorkflowException(400,"Invalid page");
+        var rows=requests.customerRequests(profile.getId(),status,PageRequest.of(page,size,Sort.by(Sort.Direction.DESC,"createdAt","id")));
+        return new PageView<>(rows.getContent().stream().map(r->view(r,actor)).toList(),page,size,rows.getTotalElements(),rows.getTotalPages());
+    }
+
     public Detail create(CreateRequest input) {
         User actor = identities.actor();
         CustomerProfile owner;

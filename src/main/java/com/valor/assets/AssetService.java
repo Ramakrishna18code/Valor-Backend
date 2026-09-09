@@ -19,14 +19,15 @@ public class AssetService {
     private final AmcContractRepository contracts;
     private final AssetIdentityAccess identities;
     private final Clock clock;
+    private final AssetCustomerRepository customerProfiles;
 
     public AssetService(BuildingRepository buildings, LiftRepository lifts,
-            AmcContractRepository contracts, AssetIdentityAccess identities, Clock clock) {
+            AmcContractRepository contracts, AssetIdentityAccess identities, Clock clock, AssetCustomerRepository customerProfiles) {
         this.buildings = buildings;
         this.lifts = lifts;
         this.contracts = contracts;
         this.identities = identities;
-        this.clock = clock;
+        this.clock = clock;this.customerProfiles=customerProfiles;
     }
 
     @Transactional(readOnly = true)
@@ -155,6 +156,28 @@ public class AssetService {
         contract.setStatus(AmcStatus.ACTIVE);
         contracts.flush();
         return amcView(contract, asOf);
+    }
+
+    private com.valor.auth.User customerActor() {
+        var user=identities.actor();if(user.getRole()!=Role.CUSTOMER)throw new AccessDeniedException("Access denied");
+        identities.requireActiveCustomerUser(user);return user;
+    }
+    public List<BuildingView> customerBuildings() {
+        Long id=customerActor().getId();
+        return buildings.findOwned(id).stream()
+            .map(b->buildingView(b,lifts.countByBuildingIdAndActiveTrue(b.getId()))).toList();
+    }
+    public List<LiftView> customerLifts() {
+        Long id=customerActor().getId();LocalDate date=LocalDate.now(clock);Set<Long> covered=new HashSet<>(contracts.coveredLiftIds(date));
+        return lifts.findOwned(id).stream()
+            .map(l->liftView(l,covered.contains(l.getId()),date)).toList();
+    }
+    public BuildingView createCustomerBuilding(CustomerBuildingWrite input) {
+        Long id=customerActor().getId();
+        var owner=customerProfiles.findByUserId(id).orElseThrow();
+        Building building=new Building();building.setCustomer(owner);
+        apply(building,new BuildingWrite(owner.getId(),input.buildingName(),input.buildingType(),input.address(),input.city(),input.state(),input.pincode(),input.emergencyContactName(),input.emergencyContactPhone(),"ACTIVE"));
+        buildings.saveAndFlush(building);return buildingView(building,0);
     }
 
     private Building activeBuilding(Long id) {

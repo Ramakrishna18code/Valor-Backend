@@ -12,7 +12,7 @@ public final class NotificationDtos {
     @Schema(name="NotificationCreateRequest")
     public record Create(@NotNull @Positive Long recipientUserId,
             @NotBlank @Size(max = 200) String title, @NotBlank @Size(max = 2000) String message,
-            NotificationChannel channel, LocalDateTime scheduledAt) {
+            @Schema(implementation=String.class,allowableValues={"IN_APP"},defaultValue="IN_APP",description="Only IN_APP is accepted. EMAIL, SMS and PUSH are reserved and unavailable.") NotificationChannel channel, LocalDateTime scheduledAt) {
         @JsonAnySetter public void rejectUnknown(String field, JsonNode value) {
             throw new IllegalArgumentException("Unsupported notification field");
         }

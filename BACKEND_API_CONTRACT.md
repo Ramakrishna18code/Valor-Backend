@@ -1,156 +1,114 @@
-# Phase-1 backend implementation contract
+# Frozen Phase-1 backend API contract
 
-Implemented on branch `main`. V1-V4 were reported verified against real MySQL by the user. Phase-1 operational closure adds staff provisioning and deactivation without migration changes. The new code has H2/MockMvc coverage; real-MySQL endpoint verification remains required.
+Scope: canonical Stage 1-4 API on main, reconciled with ../TARGET_VALOR_SCHEMA_SPEC.md. Flyway V1-V4 and MySQL schema are unchanged. This reconciliation is verified using isolated H2/MockMvc; real-MySQL endpoint verification and client migration have not been performed. Android, Admin Portal, Website and Valor-technician remain unchanged.
 
-Implemented on `main`:
+## Common contract
 
-- `POST /api/v1/auth/register` — public CUSTOMER registration; submitted roles are rejected.
-- `POST /api/v1/auth/login/customer`
-- `POST /api/v1/auth/login/admin`
-- `POST /api/v1/auth/login/technician`
-- `POST /api/v1/auth/otp/send` — development-only generated behavior.
-- `POST /api/v1/auth/otp/verify`
-- `POST /api/v1/auth/refresh` — rotates and revokes the previous refresh token.
-- `POST /api/v1/auth/logout` — revokes the supplied refresh token.
-- `GET /api/v1/me`
-- `GET /api/v1/health` — public; returns `ApiResponse` with generic `Healthy` message and `data.status=UP` only.
+All paths below have prefix `/api/v1`. Success is HTTP 200 with `ApiResponse<T>`: success, message, data, status, timestamp. Staff and domain views are flat DTOs; no identity entities or passwordHash/otpHash/tokenHash fields are serialized. Input passwords are writeOnly with password format in OpenAPI. Every operation has an explicit stable operationId. Shared ApiErrorResponse components describe safe 400 validation/authentication/OTP/refresh failures, 401 unauthenticated, 403 forbidden, 404 missing resources and 409 conflicts. Error data is null or an empty object; errors never return submitted secrets or internal exception details. Logout and asset deactivation retain their existing message envelopes with data=null, not a fabricated result object.
 
-Swagger is public at `/swagger-ui.html` (redirects to `/swagger-ui/index.html`), `/swagger-ui/**`, `/v3/api-docs`, and `/v3/api-docs/**`. These paths and the health endpoint are verified with MockMvc without authentication.
+Default port: 8081. Swagger: /swagger-ui.html. OpenAPI: /v3/api-docs. Public health: GET /api/v1/health with data.status=UP. Other routes require authentication except register, login, OTP send/verify and refresh. Runtime configuration is unchanged: Flyway enabled, Hibernate validate, SQL initialization disabled; credentials come from the process environment, not automatic .env loading. Production requires external credentials and never enables development bootstrap.
 
-Spring Security uses a canonical database-backed `UserDetailsService`: email lookup trims and lowercases; normalized international phone lookup is CUSTOMER-only. It returns the stored BCrypt hash internally and maps the single role to `ROLE_<role>`. Unknown, inactive, locked, temporarily locked, and passwordless identities are rejected generically. No fallback `InMemoryUserDetailsManager` is created; no hash is returned by a public endpoint.
+## Authentication and identity
 
-Only registration, login, OTP, and refresh auth paths are public. Logout and other `/api/v1/**` routes require authentication; `/api/v1/admin/**` requires SUPER_ADMIN. Security 401/403 responses serialize `ApiResponse<T>`, including its timestamp, without exception details.
+| Method/path | Input | Data DTO / behavior |
+|---|---|---|
+| POST /auth/register | email?, phone?, password?, fullName; alternatePhone?, companyName?, address? | Authentication; atomic CUSTOMER and customer profile creation only |
+| POST /auth/login/customer | identity (normalized email or international phone), password | Authentication, CUSTOMER only |
+| POST /auth/login/admin | email, password | Authentication, ADMIN or SUPER_ADMIN only |
+| POST /auth/login/technician | email, password | Authentication, TECHNICIAN only |
+| POST /auth/otp/send | phone only | OtpSent: requestId, expiresAt, developmentOnly, otp (development/test only) |
+| POST /auth/otp/verify | phone, otp, requestId, all required | Authentication for the matching registered active CUSTOMER |
+| POST /auth/refresh | refreshToken | Rotation: accessToken, refreshToken |
+| POST /auth/logout | refreshToken; authenticated user must own it | null data; success message |
+| GET /me | bearer JWT | CurrentUser: userId, role, email, phone, nullable customerProfile and technicianProfile |
 
-Stage 1 uses one canonical `users` table, one role per user, one-to-one customer/technician profiles, BCrypt passwords, hashed OTPs, hashed refresh tokens, signed BIGINT identifiers, Flyway V1, and Hibernate `validate`. Responses use `ApiResponse<T>`.
+Authentication data contains accessToken, refreshToken, role, userId, nullable customerProfile and technicianProfile. CustomerSummary contains id, fullName, alternatePhone, companyName, address, status, active. TechnicianSummary contains id, employeeId, assignedArea, specialization, availabilityStatus, active. Administrators have no profile. No tokens appear in /me.
 
-Tests use H2 in MySQL compatibility mode, execute Flyway V1, and validate the mapped entities with Hibernate. The development SUPER_ADMIN bootstrap is restricted to the `dev` profile, explicit `DEV_BOOTSTRAP_ENABLED=true`, and environment-provided credentials; it is idempotent and never logs or hardcodes credentials. Authentication failures are returned through the Stage-1 `ApiResponse<T>` error handler.
+Registration does not advertise role and rejects any submitted role, including null, through strict unknown-field validation. Email is trimmed/lowercased; phone is trimmed with spaces/hyphens/parentheses removed and must be canonical +international digits. A phone identity or email/password identity is required. Password storage is BCrypt; refresh-token storage is SHA-256. Duplicate normalized identities return 409. Login failures for an active matching-role account increment a persisted counter under a user-row lock; five wrong passwords temporarily lock it for fifteen minutes. Successful login resets the counter and temporary lock. Staff login now requires email rather than the old identity field; customer login preserves identity.
 
-## Stage 2: customer assets
+OTP send is available only under dev/test, never with prod active. No production delivery provider exists; other profiles reject send before persistence. The generated code is never logged by the service and only its BCrypt hash is persisted. The response requestId is the existing otp_verifications.id, and verification locks that row and checks both ID and phone, unverified state, expiry, attempt budget and lock state. Codes expire after five minutes; three wrong attempts lock the attempt for fifteen minutes. Resending an outstanding attempt is throttled for sixty seconds and during lockout. Successful verification requires an existing active CUSTOMER with an active profile; it never creates a profileless identity. Refresh rotation locks the token row, revokes the previous token atomically and checks account state before issuing a new session. Logout cannot revoke another user's token. Deactivated accounts cannot use login, JWT or refresh.
 
-All responses use `ApiResponse<T>`. Successful operations return HTTP 200. No response serializes a JPA entity or user credentials. There are no unversioned aliases or CUSTOMER building/lift mutation endpoints.
+## Staff provisioning
 
-| Method | Path | Access | Behavior |
-|---|---|---|---|
-| GET | `/api/v1/buildings` | ADMIN, SUPER_ADMIN | List buildings, including inactive history; calculated `activeLiftCount` |
-| POST | `/api/v1/buildings` | ADMIN, SUPER_ADMIN | Create under a validated active `customerProfileId` |
-| PUT | `/api/v1/buildings/{id}` | ADMIN, SUPER_ADMIN | Replace editable fields; owner remains unchanged |
-| DELETE | `/api/v1/buildings/{id}` | ADMIN, SUPER_ADMIN | Set `is_active=false`; retain row and descendants |
-| GET | `/api/v1/lifts` | ADMIN, SUPER_ADMIN | List lifts, including inactive history; calculated `amcCoverage` and `asOfDate` |
-| POST | `/api/v1/lifts` | ADMIN, SUPER_ADMIN | Create under an active building and owner |
-| PUT | `/api/v1/lifts/{id}` | ADMIN, SUPER_ADMIN | Replace editable fields; building remains unchanged |
-| DELETE | `/api/v1/lifts/{id}` | ADMIN, SUPER_ADMIN | Set `is_active=false`; retain row and contracts |
-| GET | `/api/v1/amc-contracts` | ADMIN, SUPER_ADMIN, CUSTOMER | Admin lists all; CUSTOMER query joins lift → building → profile → JWT user |
-| POST | `/api/v1/amc-contracts` | ADMIN, SUPER_ADMIN | Create ACTIVE contract for an active lift/building/owner |
-| PUT | `/api/v1/amc-contracts/{id}/renew` | ADMIN, SUPER_ADMIN | Replace term/plan, increment renewal count; keep contract identity and lift |
+| Method/path | Role | Input / data |
+|---|---|---|
+| POST /admin/users | SUPER_ADMIN | StaffCreateRequest -> StaffResponse |
+| DELETE /admin/users/{userId} | SUPER_ADMIN | StaffResponse with active=false |
 
-Write DTOs reject unknown properties, including submitted `customerId` on lifts, derived values and `isActive`. DELETE is the only exposed deactivation operation; repeated deactivation is idempotent. Building and lift PUT require their unchanged `customerProfileId`/`buildingId` and required name; omitted optional fields become null and omitted status uses ACTIVE. Ownership reassignment is rejected.
+StaffCreateRequest: email, password, role (ADMIN/TECHNICIAN only, example TECHNICIAN), employeeId?, assignedArea?, specialization?, availabilityStatus?. Technician guidance calls for these fields; existing runtime permits nullable employeeId/area/specialization and defaults availability to AVAILABLE. ADMIN must omit profile fields. Availability values are AVAILABLE, BUSY, OFF_DUTY, ON_LEAVE. StaffResponse contains userId, email, role (ADMIN/TECHNICIAN only), active and applicable technicianProfileId/employeeId/assignedArea/specialization/availabilityStatus; no password fields. Staff creation/deactivation is atomic, retains related rows, is idempotent for deactivation and disallows customer/SUPER_ADMIN management and self-deactivation. No reactivation route exists. Development SUPER_ADMIN bootstrap remains profile/opt-in controlled and is not an API.
 
-- Building writes: `customerProfileId`, `buildingName` required; optional `buildingType`, `address`, `city`, `state`, `pincode`, `emergencyContactName`, `emergencyContactPhone`, `status`. Status is nonblank free text of at most 20 characters, default ACTIVE, as the schema does not specify a building status enum.
-- Lift writes: `buildingId`, `name` required; optional `liftNumber`, `model`, `manufacturer`, `capacity`, `floorCount`, `serialNumber`, `installationDate`, `location`, `currentStatus`, `warrantyStatus`, `warrantyStartDate`, `warrantyEndDate`, `lastMaintenanceDate`, `nextMaintenanceDate`, `healthScore`, `machineRoom`, `qrCode`, `specifications`. `currentStatus`: ACTIVE, DOWN, MAINTENANCE, OUT_OF_SERVICE. Counts are nonnegative, health score is 0–100, and warranty end cannot precede start.
-- AMC creation: `liftId`, `amcNumber`, `plan`, `startDate`, `endDate` required; optional `coverageDetails`, `renewalDate`. Status and renewal count are server-managed. End cannot precede start; same-day terms are valid.
-- AMC renewal: `plan`, `startDate`, `endDate` required; optional `coverageDetails`, `renewalDate`. The new start must be after the existing end, with new end at or after new start. CANCELLED/NON_AMC contracts cannot renew. Renewal increments `renewalCount`, resets reminder state, and leaves status ACTIVE. A future renewed term does not provide coverage before its start. The existing row is updated; no separate term-history table is implemented.
+## Customer profile and owned assets
 
-Views contain the corresponding asset fields, ID, owning profile/building/lift ID and creation/modification timestamps. Building/lift views include `isActive`; AMC views also include contractual `status`, `renewalCount`, `lastReminderSentAt`, calculated `covered`, and `asOfDate`. No user identity graph is included.
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /customers/me | CUSTOMER | CustomerSummary |
+| PUT /customers/me | CUSTOMER | fullName, alternatePhone?, companyName?, address? -> CustomerSummary |
+| GET /customers/me/buildings | CUSTOMER | owned BuildingView[] |
+| POST /customers/me/buildings | CUSTOMER | buildingName; buildingType/address/city/state/pincode/emergencyContactName/emergencyContactPhone optional -> BuildingView |
+| GET /customers/me/lifts | CUSTOMER | owned LiftView[] |
+| GET /customers/me/service-requests | CUSTOMER | status?, page=0, size=20 -> PageView<RequestView> |
 
-New operations reject inactive/locked owners, inactive or non-ACTIVE customer profiles, inactive buildings and inactive lifts. CUSTOMER AMC reads require an active account/profile and preserve access to their historical contracts after asset deactivation. Admin deactivation retains all records; it does not cascade changes to child rows. Parent and asset rows are locked during dependent writes/deactivation.
+Ownership always resolves from JWT; customer building creation accepts no customer/profile ID, status, or active flag. Profile updates cannot change identity, role or account state. Inactive profiles cannot initiate operations. There is exactly one customer request-creation route: POST /service-requests.
 
-Coverage uses one service-supplied UTC business date per response. A lift has ACTIVE coverage only when an ACTIVE contract exists with inclusive `startDate <= asOfDate <= endDate`; otherwise NON_AMC. Contract `covered` uses the same date rule for that contract. Contract coverage is independent of asset deactivation and is calculated for historical rows too. Coverage and building active-lift counts are repository/service projections, never persisted columns.
+## Admin assets and AMC
 
-Validation errors return 400, missing assets 404, inactive assets and uniqueness conflicts 409, missing authentication 401, and denied roles 403, all with safe `ApiResponse<T>` bodies. Invalid/inactive target customer profiles return generic 400; inactive CUSTOMER profiles cannot read AMCs (403).
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /buildings | ADMIN, SUPER_ADMIN | BuildingView[] |
+| POST /buildings | ADMIN, SUPER_ADMIN | BuildingWrite -> BuildingView |
+| PUT /buildings/{id} | ADMIN, SUPER_ADMIN | BuildingWrite -> BuildingView |
+| DELETE /buildings/{id} | ADMIN, SUPER_ADMIN | deactivate; null data |
+| GET /lifts | ADMIN, SUPER_ADMIN | LiftView[] |
+| POST /lifts | ADMIN, SUPER_ADMIN | LiftWrite -> LiftView |
+| PUT /lifts/{id} | ADMIN, SUPER_ADMIN | LiftWrite -> LiftView |
+| DELETE /lifts/{id} | ADMIN, SUPER_ADMIN | deactivate; null data |
+| GET /amc-contracts | ADMIN, SUPER_ADMIN, CUSTOMER owner | AmcView[] |
+| POST /amc-contracts | ADMIN, SUPER_ADMIN | AmcWrite -> AmcView |
+| PUT /amc-contracts/{id}/renew | ADMIN, SUPER_ADMIN | AmcRenew -> AmcView |
 
-V2 creates only `buildings`, `lifts`, and `amc_contracts`, with signed BIGINT identifiers, restrictive FKs, named checks, and the specified indexes. Hibernate scans only canonical auth/assets entities and remains `validate`; SQL initialization remains disabled. V1 was not modified. Neither MySQL database was accessed for this change.
+Admin GET /buildings, /lifts and /amc-contracts accept optional status, page and size filters. Omitting both page and size preserves the full existing array response; supplying either defaults page to 0 and size to 20, with size 1-100 and nonnegative page. Filters apply before paging and never widen customer AMC ownership.
 
-## Stage 3: service workflow
+BuildingWrite requires customerProfileId and buildingName; accepts buildingType, address, city, state, pincode, emergencyContactName, emergencyContactPhone, status. BuildingView includes those fields, id, isActive, activeLiftCount, createdAt, updatedAt. Building ownership cannot be transferred by update.
 
-All operations return `ApiResponse<T>`; successful requests return HTTP 200. Missing authentication returns 401, role/ownership violations 403, absent request/asset IDs 404, malformed/invalid input or missing mandatory notes 400, and lifecycle/report/uniqueness conflicts 409. Unexpected errors return a generic 500 without exception or secret details.
+LiftWrite requires buildingId and name; accepts liftNumber, model, manufacturer, capacity, floorCount, serialNumber, installationDate, location, currentStatus, warrantyStatus, warrantyStartDate, warrantyEndDate, lastMaintenanceDate, nextMaintenanceDate, healthScore, machineRoom, qrCode, specifications. customerId is rejected. LiftView includes these fields, id, isActive, amcCoverage, asOfDate, createdAt, updatedAt. healthScore is a nullable JSON integer 0-100 in both directions (numeric Byte mapping to existing TINYINT); no String conversion or migration. Lift statuses: ACTIVE, DOWN, MAINTENANCE, OUT_OF_SERVICE. Derived amcCoverage is ACTIVE or NON_AMC. Ownership cannot be transferred by update.
 
-| Method | `/api/v1` path | Access | Response |
-|---|---|---|---|
-| POST | `/service-requests` | CUSTOMER, ADMIN, SUPER_ADMIN | Request detail with initial PENDING event |
-| GET | `/service-requests/{id}` | Owning CUSTOMER, actively assigned TECHNICIAN, ADMIN, SUPER_ADMIN | Request, active assignment, immutable history and permitted report |
-| GET | `/service-requests` | ADMIN, SUPER_ADMIN | Paged request summaries; optional status/priority filters |
-| POST | `/service-requests/{id}/assignments` | ADMIN, SUPER_ADMIN | Detail after assignment/reassignment |
-| POST | `/service-requests/{id}/assignments/{assignmentId}/accept` | Actively assigned TECHNICIAN only | Detail after acceptance |
-| POST | `/service-requests/{id}/status` | Actively assigned TECHNICIAN, ADMIN, SUPER_ADMIN | Detail after transition |
-| GET | `/technician/me/jobs` | TECHNICIAN | Own active-assignment request summaries; optional request-status filter |
-| GET | `/technician/me/jobs/{id}` | Actively assigned TECHNICIAN | Job detail |
-| POST | `/technician/me/jobs/{id}/report` | Actively assigned TECHNICIAN | Saved report; does not complete request or add a status event |
+AmcWrite requires liftId, amcNumber, plan, startDate, endDate; accepts coverageDetails, renewalDate. AmcRenew requires plan/startDate/endDate and accepts coverageDetails/renewalDate. AmcView adds id, status, lastReminderSentAt, renewalCount, covered, asOfDate and timestamps. AMC statuses: ACTIVE, EXPIRED, NON_AMC, CANCELLED, RENEWED. Renewal must begin after the existing end date; endDate cannot precede startDate. Coverage uses one service-supplied business date and contract queries. Lift counts remain repository projections; no derived columns are introduced. Deactivation never deletes rows. New asset operations require active account/profile/building/lift parents.
 
-No unversioned aliases or second customer creation route exist. Pages use `items`, `page`, `size`, `totalElements`, `totalPages`; defaults are page 0 and size 20, maximum size 100, sorted by descending request ID. Technician job reads include only ASSIGNED/ACCEPTED assignments; completed/released assignments are not in that list. Customer/admin detail remains available for terminal requests.
+## Service workflow
 
-### Request and response fields
+| Method/path | Role | Input / data |
+|---|---|---|
+| POST /service-requests | CUSTOMER, ADMIN, SUPER_ADMIN | CreateRequest -> Detail |
+| GET /service-requests/{id} | owner CUSTOMER, assigned TECHNICIAN, ADMIN, SUPER_ADMIN | Detail |
+| GET /service-requests | ADMIN, SUPER_ADMIN | status?, priority?, page=0, size=20 -> PageView<RequestView> |
+| POST /service-requests/{id}/assignments | ADMIN, SUPER_ADMIN | technicianProfileId, notes? -> Detail |
+| POST /service-requests/{id}/assignments/{assignmentId}/accept | assigned TECHNICIAN | Detail |
+| POST /service-requests/{id}/status | assigned TECHNICIAN, ADMIN, SUPER_ADMIN | toStatus, notes? -> Detail |
+| GET /technician/me/jobs | TECHNICIAN | status?, page=0, size=20 -> PageView<RequestView> |
+| GET /technician/me/jobs/{id} | assigned TECHNICIAN | Detail |
+| POST /technician/me/jobs/{id}/report | assigned TECHNICIAN | diagnosis, workPerformed, testingResult; completionNotes? -> ReportView |
 
-- Creation requires `liftId`, nonblank `title` (max 200), nonblank `description`, and `serviceType`. Optional: `issueCategory` (100), `priority` (default MEDIUM), `customerRemarks` (2000), `preferredVisitDate`, `preferredTimeSlot` (80). Service types: ROUTINE_MAINTENANCE, BREAKDOWN, EMERGENCY, INSPECTION, INSTALLATION, MODERNIZATION. Priorities: LOW, MEDIUM, HIGH, EMERGENCY.
-- CUSTOMER ownership is resolved exclusively from JWT user → active customer profile. `customerId` is always rejected; CUSTOMER also cannot supply `customerProfileId`, `internalAdminNotes`, or `estimatedCompletionMinutes`. ADMIN/SUPER_ADMIN must supply `customerProfileId` and may supply those admin fields. The active lift must belong to that customer's active building. Locked/inactive accounts and inactive profiles/assets are rejected for new operations.
-- Assignment accepts `technicianProfileId` and optional `notes` (2000); technician profile/account must be active and have TECHNICIAN role. Acceptance uses path IDs only and verifies the active assignment ID and owner.
-- Status accepts `toStatus` and optional `notes` (2000). CANCELLED and WAITING_FOR_PARTS require nonblank notes.
-- Reports accept only nonblank `diagnosis`, `workPerformed`, `testingResult`, and optional `completionNotes`. Request, assignment and reporting-user IDs are always resolved server-side. Unknown write properties are rejected.
-- Detail uses `request`, `activeAssignment`, `history`, `report`. DTOs contain scalar identifiers and workflow fields, never JPA identity graphs or credential fields. CUSTOMER does not receive internal admin notes, technician remarks, assignment/history notes, or the report. Only admin roles receive `internalAdminNotes`; actively assigned technicians can read/update the report.
+CreateRequest requires liftId, title, description, serviceType. Optional issueCategory, priority (MEDIUM default), customerRemarks, preferredVisitDate, preferredTimeSlot; customerProfileId is required for admin creation and forbidden for CUSTOMER. internalAdminNotes and estimatedCompletionMinutes are also admin-only and rejected from CUSTOMER. Customer ownership derives exclusively from JWT and must match the lift's building owner. Submitted customerId and unknown fields are rejected.
 
-### Lifecycle and atomicity
+Detail contains request (RequestView), nullable activeAssignment (AssignmentView), immutable history (HistoryView[]) and nullable report (ReportView). Existing response shapes are preserved. RequestView contains id/serviceId, customerProfileId/liftId, title/description/category, priority/status/serviceType, remarks, scheduling/completion/estimate and timestamps. Internal notes are hidden from customers. AssignmentView contains id, serviceRequestId, technicianProfileId, status, assignedByUserId, assignedAt, acceptedAt, releasedAt, notes. HistoryView contains id, nullable fromStatus, toStatus, changedByUserId, notes, changedAt. ReportView contains id, serviceRequestId, assignmentId, diagnosis, workPerformed, testingResult, completionNotes, reportedByUserId and timestamps. PageView contains items, page, size, totalElements, totalPages; page must be nonnegative and size is 1-100.
 
-| Current | Allowed next |
-|---|---|
-| PENDING | ASSIGNED, CANCELLED |
-| ASSIGNED | ACCEPTED, CANCELLED |
-| ACCEPTED | ON_THE_WAY, CANCELLED |
-| ON_THE_WAY | REACHED_SITE, CANCELLED |
-| REACHED_SITE | DIAGNOSIS, CANCELLED |
-| DIAGNOSIS | REPAIR_IN_PROGRESS, WAITING_FOR_PARTS, CANCELLED |
-| REPAIR_IN_PROGRESS | WAITING_FOR_PARTS, TESTING, CANCELLED |
-| WAITING_FOR_PARTS | REPAIR_IN_PROGRESS, CANCELLED |
-| TESTING | COMPLETED, REPAIR_IN_PROGRESS, CANCELLED |
-| COMPLETED / CANCELLED | None |
+Request statuses: PENDING, ASSIGNED, ACCEPTED, ON_THE_WAY, REACHED_SITE, DIAGNOSIS, REPAIR_IN_PROGRESS, WAITING_FOR_PARTS, TESTING, COMPLETED, CANCELLED. Assignment statuses: ASSIGNED, ACCEPTED, REJECTED, RELEASED, COMPLETED. Priorities: LOW, MEDIUM, HIGH, EMERGENCY. Service types: ROUTINE_MAINTENANCE, BREAKDOWN, EMERGENCY, INSPECTION, INSTALLATION, MODERNIZATION. Java enums and V3 checks remain aligned.
 
-PENDING → ASSIGNED uses the assignment endpoint, not a bare status update. ASSIGNED → ACCEPTED can use technician acceptance or the status endpoint under the stated role/ownership policy. An assignment must be ACCEPTED before further progression; cancellation can release an unaccepted assignment.
+The approved transition graph is unchanged. Request row locking coordinates assignment, reassignment, report, status and completion; the existing generated unique active-assignment index remains authoritative. Creation writes one initial PENDING event; every accepted transition writes one event. Reassignment retains released rows and allows the same technician later. Cancellation requires a reason and releases the active assignment. WAITING_FOR_PARTS requires notes. TESTING -> COMPLETED requires a nonblank report for the current active assignment, even for admins; completion atomically records completedAt, completes the assignment and writes history. Report POST does not complete a job; terminal reports are immutable.
 
-Each workflow mutation locks the request row. Creation writes exactly one initial history event with null `fromStatus`; each accepted transition writes exactly one new immutable event. Completion verifies a nonblank report for the current request, current active assignment, and its technician user, then atomically sets `completedAt`, marks the assignment COMPLETED and adds one event. Admins cannot bypass that report requirement. Cancellation releases the active assignment if present and adds one event in the same transaction. Invalid operations leave status/history unchanged.
+## Notifications and dashboard
 
-Reassignment is permitted only before terminal status. It releases and flushes the previous active row before creating another; repeated assignment to the same technician creates another retained row. It preserves the current request lifecycle and records a same-status history event. Accepting a replacement at an advanced lifecycle state records acceptance without regressing request status. A replacement must accept before progressing, and the current technician must update the report to the new assignment before completion. Previously released technicians lose access.
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /notifications | authenticated recipient | status?, page=0, size=20 -> NotificationPageResponse |
+| POST /notifications | ADMIN, SUPER_ADMIN | NotificationCreateRequest -> NotificationResponse |
+| PUT /notifications/{id}/read | recipient only | NotificationResponse |
+| GET /admin/dashboard/summary | ADMIN, SUPER_ADMIN | Summary |
 
-Reports are unique per request and updated in place before terminal status. Reassignment does not silently reattribute an old report. Terminal requests reject report edits, reassignment and further transitions. History entities are immutable and expose no update/delete API or repository operation.
+NotificationCreateRequest requires recipientUserId, title, message; channel defaults to IN_APP and only IN_APP is accepted. EMAIL/SMS/PUSH remain reserved storage values, rejected as requests and not advertised as usable input channels. scheduledAt is optional UTC local date/time. Responses contain id, recipientUserId, title, message, channel, status, scheduledAt, sentAt, readAt and timestamps. Status values are PENDING, SENT, FAILED, READ. New in-app records are PENDING with sentAt null. Inbox is recipient-scoped and only includes unscheduled/due records, ordered createdAt/id descending. Read checks ownership and due time and is idempotent, preserving readAt. No deletion, external delivery or worker exists.
 
-### Migration and verification limits
+Dashboard Summary fields are totalCustomers, totalLifts, totalRequests, pendingJobs, completedJobs, emergencyJobs, totalTechnicians, totalAmcs. Counts include retained rows; pending/completed count exact lifecycle status and emergencyJobs counts priority EMERGENCY. Dashboard is the specific ADMIN/SUPER_ADMIN exception to the otherwise SUPER_ADMIN-only /admin/** security rule.
 
-V3 creates exactly `service_requests`, `technician_assignments`, `service_status_history`, `service_reports`; V1/V2 files remain unchanged. Signed BIGINT keys, VARCHAR enum checks, restrictive FKs and the approved indexes are used. `service_requests` has no direct technician FK. The stored generated `active_request_id` and unique index `uk_assignment_active_request` enforce one ASSIGNED/ACCEPTED assignment; the generated column has no Java field, and there is no request/technician pair uniqueness.
+## Migration and client readiness
 
-The test-classpath-only `H2WorkflowMigrationAdapter` reads the original migration resources and removes only `STORED` from V3 for H2 execution. Generated expressions, uniqueness, FKs, Hibernate validation and workflow behavior are exercised there. The committed production migration retains the exact MySQL STORED strategy. H2 migration checksums therefore differ for V3; the adapter is absent from the application JAR and must never be used with MySQL. These tests do not establish MySQL V3 startup or storage-engine behavior.
-
-## Stage 4: in-app notification records
-
-All success/error responses use `ApiResponse<T>`. Success is HTTP 200. The only new runtime routes are:
-
-| Method | Path | Access | Behavior |
-|---|---|---|---|
-| GET | `/api/v1/notifications` | Any authenticated active user | Own due/unscheduled IN_APP records, paged with optional status filter |
-| POST | `/api/v1/notifications` | ADMIN, SUPER_ADMIN | Create PENDING IN_APP record for an active canonical user |
-| PUT | `/api/v1/notifications/{id}/read` | Recipient only | Mark due IN_APP record READ and set readAt once |
-
-Creation requires `recipientUserId` (positive Long), nonblank `title` (max 200), and nonblank `message` (max 2000). Optional `channel` defaults to IN_APP; EMAIL, SMS and PUSH are rejected with 400. Optional `scheduledAt` is an ISO local date-time interpreted in UTC. Unknown write fields, including client-supplied status, sentAt and readAt, are rejected. Inactive recipients return 400 and missing recipients 404. No external delivery is attempted or claimed; sentAt stays null.
-
-Inbox recipient identity always comes from JWT user ID, never query parameters. `page` defaults to 0, `size` to 20 and is limited to 1–100; ordering is createdAt descending then id descending. Optional `status` accepts PENDING, SENT, FAILED or READ, although this stage only creates PENDING and transitions to READ. The page DTO contains `items`, `page`, `size`, `totalElements`, `totalPages`.
-
-One service-supplied UTC time is used per inbox/read operation. Unscheduled records are immediately visible; scheduled records are visible when `scheduledAt <= asOf`. Reading a future or non-IN_APP record returns 404. Another user, including a nonrecipient admin, receives 403 when marking a record read. Repeated reads preserve the original readAt, protected by a row lock; no delivery status is inferred. There is no delete endpoint or notification worker, and all records are retained.
-
-Flat notification views expose only `id`, `recipientUserId`, `title`, `message`, `channel`, `status`, `scheduledAt`, `sentAt`, `readAt`, `createdAt`, `updatedAt`. User entities, credential hashes and token fields are never serialized. Missing authentication returns a safe 401; CUSTOMER/TECHNICIAN creation returns 403. Invalid payloads, filters and page bounds return 400; nonexistent records return 404. Errors use generic messages and do not expose internal exceptions.
-
-V4 creates only `notifications`: signed BIGINT keys, recipient FK with ON DELETE RESTRICT, named VARCHAR checks, IN_APP/PENDING defaults, microsecond timestamps and the required `(recipient_user_id,status,created_at)` and `(status,scheduled_at)` indexes. Hibernate scans the canonical notifications package; old notification entities/controllers remain outside runtime scans. Flyway and Hibernate validate remain the schema controls. The existing H2 adapter changes only V3's STORED keyword, leaving V4 SQL unchanged during tests.
-
-External notification providers remain unimplemented. Visits, checklist items, parts, attachments, payments, inventory, invoices, audit, exports, settings, website forms and client changes remain out of scope. `Valor-technician` was not changed. `valor_lift_db` remains untouched. V4 was subsequently reported verified against real MySQL by the user; operational closure endpoint verification is tracked below.
-
-## Phase-1 operational closure: staff provisioning
-
-Implemented on main using existing canonical users and technician_profiles tables. No migration added or changed. The user reports V1-V4 verified against real MySQL; these new endpoints have only been verified with the isolated test database so far.
-
-| Method | Path | Authorization | Behavior |
-|---|---|---|---|
-| POST | `/api/v1/admin/users` | SUPER_ADMIN only | Creates ADMIN or TECHNICIAN; returns a flat staff summary in ApiResponse, HTTP 200 |
-| DELETE | `/api/v1/admin/users/{userId}` | SUPER_ADMIN only | Idempotently deactivates ADMIN or TECHNICIAN; retains rows; returns a staff summary, HTTP 200 |
-
-POST requires email, password and role. Email is trimmed/lowercased; passwords are BCrypt-hashed with a 72-byte maximum. Only ADMIN and TECHNICIAN are accepted. Technician employeeId (50), assignedArea (160), specialization (160) are optional as in V1; availabilityStatus defaults to AVAILABLE and accepts AVAILABLE, BUSY, OFF_DUTY, ON_LEAVE. Blank optional strings become null; employee IDs are trimmed and unique when present. ADMIN requests cannot carry technician fields and create no profile. Technician user/profile insertion is atomic; a duplicate employee ID rolls back both. New accounts/profiles default active, unlocked with zero failed attempts.
-
-Responses contain userId, email, role, active, technicianProfileId, employeeId, assignedArea, specialization and availabilityStatus; no credentials or tokens. Unknown fields and invalid payloads return safe 400 envelopes, duplicates 409, missing staff 404. Anonymous callers receive 401; other roles receive 403. Customer and SUPER_ADMIN management are not supported, including self-deactivation. Deactivation locks the target user and sets the technician profile inactive in the same transaction. Repeated calls are safe; no related records are deleted. Deactivated users cannot log in, use existing JWTs for protected operations, or obtain a new session by refreshing. A future customer deactivation implementation must deactivate its customer profile transactionally; no customer management route is added here.
-
-Client repositories remain unchanged. External notification providers and all other deferred features remain unimplemented. Phase-1 operational closure implementation is complete; real-MySQL endpoint verification remains required for this code-only change.
-
-OpenAPI contract: staff request/response components are explicitly named `StaffCreateRequest` and `StaffResponse`; notification components are `NotificationCreateRequest`, `NotificationResponse` and `NotificationPageResponse`. Unique operation IDs are `createStaff`, `deactivateStaff`, `createNotification`, `getNotifications` and `markNotificationRead`. Distinct component names prevent nested `Create`/`View` DTO and generic response schema collisions. HTTP payloads and behavior are unchanged.
+No V1-V4 edits, schema additions, manual SQL or MySQL access occurred during reconciliation. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. The user previously reported V1-V4 verified against real MySQL; the new code still needs real-MySQL endpoint verification before client migration. All client repositories and unrelated README changes remain untouched. Payments, inventory, providers, visits/checklists/parts/attachments, invoices, exports and other excluded features remain unimplemented.

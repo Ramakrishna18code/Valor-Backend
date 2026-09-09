@@ -8,6 +8,9 @@ import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
 interface BuildingRepository extends JpaRepository<Building, Long> {
+    @Query("select b from Building b join fetch b.customer c join fetch c.user u where u.id=:userId order by b.id")
+    List<Building> findOwned(@Param("userId") Long userId);
+
     @Query("select b from Building b join fetch b.customer c join fetch c.user order by b.id")
     List<Building> listAssets();
 
@@ -17,6 +20,9 @@ interface BuildingRepository extends JpaRepository<Building, Long> {
 }
 
 interface LiftRepository extends JpaRepository<Lift, Long> {
+    @Query("select l from Lift l join fetch l.building b join fetch b.customer c join fetch c.user u where u.id=:userId order by l.id")
+    List<Lift> findOwned(@Param("userId") Long userId);
+
     @Query("select l from Lift l join fetch l.building b join fetch b.customer c join fetch c.user order by l.id")
     List<Lift> listAssets();
 

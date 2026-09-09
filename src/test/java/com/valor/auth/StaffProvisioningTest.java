@@ -64,7 +64,7 @@ class StaffProvisioningTest {
             call(delete("/api/v1/admin/users/"+id),a,null,200);call(delete("/api/v1/admin/users/"+id),a,null,200);
             assertEquals(count,users.count());assertFalse(users.findById(id).orElseThrow().isActive());assertEquals(hash,users.findById(id).orElseThrow().getPasswordHash());
             if(role==Role.TECHNICIAN)assertFalse(techs.findByUserId(id).orElseThrow().active);
-            call(post("/api/v1/auth/login/"+(role==Role.ADMIN?"admin":"technician")),null,Map.of("identity",body.get("email"),"password",PASSWORD),400);
+            call(post("/api/v1/auth/login/"+(role==Role.ADMIN?"admin":"technician")),null,Map.of("email",body.get("email"),"password",PASSWORD),400);
             call(get("/api/v1/me"),old,null,401);
         }
     }

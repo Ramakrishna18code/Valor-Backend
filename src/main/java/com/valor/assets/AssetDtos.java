@@ -3,6 +3,7 @@ package com.valor.assets;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.*;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.*;
 
 /** Flat API data only: no JPA entity or identity graph is serialized. */
@@ -25,6 +26,13 @@ public final class AssetDtos {
         }
     }
 
+    public record CustomerBuildingWrite(@NotBlank @Size(max=200) String buildingName,
+        @Size(max=80) String buildingType,@Size(max=500) String address,@Size(max=100) String city,
+        @Size(max=100) String state,@Size(max=20) String pincode,@Size(max=160) String emergencyContactName,
+        @Size(max=20) String emergencyContactPhone) {
+        @JsonAnySetter public void rejectUnknown(String field,JsonNode value){throw new IllegalArgumentException("Unsupported asset field");}
+    }
+
     public record LiftWrite(
             @NotNull @Positive Long buildingId,
             @NotBlank @Size(max = 160) String name,
@@ -42,7 +50,7 @@ public final class AssetDtos {
             LocalDate warrantyEndDate,
             LocalDate lastMaintenanceDate,
             LocalDate nextMaintenanceDate,
-            @PositiveOrZero @Max(100) Byte healthScore,
+            @Schema(type="integer",format="int32",minimum="0",maximum="100") @PositiveOrZero @Max(100) Byte healthScore,
             @Size(max = 200) String machineRoom,
             @Size(max = 255) String qrCode,
             String specifications) {
@@ -112,11 +120,11 @@ public final class AssetDtos {
             LocalDate warrantyEndDate,
             LocalDate lastMaintenanceDate,
             LocalDate nextMaintenanceDate,
-            Byte healthScore,
+            @Schema(type="integer",format="int32",minimum="0",maximum="100") Byte healthScore,
             String machineRoom,
             String qrCode,
             String specifications,
-            boolean isActive, String amcCoverage, LocalDate asOfDate,
+            boolean isActive, @Schema(allowableValues={"ACTIVE","NON_AMC"}) String amcCoverage, LocalDate asOfDate,
             LocalDateTime createdAt,
             LocalDateTime updatedAt) {}
 

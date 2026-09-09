@@ -9,6 +9,9 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
 interface RequestRepository extends JpaRepository<ServiceRequest, Long> {
+    @Query("select r from ServiceRequest r where r.customer.id=:customerId and (:status is null or r.status=:status)")
+    Page<ServiceRequest> customerRequests(@Param("customerId") Long customerId,@Param("status") RequestStatus status,Pageable page);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from ServiceRequest r where r.id = :id")
     Optional<ServiceRequest> lockById(@Param("id") Long id);
