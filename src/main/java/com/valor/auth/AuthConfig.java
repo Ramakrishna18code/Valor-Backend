@@ -39,6 +39,11 @@ class AuthConfig {
                         .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login/**",
                                 "/api/v1/auth/otp/**", "/api/v1/auth/refresh").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/amc-contracts")
+                                .hasAnyRole("ADMIN", "SUPER_ADMIN", "CUSTOMER")
+                        .requestMatchers("/api/v1/buildings", "/api/v1/buildings/**",
+                                "/api/v1/lifts", "/api/v1/lifts/**", "/api/v1/amc-contracts", "/api/v1/amc-contracts/**")
+                                .hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .anyRequest().authenticated())
                 .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class)
                 .build();
