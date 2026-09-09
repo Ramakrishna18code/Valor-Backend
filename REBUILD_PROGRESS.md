@@ -10,3 +10,11 @@
 - MySQL: V1-V4 verification was reported by the user. No MySQL access or backend startup occurred in this task. Real-MySQL endpoint verification is still required for this code-only change. valor_lift_db remained untouched.
 - Client repositories (Android, Admin Portal, Website and Valor-technician) remain unchanged. External notification providers and other deferred features remain unimplemented.
 - Blockers: none for implementation; pending real-MySQL endpoint verification. Next step: verify staff provisioning/deactivation on the intended MySQL runtime.
+
+## OpenAPI contract correction
+
+- Corrected nested DTO component-name collisions: both staff and notification controllers used Create/View, causing shared OpenAPI request and ApiResponse<View> component keys. Explicit distinct Schema names resolve the actual component references without changing payloads. Explicit operation IDs remove reliance on generated names for the five staff/notification operations.
+- Files: StaffController, NotificationController, NotificationDtos, StaffOpenApiTest, BACKEND_API_CONTRACT.md and this progress note.
+- Regression coverage: /v3/api-docs staff request fields and response fields, deactivation response, notification creation/read/inbox schemas and global operationId uniqueness. Generic response inference is correct with distinct component names; no replacement runtime envelope or behavior change is required.
+- No schema change: no migration added/modified, no entity/business/security behavior changes, no client changes, no MySQL access. valor_lift_db untouched. README.md remains excluded.
+- Validation: mvn clean test and mvn clean package both passed with 81 tests each (79 existing plus 2 OpenAPI regression tests), zero failures/errors/skips. No real-MySQL access or endpoint verification was performed for this documentation-only fix.
