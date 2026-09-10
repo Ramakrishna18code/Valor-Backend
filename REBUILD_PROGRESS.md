@@ -1,3 +1,15 @@
+# Live development CORS verification - 10 September 2026
+
+- Implementation: `295d2ef` on `main`; not pushed. No backend code/configuration/migration changes in this documentation follow-up.
+- Direct HTTP after restart: GET `/api/v1/health` returned 200 with data.status=UP.
+- Login preflight: OPTIONS `/api/v1/auth/login/admin`, requested method POST and header content-type, returned 200 with exact Access-Control-Allow-Origin for both `http://localhost:5173` and `http://127.0.0.1:5173`.
+- Unapproved-origin preflight returned 403 with no Access-Control-Allow-Origin. Unauthenticated GET `/api/v1/me` and `/api/v1/admin/dashboard/summary` each returned a consistent ApiResponse 401. Protected-route authorization remains effective.
+- User manually confirmed successful SUPER_ADMIN portal login from `http://localhost:5173` after restart with the CORS fix. No credentials, tokens, authorization headers or sensitive environment values are recorded.
+- Correct binding remains CORS_ALLOWED_ORIGINS -> app.cors.allowed-origins. The active security chain consumes the explicit origin list; the retired security configuration remains excluded.
+- Existing CORS-commit validation: mvn clean test and mvn clean package passed with 100 tests, zero failures/errors/skips. No rerun required for this documentation-only follow-up.
+- Portal verification: 25 tests and production build passed again. Browser automation is unavailable; reload, dashboard live display/network agreement, browser refresh races, logout/Back and console behavior remain manual observations. See the portal ADMIN_MIGRATION_PROGRESS.md for the complete evidence matrix.
+- V1-V4, MySQL schema/data, valor_lift_db, client source and README files are unchanged. Existing README/Postman environment edits are preserved and excluded. Direct HTTP used only health, preflight and unauthenticated reads; no direct database access.
+
 # Phase-1 verification complete
 
 - Current backend phase: Phase 1 complete.
