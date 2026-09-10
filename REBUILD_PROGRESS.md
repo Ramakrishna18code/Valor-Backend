@@ -1,3 +1,11 @@
+# Admin Portal Stage 1 acceptance - 10 September 2026
+
+- User confirmed final browser verification: SUPER_ADMIN login, retained authentication after refresh, successful authenticated `/api/v1/me` and `/api/v1/admin/dashboard/summary`, backend-provided dashboard values, logout clearing authenticated access, and no red application errors in the browser console.
+- Admin Portal Stage 1 is accepted. The user explicitly accepts automated single-flight refresh, failed-refresh cleanup, role-guard/rejection and separate 401/403 coverage as sufficient. Earlier pending-browser statements below are superseded for acceptance; unobserved Back-button and live race behavior are not newly claimed as observed.
+- Existing validation remains: portal 25 tests and production build passed; backend CORS fix `295d2ef` passed 100 tests and Maven package. No code changed and no validation rerun was required for this documentation-only record.
+- Backend `main` and portal authorized `master` are ready for explicitly authorized push. Nothing was pushed; Stage 2 was not started.
+- No database access, migration/configuration changes, credentials recorded, or unrelated repository modifications. README and Postman environment changes remain unstaged and excluded. See portal ADMIN_MIGRATION_PROGRESS.md for final acceptance and historical evidence.
+
 # Live development CORS verification - 10 September 2026
 
 - Implementation: `295d2ef` on `main`; not pushed. No backend code/configuration/migration changes in this documentation follow-up.
