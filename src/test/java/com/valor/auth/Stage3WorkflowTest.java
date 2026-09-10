@@ -193,7 +193,7 @@ class Stage3WorkflowTest {
         assertEquals(3, db.queryForObject("select count(*) from technician_assignments where service_request_id=?", Integer.class, f.requestId()));
         assertEquals(2, db.queryForObject("select count(*) from technician_assignments where service_request_id=? and status='RELEASED' and released_at is not null", Integer.class, f.requestId()));
         assertEquals(1, db.queryForObject("select count(*) from technician_assignments where active_request_id=?", Integer.class, f.requestId()));
-        assertEquals(4, events(f)); assertEquals("ASSIGNED", state(f));
+        assertEquals(2, events(f)); assertEquals("ASSIGNED", state(f));
         call(post(path(f) + "/assignments/" + first + "/accept"), f.technician(), null, 403);
         accept(f, third, f.technician());
     }
@@ -203,8 +203,10 @@ class Stage3WorkflowTest {
         JsonNode old = report(f, f.technician(), 200);
         TechnicianProfile replacement = technician(); long next = assign(f, replacement.getId());
         assertEquals("TESTING", state(f));
+        int beforeAcceptance = events(f);
         transition(f, f.admin(), "COMPLETED", "", 409);
         accept(f, next, replacement.getUser());
+        assertEquals(beforeAcceptance, events(f));
         transition(f, f.admin(), "COMPLETED", "", 409);
         report(f, f.technician(), 403);
         JsonNode updated = report(f, replacement.getUser(), 200);
@@ -233,6 +235,7 @@ class Stage3WorkflowTest {
             assertEquals(next, state(f)); assertEquals(before + 1, events(f));
             assertEquals(entry.getKey(), db.queryForObject("select from_status from service_status_history where service_request_id=? order by id desc limit 1", String.class, f.requestId()));
             assertEquals(next, db.queryForObject("select to_status from service_status_history where service_request_id=? order by id desc limit 1", String.class, f.requestId()));
+            assertEquals(next.equals("ASSIGNED") ? "Assignment note" : "Required notes", db.queryForObject("select notes from service_status_history where service_request_id=? order by id desc limit 1", String.class, f.requestId()));
         }
     }
 
@@ -271,7 +274,7 @@ class Stage3WorkflowTest {
         JsonNode first = report(f, f.technician(), 200), second = report(f, f.technician(), 200);
         assertEquals(first.get("id"), second.get("id")); assertEquals(before, events(f)); assertEquals("ASSIGNED", state(f));
         assertEquals(1, db.queryForObject("select count(*) from service_reports where service_request_id=?", Integer.class, f.requestId()));
-        assertTrue(call(get(path(f)), f.customer(), null, 200).get("report").isNull());
+        assertEquals(first.get("id"), call(get(path(f)), f.customer(), null, 200).at("/report/id"));
     }
 
     @Test void completionRequiresReportForAdminsAndCommitsAllStateAtomically() throws Exception {
@@ -349,4 +352,51 @@ class Stage3WorkflowTest {
             assertEquals("COMPLETED", state(f));
         } finally { executor.shutdownNow(); }
     }
+    @Test void terminalReportsRemainVisibleToAuthorizedHistoricalViewers() throws Exception {
+        for (String terminal : List.of("COMPLETED", "CANCELLED")) {
+            Fixture f = fixture(); reach(f, "TESTING");
+            JsonNode created = report(f, f.technician(), 200);
+            JsonNode saved = call(get(path(f)), f.technician(), null, 200).get("report");
+            assertEquals(created.get("id"), saved.get("id"));
+            transition(f, f.technician(), terminal, "Terminal explanation", 200);
+            for (User actor : List.of(f.customer(), f.admin(), f.technician())) {
+                JsonNode detail = call(get(path(f)), actor, null, 200);
+                assertTrue(detail.get("activeAssignment").isNull());
+                assertEquals(saved, detail.get("report"));
+                assertEquals("Diagnosed", detail.at("/report/diagnosis").asText());
+                assertEquals("Repaired", detail.at("/report/workPerformed").asText());
+                assertEquals("Passed", detail.at("/report/testingResult").asText());
+            }
+            assertEquals(saved, call(get("/api/v1/technician/me/jobs/" + f.requestId()), f.technician(), null, 200).get("report"));
+            call(get(path(f)), technician().getUser(), null, 403);
+            call(get(path(f)), fixture().customer(), null, 403);
+            report(f, f.technician(), 409);
+        }
+    }
+
+    @Test void transitionNotesSurvivePersistenceAndAllAuthorizedProjections() throws Exception {
+        Fixture f = fixture(); reach(f, "DIAGNOSIS");
+        transition(f, f.technician(), "WAITING_FOR_PARTS", "Awaiting replacement board", 200);
+        transition(f, f.admin(), "CANCELLED", "Customer requested cancellation", 200);
+        for (User actor : List.of(f.customer(), f.admin(), f.technician())) {
+            JsonNode rows = call(get(path(f)), actor, null, 200).get("history");
+            assertEquals("Awaiting replacement board", rows.get(rows.size()-2).get("notes").asText());
+            assertEquals("Customer requested cancellation", rows.get(rows.size()-1).get("notes").asText());
+        }
+        assertEquals("Awaiting replacement board", db.queryForObject("select notes from service_status_history where service_request_id=? and to_status='WAITING_FOR_PARTS'", String.class, f.requestId()));
+        assertEquals("Customer requested cancellation", db.queryForObject("select notes from service_status_history where service_request_id=? and to_status='CANCELLED'", String.class, f.requestId()));
+    }
+
+    @Test void historyRejectsEqualStatesAndReassignmentNeverAddsThem() throws Exception {
+        Fixture f = fixture(); long first = assign(f); int before = events(f);
+        long second = assign(f); assertNotEquals(first, second); assertEquals(before, events(f));
+        accept(f, second, f.technician());
+        long third = assign(f); before = events(f); accept(f, third, f.technician());
+        assertEquals(before, events(f));
+        assertEquals(0, db.queryForObject("select count(*) from service_status_history where service_request_id=? and from_status=to_status", Integer.class, f.requestId()));
+        for (RequestStatus status : RequestStatus.values()) {
+            assertThrows(IllegalArgumentException.class, () -> new ServiceStatusHistory(null, status, status, f.admin(), "Invalid"));
+        }
+    }
+
 }

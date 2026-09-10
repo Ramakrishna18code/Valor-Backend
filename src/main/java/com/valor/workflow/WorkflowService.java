@@ -188,11 +188,16 @@ public class WorkflowService {
         if (actor.getRole() == Role.CUSTOMER) {
             var customer = profiles.customer(actor);
             if (!request.getCustomer().getId().equals(customer.getId())) throw denied();
-        } else if (actor.getRole() == Role.TECHNICIAN) ownedActive(request, actor);
+        } else if (actor.getRole() == Role.TECHNICIAN) {
+            if (request.getStatus() == RequestStatus.COMPLETED || request.getStatus() == RequestStatus.CANCELLED) {
+                var technician = profiles.technician(actor);
+                if (!assignments.existsByRequestIdAndTechnicianId(request.getId(), technician.getId())) throw denied();
+            } else ownedActive(request, actor);
+        }
         else admin(actor);
     }
     private void event(ServiceRequest request, RequestStatus from, User actor, String notes) {
-        history.save(new ServiceStatusHistory(request, from, request.getStatus(), actor, notes));
+        if (from != request.getStatus()) history.save(new ServiceStatusHistory(request, from, request.getStatus(), actor, notes));
     }
     private static void admin(User actor) {
         if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied();
@@ -238,8 +243,8 @@ public class WorkflowService {
                 actor.getRole() == Role.CUSTOMER ? null : a.getNotes())).orElse(null);
         var events = history.findByRequestIdOrderByChangedAtAscIdAsc(request.getId()).stream()
                 .map(e -> new HistoryView(e.getId(), e.getFromStatus(), e.getToStatus(), e.getChangedBy().getId(),
-                        actor.getRole() == Role.CUSTOMER ? null : e.getNotes(), e.getChangedAt())).toList();
-        var report = actor.getRole() == Role.CUSTOMER ? null : reports.findByRequestId(request.getId()).map(this::reportView).orElse(null);
+                        e.getNotes(), e.getChangedAt())).toList();
+        var report = reports.findByRequestId(request.getId()).map(this::reportView).orElse(null);
         return new Detail(view(request, actor), assignment, events, report);
     }
     private ReportView reportView(ServiceReport r) {

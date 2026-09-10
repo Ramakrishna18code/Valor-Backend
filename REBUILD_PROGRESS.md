@@ -1,3 +1,15 @@
+# Workflow report/history correction
+
+- Branch: main; root README.md and unrelated changes preserved; no push.
+- Root causes: customer detail projection suppressed persisted reports and notes; technician reads required an active assignment even for terminal requests; assignment/acceptance emitted events with unchanged lifecycle state. Binding and persistence already retained transition notes.
+- Corrected behavior: report lookup by unique request ID for authorized customer/admin/historical technician detail; terminal writes remain forbidden. Terminal technician reads require a canonical historical assignment; nonterminal reads still require current assignment. Transition notes are visible to authorized viewers. Same-state events are skipped at the service boundary and rejected by the history constructor.
+- Files: WorkflowService, WorkflowRepositories, ServiceStatusHistory constructor guard, Stage3WorkflowTest, BACKEND_API_CONTRACT.md, this note, and the local Postman collection/environment/instructions. Postman includes no secrets and retains records.
+- Coverage: three new regression methods cover completed/cancelled historical reports, terminal write denial and unrelated-user denial, note persistence/projection, and same-state history rejection. Existing reassignment, advanced acceptance, report and all-transition tests have stronger assertions.
+- Test audit: 424621b is the older commit (82 test methods); 0522812 adds Phase1ContractTest with ten methods (92 total). git diff shows zero removed test methods; login/OTP/staff fixtures were adapted, not removed. There is no lost coverage to restore.
+- Validation: final mvn clean test and mvn clean package both passed (95 tests each, zero failures/errors/skips). No skip flags. The first run caught timestamp precision in a new assertion; it now compares the persisted report before/after completion rather than an unrounded creation timestamp. Postman JSON parses and all 190 scripts compile; corrected assertions and empty exported secrets checked offline.
+- Database: Flyway V1-V4 untouched, no new migration, no MySQL access or schema changes. Tests use isolated H2/MockMvc and the existing test-only V3 syntax adapter. valor_lift_db untouched; client repositories unchanged.
+- Next step: rerun the corrected retained-record Postman flow against the independently verified local MySQL backend; no real-MySQL verification claimed for this fix.
+
 # Phase-1 API/OpenAPI reconciliation
 
 - Branch: main. README.md and unrelated changes preserved; no branch operations or push.
