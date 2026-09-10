@@ -2,6 +2,11 @@ package com.valor.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.valor.response.ApiResponse;
+import java.util.Arrays;
+import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -19,8 +24,28 @@ class AuthConfig {
     }
 
     @Bean
-    SecurityFilterChain filter(HttpSecurity http, JwtFilter jwt, ObjectMapper json) throws Exception {
-        return http.csrf(csrf -> csrf.disable())
+    UrlBasedCorsConfigurationSource corsConfigurationSource(@Value("${app.cors.allowed-origins}") String configuredOrigins) {
+        List<String> origins = Arrays.stream(configuredOrigins.split(","))
+                .map(String::trim).filter(origin -> !origin.isEmpty()).distinct().toList();
+        if (origins.stream().anyMatch(origin -> origin.contains("*"))) {
+            throw new IllegalArgumentException("CORS requires explicit origins");
+        }
+        CorsConfiguration cors = new CorsConfiguration();
+        cors.setAllowedOrigins(origins);
+        cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        cors.setAllowedHeaders(List.of("Content-Type", "Authorization", "Accept"));
+        // The API uses bearer headers, not cross-origin cookies.
+        cors.setAllowCredentials(false);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", cors);
+        return source;
+    }
+
+    @Bean
+    SecurityFilterChain filter(HttpSecurity http, JwtFilter jwt, ObjectMapper json,
+            UrlBasedCorsConfigurationSource corsConfigurationSource) throws Exception {
+        return http.cors(cors -> cors.configurationSource(corsConfigurationSource))
+                .csrf(csrf -> csrf.disable())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> {
                             response.setStatus(401);
