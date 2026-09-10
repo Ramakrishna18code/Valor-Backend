@@ -1,3 +1,48 @@
+# Phase-1 verification complete
+
+- Current backend phase: Phase 1 complete.
+- Backend branch: `main`.
+- Latest implementation commit before this documentation commit: `1ab6df0`.
+- Java tests: 95 passed.
+- Maven package: passed.
+- Real-MySQL Postman assertions: 1,143 passed.
+- Flyway schema version: V4.
+- Remaining backend limitation: production OTP delivery provider is not implemented.
+- Local development SUPER_ADMIN credentials must never be used for production.
+- No client repository has been migrated yet.
+
+### Real MySQL Phase-1 Verification — 10 September 2026
+
+The following completed verification results were supplied by the user for this record; no database access was performed during this documentation update.
+
+- Database: `valor_world_dev`
+- Flyway migrations: V1–V4 successfully validated
+- Postman collection: `Valor Phase1 Local - retained MySQL verification`
+- Iterations: 1
+- Assertions executed: 1,143
+- Passed: 1,143
+- Failed: 0
+- Skipped: 0
+- Errors: 0
+- Result: Full Phase-1 API workflow passed against real MySQL.
+- Verified: authentication, roles, staff provisioning, customer assets, AMC contracts, service requests, technician assignments, lifecycle transitions, status history, service reports, notifications, refresh-token rotation, logout and ownership enforcement.
+- `valor_lift_db`: untouched.
+- Secrets, passwords, tokens and OTPs: not recorded.
+
+## Next execution sequence
+
+1. Push `Valor-Backend/main` only after explicit authorization.
+2. Migrate `Valor-Admin-Portal` to the frozen `/api/v1` contract.
+3. Migrate `Valor-Android-APP`.
+4. Migrate the technician React Native client.
+5. Verify the complete technician workflow against `Valor-Backend`.
+6. Retire the duplicate Java backend inside `Valor-technician` only after that verification.
+7. Keep `Valor-Website` backend-independent because website enquiries are outside Phase 1.
+
+## Historical implementation records
+
+The entries below describe their original implementation-time checks. Their pending real-MySQL verification gates are superseded by the completed verification recorded above.
+
 # Workflow report/history correction
 
 - Branch: main; root README.md and unrelated changes preserved; no push.
