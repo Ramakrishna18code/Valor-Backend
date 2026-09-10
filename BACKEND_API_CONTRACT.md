@@ -37,6 +37,21 @@ OTP send is available only under dev/test, never with prod active. No production
 
 StaffCreateRequest: email, password, role (ADMIN/TECHNICIAN only, example TECHNICIAN), employeeId?, assignedArea?, specialization?, availabilityStatus?. Technician guidance calls for these fields; existing runtime permits nullable employeeId/area/specialization and defaults availability to AVAILABLE. ADMIN must omit profile fields. Availability values are AVAILABLE, BUSY, OFF_DUTY, ON_LEAVE. StaffResponse contains userId, email, role (ADMIN/TECHNICIAN only), active and applicable technicianProfileId/employeeId/assignedArea/specialization/availabilityStatus; no password fields. Staff creation/deactivation is atomic, retains related rows, is idempotent for deactivation and disallows customer/SUPER_ADMIN management and self-deactivation. No reactivation route exists. Development SUPER_ADMIN bootstrap remains profile/opt-in controlled and is not an API.
 
+## Admin workflow directories
+
+| Method/path | Authorization | Page items / operation ID |
+|---|---|---|
+| GET /admin/technicians | ADMIN, SUPER_ADMIN | TechnicianDirectoryEntry / getAdminTechnicians |
+| GET /admin/customers | ADMIN, SUPER_ADMIN | CustomerDirectoryEntry / getAdminCustomers |
+
+Both use `/api/v1`, HTTP 200 `ApiResponse<PageView<T>>`, with data `{items, page, size, totalElements, totalPages}`. Query parameters: page=0 (nonnegative), size=20 (1-100), optional q (trimmed, case-insensitive literal substring, maximum 254 characters), optional active=true/false. Invalid parameters or an offset greater than Integer.MAX_VALUE return 400. Empty results return items=[] and zero totals; pages beyond the last page retain matching totals and return items=[]. Ordering is profile ID ascending. No user-controlled sorting is accepted.
+
+TechnicianDirectoryEntry: userId, email, active, technicianProfileId, employeeId, assignedArea, specialization, availabilityStatus (AVAILABLE/BUSY/OFF_DUTY/ON_LEAVE). Search covers email, employeeId, assignedArea and specialization. CustomerDirectoryEntry: userId, customerProfileId, fullName, email, phone, active, status (ACTIVE/INACTIVE/SUSPENDED). Search covers fullName, email and canonical phone. Nullable model fields remain null. Only canonical profiles with their matching user role are included.
+
+active is the conjunction of users.is_active and the profile's is_active. Omitted includes both; false matches either inactive flag. Customer status is returned separately. Active directory results do not guarantee workflow eligibility: lock state, customer status, asset state and assignment rules remain validated by existing write services. Use customerProfileId for service-request ownership and technicianProfileId for assignments; userId identifies the account, not the profile.
+
+Only these exact GET routes additionally admit ADMIN under the admin namespace; staff provisioning/deactivation remains SUPER_ADMIN-only. Unauthenticated requests return the existing 401 envelope; CUSTOMER and TECHNICIAN receive 403. Shared OpenAPI error schemas and typed page responses apply. Queries use Criteria scalar projections and a count query, with no entity graph serialization or per-row user loading. Passwords, authentication hashes/tokens, lock/login audit fields, customer address/company/alternate contact/rating and unrelated technician metrics are intentionally omitted. Email and customer phone are included only for authorized selection. These reads add no tables, migrations, fake records or write operations.
+
 ## Customer profile and owned assets
 
 | Method/path | Role | Input / data |

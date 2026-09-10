@@ -65,6 +65,7 @@ class AuthConfig {
                                 "/api/v1/auth/otp/**", "/api/v1/auth/refresh").permitAll()
                         .requestMatchers("/api/v1/customers/**").hasRole("CUSTOMER")
                         .requestMatchers("/api/v1/admin/dashboard/summary").hasAnyRole("ADMIN","SUPER_ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/admin/technicians", "/api/v1/admin/customers").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/notifications")
                                 .hasAnyRole("ADMIN", "SUPER_ADMIN")

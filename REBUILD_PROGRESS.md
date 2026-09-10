@@ -1,3 +1,14 @@
+# Admin workflow directories - 10 September 2026
+
+- Implemented on existing main: GET `/api/v1/admin/technicians` and GET `/api/v1/admin/customers`, ADMIN/SUPER_ADMIN only. Staff POST/DELETE remains SUPER_ADMIN-only; no portal workflow UI or other feature added.
+- Page data uses items/page/size/totalElements/totalPages. Defaults page=0,size=20; size 1-100, bounded integer offset. Stable profile-ID ascending order; optional trimmed literal case-insensitive q (maximum 254) and combined user/profile active flag filter. Customer status is separate; existing workflow writes revalidate eligibility.
+- Technician items provide canonical user/profile IDs, email, employee ID, area, specialization, availability and active. Customer items provide canonical user/profile IDs, fullName, email, phone, status and active. No authentication fields or unrelated personal/profile details are projected. Criteria queries select only response fields plus a count; no per-row user loads or native SQL.
+- Files: auth/DirectoryController.java, auth/DirectoryService.java, auth/AuthConfig.java, auth/AdminDirectoriesTest.java, BACKEND_API_CONTRACT.md and this progress record. No dependencies added.
+- Validation: `mvn clean test` and `mvn clean package` both passed with 111 tests, zero failures/errors/skips (100 existing plus 11 new). V1-V4 ran and Hibernate validate passed in isolated H2 test contexts; no tests were skipped. Eleven new MockMvc/H2 integration tests cover both permitted roles, denied roles/anonymous access, stable pagination, selection IDs, search (including literal wildcard handling), active flags, empty/out-of-range pages, invalid queries, secret-free JSON, unchanged staff-write restriction and typed OpenAPI/unique operation IDs.
+- Live verification: local backend health at localhost:8081 was unreachable during this task. No real-MySQL directory endpoint verification is claimed. Verify both GET routes in local Swagger/Postman after starting the updated backend, then confirm profile IDs in existing workflow selectors. No credentials or tokens were used or recorded.
+- Safety: V1-V4 unchanged; no migration, schema or MySQL access, fake records, client edits or push. valor_lift_db untouched. Existing README.md and postman/Valor_Local.postman_environment.json edits are preserved and excluded.
+- Next: real-MySQL directory read verification, then separately authorized Admin Portal workflow migration. Production OTP provider and other previously deferred capabilities remain unchanged.
+
 # Admin Portal Stage 1 acceptance - 10 September 2026
 
 - User confirmed final browser verification: SUPER_ADMIN login, retained authentication after refresh, successful authenticated `/api/v1/me` and `/api/v1/admin/dashboard/summary`, backend-provided dashboard values, logout clearing authenticated access, and no red application errors in the browser console.
