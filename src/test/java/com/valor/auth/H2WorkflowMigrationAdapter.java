@@ -24,7 +24,8 @@ class H2WorkflowMigrationAdapter {
             String name = resource.getFilename();
             String source;
             try (var input = resource.getInputStream()) { source = new String(input.readAllBytes(), StandardCharsets.UTF_8); }
-            String sql = name.equals("V3__create_service_workflow.sql") ? source.replace(") STORED;", ");") : source;
+                    String sql = (name.equals("V3__create_service_workflow.sql") || name.equals("V5__create_service_visits.sql"))
+                        ? source.replace(") STORED", ")") : source;
             resources.add(new LoadableResource() {
                 public Reader read() { return new StringReader(sql); }
                 public String getFilename() { return name; }

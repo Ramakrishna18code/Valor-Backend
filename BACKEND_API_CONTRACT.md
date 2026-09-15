@@ -1,6 +1,6 @@
-# Frozen Phase-1 backend API contract
+# Canonical backend API contract
 
-Scope: canonical Stage 1-4 API on main, reconciled with ../TARGET_VALOR_SCHEMA_SPEC.md. Flyway V1-V4 and MySQL schema are unchanged. This reconciliation is verified using isolated H2/MockMvc; real-MySQL endpoint verification and client migration have not been performed. Android, Admin Portal, Website and Valor-technician remain unchanged.
+Scope: canonical Stage 1-4 API on main, reconciled with ../TARGET_VALOR_SCHEMA_SPEC.md, plus the approved Scheduling / Service Visit contract below. Flyway V1-V4 remain unchanged; Scheduling / Service Visits are added in V5. This reconciliation is verified using isolated H2/MockMvc; real-MySQL endpoint verification and client migration have not been performed. Android, Admin Portal, Website and Valor-technician remain unchanged.
 
 ## Common contract
 
@@ -111,6 +111,36 @@ Request statuses: PENDING, ASSIGNED, ACCEPTED, ON_THE_WAY, REACHED_SITE, DIAGNOS
 
 The approved transition graph is unchanged. Request row locking coordinates assignment, reassignment, report, status and completion; the existing generated unique active-assignment index remains authoritative. Creation writes one initial PENDING event; every accepted transition writes one event. Reassignment retains released rows and allows the same technician later without a status-history event when lifecycle state is unchanged. Acceptance after advanced reassignment likewise does not emit a same-status event. Event creation rejects equal from/to states; the initial NULL -> PENDING event remains valid. Supplied transition notes are persisted and returned, including waiting notes and cancellation reasons. Cancellation requires a reason and releases the active assignment. WAITING_FOR_PARTS requires notes. TESTING -> COMPLETED requires a nonblank report for the current active assignment, even for admins; completion atomically records completedAt, completes the assignment and writes history. Report POST does not complete a job; terminal reports are immutable.
 
+## Scheduling / Service Visits
+
+A ServiceRequest represents the customer's service need. A ServiceVisit represents one planned field-service appointment for that request. Every visit belongs to an existing service request. A request may have multiple historical visits, but only one active/upcoming visit may exist at a time. Completed and cancelled visits remain associated with the request. A visit is not a replacement for the service-request state machine.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /admin/service-visits | ADMIN, SUPER_ADMIN | `fromDate?`, `toDate?`, `technicianProfileId?`, `status?`, `page=0`, `size=20` -> `PageView<VisitView>` |
+| POST /admin/service-visits | ADMIN, SUPER_ADMIN | `VisitCreateRequest` -> `VisitView` |
+| GET /admin/service-visits/{id} | ADMIN, SUPER_ADMIN | `VisitView` |
+| PUT /admin/service-visits/{id} | ADMIN, SUPER_ADMIN | `VisitUpdateRequest` for date/time, technician and notes -> `VisitView` |
+| POST /admin/service-visits/{id}/cancel | ADMIN, SUPER_ADMIN | required reason -> `VisitView` |
+| GET /technician/me/visits | TECHNICIAN | `fromDate?`, `toDate?`, `status?`, `page=0`, `size=20` -> `PageView<VisitView>` |
+| GET /technician/me/visits/{id} | assigned TECHNICIAN | `VisitView` |
+| PUT /technician/me/visits/{id}/status | assigned TECHNICIAN | `IN_PROGRESS` or `COMPLETED`, optional notes -> `VisitView` |
+| POST /technician/me/visits/{id}/reschedule-requests | assigned TECHNICIAN | required reason, requested date/start/end -> `VisitChangeRequestView` |
+| POST /technician/me/visits/{id}/additional-visit-requests | assigned TECHNICIAN | required reason, requested date/start/end -> `VisitChangeRequestView` |
+| POST /technician/me/visits/{id}/cancel | assigned TECHNICIAN | required reason -> `VisitView` |
+| GET /admin/visit-change-requests | ADMIN, SUPER_ADMIN | `type?`, `status?`, `page=0`, `size=20` -> `PageView<VisitChangeRequestView>` |
+| POST /admin/visit-change-requests/{id}/approve | ADMIN, SUPER_ADMIN | optional replacement date/start/end/technician -> `VisitView` |
+| POST /admin/visit-change-requests/{id}/reject | ADMIN, SUPER_ADMIN | required reason -> `VisitChangeRequestView` |
+| GET /customers/me/visits | CUSTOMER | optional `serviceRequestId`, `page=0`, `size=20` -> customer-safe `PageView<VisitView>` |
+
+VisitCreateRequest requires an existing service request, an eligible assigned technician, `scheduledDate`, `startTime`, and `endTime`; it may include notes. Customers never create visits. Admin scheduling may be request-driven or calendar-driven, but both use this same Visit resource. A service request with no active/upcoming visit is an unscheduled service request; no separate task entity exists.
+
+Visit statuses are exactly `SCHEDULED`, `IN_PROGRESS`, `COMPLETED`, and `CANCELLED`. `RESCHEDULED` is not a status. Admin updates to date/time or technician are reschedule events while status remains `SCHEDULED`. Rescheduling and technician changes require the same conflict checks as creation. A technician may request a reschedule or additional visit, but cannot create or approve an appointment directly. Admin/SUPER_ADMIN approve or reject those requests and may change the proposed date/time or technician before approval.
+
+The actual visit time range is authoritative. `startTime` must be before `endTime`. The database and service layer prevent overlapping active scheduled visits for the same technician; adjacent ranges are allowed. Completed and cancelled visits do not conflict. Only one active/upcoming visit is allowed for a service request. Technician availability labels are not a substitute for time-range conflict detection.
+
+ADMIN and SUPER_ADMIN may create, list, view, reschedule, reassign, cancel and review visit-change requests. Assigned TECHNICIAN users may view their own visits, update authorized progress, request rescheduling, request an additional visit, and cancel their visit with a reason; they do not have unrestricted scheduling authority. CUSTOMER users may view only their own customer-safe visits and may cancel their own service request through `PENDING`, `ASSIGNED`, `ACCEPTED`, or `ON_THE_WAY`; cancellation is rejected from `REACHED_SITE` and later work states. Customer cancellation uses the existing request status endpoint, requires a reason, releases the active assignment and active visit, and records normal request/visit history. Customer visit views omit technician contact, employee, security and workload data. Visit cancellation does not cancel the service request; the request remains available for another visit. Visit and change-request events retain actor, reason/notes and timestamps in visit history.
+
 ## Notifications and dashboard
 
 | Method/path | Role | Input / data |
@@ -126,4 +156,4 @@ Dashboard Summary fields are totalCustomers, totalLifts, totalRequests, pendingJ
 
 ## Migration and client readiness
 
-No V1-V4 edits, schema additions, manual SQL or MySQL access occurred during reconciliation. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. The user previously reported V1-V4 verified against real MySQL; the new code still needs real-MySQL endpoint verification before client migration. All client repositories and unrelated README changes remain untouched. Payments, inventory, providers, visits/checklists/parts/attachments, invoices, exports and other excluded features remain unimplemented.
+V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. The user previously reported V1-V4 verified against real MySQL; the new code still needs real-MySQL endpoint verification before client migration. All client repositories and unrelated README changes remain untouched. Payments, inventory, providers, checklists/parts/attachments, invoices, exports and other excluded features remain unimplemented.

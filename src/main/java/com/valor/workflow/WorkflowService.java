@@ -19,11 +19,13 @@ public class WorkflowService {
     private final WorkflowLiftRepository lifts;
     private final AssetIdentityAccess identities;
     private final WorkflowIdentityAccess profiles;
+    private final ServiceVisitService visits;
 
     public WorkflowService(RequestRepository requests, AssignmentRepository assignments, HistoryRepository history,
-            ReportRepository reports, WorkflowLiftRepository lifts, AssetIdentityAccess identities, WorkflowIdentityAccess profiles) {
+            ReportRepository reports, WorkflowLiftRepository lifts, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
+            ServiceVisitService visits) {
         this.requests = requests; this.assignments = assignments; this.history = history;
-        this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles;
+        this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles; this.visits = visits;
     }
 
     @Transactional(readOnly=true)
@@ -123,6 +125,20 @@ public class WorkflowService {
     public Detail status(Long id, StatusRequest input) {
         User actor = identities.actor();
         ServiceRequest request = locked(id); nonterminal(request);
+        if (actor.getRole() == Role.CUSTOMER) {
+            var customer = profiles.customer(actor);
+            if (!request.getCustomer().getId().equals(customer.getId())) throw denied();
+            if (input.toStatus() != RequestStatus.CANCELLED || !EnumSet.of(RequestStatus.PENDING, RequestStatus.ASSIGNED, RequestStatus.ACCEPTED, RequestStatus.ON_THE_WAY).contains(request.getStatus())) {
+                throw new WorkflowException(409, "Customer cancellation is not allowed in this state");
+            }
+            if (blank(input.notes())) throw new WorkflowException(400, "Transition notes are required");
+            visits.cancelActiveForRequest(request, actor, input.notes());
+            TechnicianAssignment active = assignments.active(id).orElse(null);
+            if (active != null) { active.setStatus(AssignmentStatus.RELEASED); active.setReleasedAt(LocalDateTime.now()); }
+            RequestStatus from = request.getStatus(); request.setStatus(RequestStatus.CANCELLED); event(request, from, actor, input.notes());
+            requests.flush();
+            return detail(request, actor);
+        }
         TechnicianAssignment assignment;
         if (actor.getRole() == Role.TECHNICIAN) assignment = ownedActive(request, actor);
         else { admin(actor); assignment = assignments.active(id).orElse(null); }

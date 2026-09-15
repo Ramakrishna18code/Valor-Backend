@@ -66,6 +66,7 @@ class AuthConfig {
                         .requestMatchers("/api/v1/customers/**").hasRole("CUSTOMER")
                         .requestMatchers("/api/v1/admin/dashboard/summary").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/admin/technicians", "/api/v1/admin/customers").hasAnyRole("ADMIN","SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/service-visits/**", "/api/v1/admin/visit-change-requests/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/notifications")
                                 .hasAnyRole("ADMIN", "SUPER_ADMIN")
@@ -76,7 +77,7 @@ class AuthConfig {
                                 .hasAnyRole("CUSTOMER", "ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/service-requests/*/assignments/*/accept").hasRole("TECHNICIAN")
                         .requestMatchers("/api/v1/service-requests/*/assignments").hasAnyRole("ADMIN", "SUPER_ADMIN")
-                        .requestMatchers("/api/v1/service-requests/*/status").hasAnyRole("ADMIN", "SUPER_ADMIN", "TECHNICIAN")
+                        .requestMatchers("/api/v1/service-requests/*/status").hasAnyRole("ADMIN", "SUPER_ADMIN", "TECHNICIAN", "CUSTOMER")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/amc-contracts")
                                 .hasAnyRole("ADMIN", "SUPER_ADMIN", "CUSTOMER")
                         .requestMatchers("/api/v1/buildings", "/api/v1/buildings/**",

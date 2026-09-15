@@ -42,18 +42,20 @@ flowchart LR
 
 ## Run locally
 1. Create a MySQL database named `valor_lift_db`
-2. Set the values from `.env.example` in your local environment. The database
-   password must remain outside Git and should be entered in the Render secret
-   environment variables `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` for
-   deployment. `DB_URL` must use your hosted MySQL hostname, for example
-   `jdbc:mysql://<mysql-host>:3306/valor_lift_db`.
+2. Set the values from `.env.example` in the process environment. Spring Boot
+   does not load a plain `.env` file automatically, so PowerShell must receive
+   `PORT`, `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`,
+   `CORS_ALLOWED_ORIGINS`, and `JPA_DDL_AUTO` explicitly unless dotenv support
+   is configured. The database password must remain outside Git.
+   For local clients in this workspace, use `PORT=8081` and
+   `DB_URL=jdbc:mysql://localhost:3306/valor_lift_db`.
 3. Run:
    ```bash
    mvn spring-boot:run
    ```
 4. Open Swagger UI at:
    ```text
-   http://localhost:8080/swagger-ui.html
+   http://localhost:8081/swagger-ui.html
    ```
 
 ## Application Flow

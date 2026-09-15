@@ -79,11 +79,11 @@ class Stage4NotificationsTest {
     private JsonNode inbox(User recipient) throws Exception { return call(get("/api/v1/notifications"), recipient, null, 200); }
     private JsonNode read(User recipient, long id, int status) throws Exception { return call(put("/api/v1/notifications/" + id + "/read"), recipient, null, status); }
 
-    @Test void v4AndHibernateValidateUseOnlyCanonicalNotificationEntity() {
-        assertEquals("4", flyway.info().current().getVersion().getVersion());
-        assertEquals(4, flyway.info().applied().length);
+    @Test void v5AndHibernateValidateUseOnlyCanonicalNotificationEntity() {
+        assertEquals("5", flyway.info().current().getVersion().getVersion());
+        assertEquals(5, flyway.info().applied().length);
         assertEquals("validate", environment.getProperty("spring.jpa.hibernate.ddl-auto"));
-        assertEquals(13, em.getMetamodel().getEntities().size());
+        assertEquals(16, em.getMetamodel().getEntities().size());
         assertEquals(Long.class, em.getMetamodel().entity(Notification.class).getIdType().getJavaType());
         assertEquals(1, em.getMetamodel().getEntities().stream().filter(e -> e.getName().equals("Notification")).count());
         assertTrue(em.getMetamodel().getEntities().stream().noneMatch(e -> e.getJavaType().getPackageName().equals("com.valor.entity")));
