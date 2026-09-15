@@ -18,8 +18,8 @@ class ServiceVisitController {
     @GetMapping("/admin/service-visits")
     ApiResponse<PageView<VisitView>> adminList(@RequestParam(required=false) LocalDate fromDate,
             @RequestParam(required=false) LocalDate toDate, @RequestParam(required=false) Long technicianProfileId,
-            @RequestParam(required=false) VisitStatus status, @RequestParam(defaultValue="0") int page,
-            @RequestParam(defaultValue="20") int size) { return ok(service.adminList(fromDate, toDate, technicianProfileId, status, page, size)); }
+            @RequestParam(required=false) Long serviceRequestId, @RequestParam(required=false) VisitStatus status, @RequestParam(defaultValue="0") int page,
+            @RequestParam(defaultValue="20") int size) { return ok(service.adminList(fromDate, toDate, technicianProfileId, serviceRequestId, status, page, size)); }
 
     @PostMapping("/admin/service-visits")
     ApiResponse<VisitView> create(@Valid @RequestBody VisitCreateRequest input) { return ok(service.create(input)); }

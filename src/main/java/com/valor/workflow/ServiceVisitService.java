@@ -33,9 +33,9 @@ public class ServiceVisitService {
 
     @Transactional(readOnly = true)
     public PageView<VisitView> adminList(LocalDate fromDate, LocalDate toDate, Long technicianId,
-            VisitStatus status, int page, int size) {
+            Long requestId, VisitStatus status, int page, int size) {
         User actor = identities.actor(); admin(actor);
-        Page<ServiceVisit> result = visits.search(fromDate, toDate, technicianId, status, paging(page, size));
+        Page<ServiceVisit> result = visits.search(fromDate, toDate, technicianId, requestId, status, paging(page, size));
         return page(result, actor);
     }
 

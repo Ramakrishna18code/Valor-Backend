@@ -10,9 +10,9 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
 interface ServiceVisitRepository extends JpaRepository<ServiceVisit, Long> {
-    @Query("select v from ServiceVisit v join fetch v.request r join fetch r.customer c join fetch r.lift l join fetch v.technician t join fetch t.user u where (:fromDate is null or v.scheduledDate >= :fromDate) and (:toDate is null or v.scheduledDate <= :toDate) and (:technicianId is null or t.id = :technicianId) and (:status is null or v.status = :status)")
+    @Query("select v from ServiceVisit v join fetch v.request r join fetch r.customer c join fetch r.lift l join fetch v.technician t join fetch t.user u where (:fromDate is null or v.scheduledDate >= :fromDate) and (:toDate is null or v.scheduledDate <= :toDate) and (:technicianId is null or t.id = :technicianId) and (:requestId is null or r.id = :requestId) and (:status is null or v.status = :status)")
     Page<ServiceVisit> search(@Param("fromDate") LocalDate fromDate, @Param("toDate") LocalDate toDate,
-            @Param("technicianId") Long technicianId, @Param("status") VisitStatus status, Pageable page);
+            @Param("technicianId") Long technicianId, @Param("requestId") Long requestId, @Param("status") VisitStatus status, Pageable page);
     @Query("select v from ServiceVisit v join fetch v.request r join fetch r.customer c join fetch r.lift l join fetch v.technician t join fetch t.user u where v.id = :id")
     Optional<ServiceVisit> detail(@Param("id") Long id);
     @Lock(LockModeType.PESSIMISTIC_WRITE)

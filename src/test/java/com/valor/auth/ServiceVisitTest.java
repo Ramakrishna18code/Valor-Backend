@@ -73,6 +73,15 @@ class ServiceVisitTest {
         assertTrue(customer.get("notes").isNull()); assertTrue(customer.get("history").isEmpty());
     }
 
+    @Test void adminCanFilterVisitsByServiceRequest() throws Exception {
+        Fixture first = fixture(), second = fixture();
+        call(post(visitPath(first)), first.admin(), visit(first, "2031-01-10", "10:00:00", "11:00:00"), 200);
+        call(post(visitPath(second)), second.admin(), visit(second, "2031-01-11", "10:00:00", "11:00:00"), 200);
+        JsonNode filtered = call(get(visitPath(first) + "?serviceRequestId=" + first.requestId()), first.admin(), null, 200);
+        assertEquals(1, filtered.get("items").size());
+        assertEquals(first.requestId(), filtered.get("items").get(0).get("serviceRequestId").asLong());
+    }
+
     @Test void creationRequiresExistingRequestAssignedTechnicianAndValidRange() throws Exception {
         Fixture fixture = fixture();
         Map<String, Object> input = new HashMap<>(visit(fixture, "2031-01-10", "10:00:00", "11:00:00"));

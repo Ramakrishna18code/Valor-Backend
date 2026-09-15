@@ -140,7 +140,7 @@ A ServiceRequest represents the customer's service need. A ServiceVisit represen
 
 | Method/path | Role | Input / data |
 |---|---|---|
-| GET /admin/service-visits | ADMIN, SUPER_ADMIN | `fromDate?`, `toDate?`, `technicianProfileId?`, `status?`, `page=0`, `size=20` -> `PageView<VisitView>` |
+| GET /admin/service-visits | ADMIN, SUPER_ADMIN | `fromDate?`, `toDate?`, `technicianProfileId?`, `serviceRequestId?`, `status?`, `page=0`, `size=20` -> `PageView<VisitView>` |
 | POST /admin/service-visits | ADMIN, SUPER_ADMIN | `VisitCreateRequest` -> `VisitView` |
 | GET /admin/service-visits/{id} | ADMIN, SUPER_ADMIN | `VisitView` |
 | PUT /admin/service-visits/{id} | ADMIN, SUPER_ADMIN | `VisitUpdateRequest` for date/time, technician and notes -> `VisitView` |
@@ -177,6 +177,23 @@ NotificationCreateRequest requires recipientUserId, title, message; channel defa
 
 Dashboard Summary fields are totalCustomers, totalLifts, totalRequests, pendingJobs, completedJobs, emergencyJobs, totalTechnicians, totalAmcs. Counts include retained rows; pending/completed count exact lifecycle status and emergencyJobs counts priority EMERGENCY. Dashboard is the specific ADMIN/SUPER_ADMIN exception to the otherwise SUPER_ADMIN-only /admin/** security rule.
 
+Dashboard backend connectivity uses the public `GET /api/v1/health` endpoint only. It returns a safe envelope with `data.status=UP`, requires no authentication, and must not expose database state, credentials, stack traces, host internals, JWT configuration or provider secrets. Admin clients may use it to show Backend API reachable/unreachable/checking states, but an HTTP health response is not a full business-data or infrastructure health guarantee.
+
+## Admin settings
+
+Admin settings are global non-secret business/runtime preferences managed through `/api/v1/admin/settings`. They are not deployment secrets. Database credentials, JWT secrets, provider API keys, password policy secrets, refresh-token/session lifetimes and environment-specific hostnames remain process/environment configuration and are never stored in the settings row.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /admin/settings | ADMIN, SUPER_ADMIN | SettingsView |
+| PUT /admin/settings | ADMIN, SUPER_ADMIN | SettingsRequest -> SettingsView |
+
+There is one global settings record. `SettingsView` contains `companyName`, nullable `supportEmail`, nullable `supportPhone`, `timezone`, `currency`, `dateFormat`, `defaultVisitDurationMinutes`, `maintenanceReminderDays`, `emergencyResponseTargetMinutes`, `emailNotificationsEnabled`, `smsNotificationsEnabled`, `autoAssignRequestsEnabled`, `createdAt`, and `updatedAt`.
+
+`SettingsRequest` accepts the same editable fields except timestamps. `companyName`, `timezone`, `currency`, `dateFormat`, `defaultVisitDurationMinutes`, `maintenanceReminderDays`, and `emergencyResponseTargetMinutes` are required. Supported currencies are `INR`, `USD`, and `AED`. Supported date formats are `DD MMM YYYY`, `MM/DD/YYYY`, and `YYYY-MM-DD`. `timezone` must be a valid Java `ZoneId`. `defaultVisitDurationMinutes` must be 15-480, `maintenanceReminderDays` 0-365, and `emergencyResponseTargetMinutes` 5-1440. Email, phone and text lengths follow the DTO validation. Unknown fields are rejected, including secret-looking fields such as JWT, database, token, password or provider key values.
+
+ADMIN and SUPER_ADMIN can read and update settings. CUSTOMER and TECHNICIAN cannot access these routes. Settings changes do not mutate existing service requests, visits, assignments, customers, assets, AMCs, notifications or staff accounts. The settings record is initialized by Flyway defaults and is recreated with defaults by service code only if missing in a nonstandard local/test database.
+
 ## Migration and client readiness
 
-V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. The user previously reported V1-V4 verified against real MySQL; the new code still needs real-MySQL endpoint verification before client migration. All client repositories and unrelated README changes remain untouched. Payments, inventory, providers, checklists/parts/attachments, invoices, exports and other excluded features remain unimplemented.
+V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. The user previously reported V1-V4 verified against real MySQL; the new code still needs real-MySQL endpoint verification before client migration. All client repositories and unrelated README changes remain untouched. Payments, inventory, providers, checklists/parts/attachments, invoices, exports and other excluded features remain unimplemented.
