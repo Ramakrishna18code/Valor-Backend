@@ -12,6 +12,10 @@ class AuthErrorHandler {
   ResponseEntity<ApiResponse<Object>> missingStaff(Exception ignored) {
     return ResponseEntity.status(404).body(ApiResponse.error("Staff not found", 404));
   }
+  @ExceptionHandler(CustomerNotFoundException.class)
+  ResponseEntity<ApiResponse<Object>> missingCustomer(Exception ignored) {
+    return ResponseEntity.status(404).body(ApiResponse.error("Customer not found", 404));
+  }
   @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
   ResponseEntity<ApiResponse<Object>> duplicate(Exception ignored) {
     return ResponseEntity.status(409).body(ApiResponse.error("Identity already exists", 409));

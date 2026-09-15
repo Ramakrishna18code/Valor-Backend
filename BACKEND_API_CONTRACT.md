@@ -52,6 +52,29 @@ active is the conjunction of users.is_active and the profile's is_active. Omitte
 
 Only these exact GET routes additionally admit ADMIN under the admin namespace; staff provisioning/deactivation remains SUPER_ADMIN-only. Unauthenticated requests return the existing 401 envelope; CUSTOMER and TECHNICIAN receive 403. Shared OpenAPI error schemas and typed page responses apply. Queries use Criteria scalar projections and a count query, with no entity graph serialization or per-row user loading. Passwords, authentication hashes/tokens, lock/login audit fields, customer address/company/alternate contact/rating and unrelated technician metrics are intentionally omitted. Email and customer phone are included only for authorized selection. These reads add no tables, migrations, fake records or write operations.
 
+## Admin customer management
+
+ADMIN and SUPER_ADMIN can manage canonical CUSTOMER accounts and profiles through `/api/v1/admin/customers`. Customer records are retained permanently; lifecycle operations change account/profile state and never delete users, profiles, assets, AMCs, service requests, visits, history or reports.
+
+| Method/path | Authorization | Input / data |
+|---|---|---|
+| GET /admin/customers | ADMIN, SUPER_ADMIN | `q?`, `active?`, `page=0`, `size=20` -> `PageView<CustomerDirectoryEntry>` |
+| POST /admin/customers | ADMIN, SUPER_ADMIN | `CustomerCreateRequest` -> `AdminCustomerDetail` |
+| GET /admin/customers/{customerProfileId} | ADMIN, SUPER_ADMIN | `AdminCustomerDetail` |
+| PUT /admin/customers/{customerProfileId} | ADMIN, SUPER_ADMIN | `CustomerUpdateRequest` -> `AdminCustomerDetail` |
+| POST /admin/customers/{customerProfileId}/deactivate | ADMIN, SUPER_ADMIN | optional reason -> `AdminCustomerDetail` with inactive state |
+| POST /admin/customers/{customerProfileId}/reactivate | ADMIN, SUPER_ADMIN | optional reason -> `AdminCustomerDetail` with active state |
+
+`CustomerCreateRequest` accepts `email`, `phone`, `password`, `fullName`, `alternatePhone`, `companyName`, and `address`. `fullName` and `password` are required. At least one canonical identity (`email` or `phone`) is required, and email/phone use the same normalization and duplicate checks as customer self-registration. Password input is writeOnly, limited by the existing BCrypt byte-length rule, and is never returned. The response never includes passwordHash, OTP data, refresh-token hashes, lock counters, deletedAt, or submitted credentials. Creation creates exactly one canonical `users` row with role CUSTOMER and one canonical `customer_profiles` row; it does not create buildings, lifts, AMCs, service requests or visits.
+
+`CustomerUpdateRequest` accepts only profile fields already supported by customer self-service: `fullName`, `alternatePhone`, `companyName`, and `address`. Admin update cannot change email, phone, role, password, authentication state, profile ID, user ID, rating, or ownership identifiers. Unknown fields are rejected.
+
+`AdminCustomerDetail` contains `userId`, `customerProfileId`, `email`, `phone`, `fullName`, `alternatePhone`, `companyName`, `address`, `active`, `status`, `createdAt`, `updatedAt`, and an operational summary: `buildingCount`, `liftCount`, `serviceRequestCount`, plus lightweight `buildings`, `lifts`, and recent `serviceRequests` arrays where canonical relationships already exist. Building rows include id/name/type/city/status/isActive. Lift rows include id/buildingId/name/liftNumber/currentStatus/isActive. Recent service-request rows use the existing `RequestView` shape. These summary arrays are read-only convenience projections; use the canonical asset and service-request APIs for writes.
+
+Deactivation sets the canonical user inactive, sets the customer profile inactive, and sets profile status to `INACTIVE`. Authentication and refresh already reject inactive users, so deactivated customers cannot log in or rotate sessions. Existing bearer tokens become unusable on the next authenticated request because account usability is rechecked. Existing refresh-token rows are retained for audit/rotation semantics and remain rejected by account-state checks. Deactivation is idempotent and non-destructive; historical service requests, buildings, lifts, AMCs, visits and history remain visible to admins.
+
+Reactivation sets the canonical user active, sets the customer profile active, and restores profile status to `ACTIVE`. It does not change existing passwords, identities, assets, service requests, assignments, visits, or history. Reactivation is idempotent. CUSTOMER and TECHNICIAN users cannot call these routes. ADMIN and SUPER_ADMIN have the same customer-management authority; staff management remains separately restricted to SUPER_ADMIN.
+
 ## Customer profile and owned assets
 
 | Method/path | Role | Input / data |

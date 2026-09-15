@@ -41,22 +41,56 @@ flowchart LR
 - MySQL 8+
 
 ## Run locally
-1. Create a MySQL database named `valor_lift_db`
-2. Set the values from `.env.example` in the process environment. Spring Boot
-   does not load a plain `.env` file automatically, so PowerShell must receive
-   `PORT`, `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`,
-   `CORS_ALLOWED_ORIGINS`, and `JPA_DDL_AUTO` explicitly unless dotenv support
-   is configured. The database password must remain outside Git.
-   For local clients in this workspace, use `PORT=8081` and
-   `DB_URL=jdbc:mysql://localhost:3306/valor_lift_db`.
-3. Run:
-   ```bash
+1. Ensure MySQL 8+ is running locally.
+2. Copy `.env.example` to `.env` and fill only your local secret values:
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+3. The default local database is `valor_world_dev`; the example URL includes
+   `createDatabaseIfNotExist=true` so MySQL can create it when the configured
+   user has permission.
+4. Start the backend:
+   ```powershell
+   cd D:\RKKKK\Valor-Backend
    mvn spring-boot:run
    ```
-4. Open Swagger UI at:
+5. Open Swagger UI:
    ```text
    http://localhost:8081/swagger-ui.html
    ```
+
+Spring Boot imports the local `.env` file through `spring.config.import`. Keep
+`.env` local and never commit it. The dev profile can bootstrap a local
+SUPER_ADMIN account when `DEV_BOOTSTRAP_ENABLED=true` and both bootstrap
+credentials are present in `.env`.
+
+### Local dev seed data
+
+The `dev` profile can also seed sample records for local UI development:
+
+```dotenv
+DEV_SEED_SAMPLE_DATA_ENABLED=true
+DEV_SEED_SAMPLE_PASSWORD=<local sample password>
+```
+
+When enabled, startup keeps the bootstrap admin account and adds five sample
+customers, five sample technicians, buildings, lifts, AMCs, and service
+requests if they do not already exist. This is local-only development data; do
+not use it for production or shared environments.
+
+Useful local sign-ins after seeding:
+
+- Admin: `admin@valor.local` with `DEV_BOOTSTRAP_SUPER_ADMIN_PASSWORD`.
+- Sample customers: `ananya.rao@example.com`, `vikram.menon@example.com`,
+  `priya.shah@example.com`, `farhan.khan@example.com`,
+  `neha.iyer@example.com` with `DEV_SEED_SAMPLE_PASSWORD`.
+- Sample technicians: `tech.arjun@valor.local`, `tech.meera@valor.local`,
+  `tech.kabir@valor.local`, `tech.nisha@valor.local`,
+  `tech.rohan@valor.local` with `DEV_SEED_SAMPLE_PASSWORD`.
+
+To wipe local data and reseed from scratch, stop the backend and drop only the
+local development database configured by `DB_URL`, then run `mvn spring-boot:run`.
+Flyway will recreate the schema before the dev seed runs.
 
 ## Application Flow
 ### Typical request flow
@@ -104,7 +138,7 @@ flowchart LR
 
 ## Client integration contract
 
-Use `http://localhost:8080` as the local API base URL. Production clients should
+Use `http://localhost:8081` as the local API base URL. Production clients should
 receive the deployed HTTPS URL through their environment configuration.
 
 ### Authentication
