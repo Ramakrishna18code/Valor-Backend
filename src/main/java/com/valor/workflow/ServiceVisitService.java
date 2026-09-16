@@ -153,7 +153,7 @@ public class ServiceVisitService {
     @Transactional(readOnly = true)
     public PageView<VisitChangeRequestView> changeList(VisitChangeRequestType type, VisitChangeRequestStatus status, int page, int size) {
         User actor = identities.actor(); admin(actor);
-        Page<VisitChangeRequest> result = changeRequests.search(type, status, paging(page, size));
+        Page<VisitChangeRequest> result = changeRequests.search(type, status, changeRequestPaging(page, size));
         return new PageView<>(result.getContent().stream().map(this::changeView).toList(), page, size, result.getTotalElements(), result.getTotalPages());
     }
 
@@ -272,6 +272,7 @@ public class ServiceVisitService {
         return new PageView<>(result.getContent().stream().map(v -> view(v, actor)).toList(), result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
     }
     private Pageable paging(int page, int size) { if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Invalid page"); return PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "scheduledDate", "startTime", "id")); }
+    private Pageable changeRequestPaging(int page, int size) { if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Invalid page"); return PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")); }
     private static void requireReason(String reason) { if (reason == null || reason.isBlank()) throw new WorkflowException(400, "Reason is required"); }
     private static void admin(User actor) { if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied(); }
     private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }

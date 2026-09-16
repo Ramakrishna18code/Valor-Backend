@@ -43,7 +43,8 @@ interface VisitHistoryRepository extends JpaRepository<VisitHistory, Long> {
 }
 
 interface VisitChangeRequestRepository extends JpaRepository<VisitChangeRequest, Long> {
-    @Query("select r from VisitChangeRequest r join fetch r.request q join fetch q.customer c join fetch q.lift l join fetch r.requestedTechnician t join fetch t.user u where (:type is null or r.type = :type) and (:status is null or r.status = :status)")
+    @Query(value = "select r from VisitChangeRequest r join fetch r.request q join fetch q.customer c join fetch q.lift l join fetch r.requestedTechnician t join fetch t.user u where (:type is null or r.type = :type) and (:status is null or r.status = :status)",
+            countQuery = "select count(r) from VisitChangeRequest r where (:type is null or r.type = :type) and (:status is null or r.status = :status)")
     Page<VisitChangeRequest> search(@Param("type") VisitChangeRequestType type, @Param("status") VisitChangeRequestStatus status, Pageable page);
     @Query("select r from VisitChangeRequest r join fetch r.request q join fetch q.customer c join fetch q.lift l join fetch r.requestedTechnician t join fetch t.user u where r.id = :id")
     Optional<VisitChangeRequest> detail(@Param("id") Long id);

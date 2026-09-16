@@ -8,6 +8,7 @@ It covers:
 - Lift registration and lifecycle management
 - AMC lifecycle management
 - Service request handling and tracking
+- Payments, invoices, support tickets, PDF service reports, and asset documents
 - Swagger/OpenAPI documentation
 - MySQL persistence with JPA
 
@@ -92,6 +93,15 @@ To wipe local data and reseed from scratch, stop the backend and drop only the
 local development database configured by `DB_URL`, then run `mvn spring-boot:run`.
 Flyway will recreate the schema before the dev seed runs.
 
+### Disposable verification records
+
+Cross-repository local verification may create disposable users and related
+records with emails such as `verify.customer.*@valor.local` and
+`verify.tech.*@valor.local`. Do not delete production-like or sample seed data
+by broad table cleanup. If the local dev database must be pristine, prefer
+dropping only the local development database configured by `DB_URL` and letting
+Flyway/dev seed recreate it.
+
 ## Application Flow
 ### Typical request flow
 1. The client sends an HTTP request to a controller endpoint.
@@ -116,13 +126,79 @@ Flyway will recreate the schema before the dev seed runs.
 5. The backend stores the latest state in MySQL and exposes it through the API.
 
 ## Main API groups
-- Authentication: `/api/auth/**`
-- Customers: `/api/customers/**`
-- Lifts: `/api/lifts/**`
-- AMC: `/api/amcs/**`
-- Service requests: `/api/service-requests/**`
-- Admin: `/api/admin/**`
-- Technicians: `/api/technicians/**`
+
+The canonical API contract lives in `BACKEND_API_CONTRACT.md`. All active
+client-facing endpoints use the `/api/v1` prefix and the standard
+`{ success, message, data, status, timestamp }` response envelope.
+
+- Authentication: `/api/v1/auth/**`
+- Current user: `/api/v1/me`
+- Customer profile/assets: `/api/v1/customers/me/**`
+- Service requests: `/api/v1/service-requests/**`
+- Service visits: `/api/v1/admin/service-visits/**`, `/api/v1/customers/me/visits`, `/api/v1/technician/me/visits`
+- Notifications: `/api/v1/notifications`
+- Admin operations: `/api/v1/admin/**`
+- Technician app: `/api/v1/technician/me/**`
+- Payments and invoices: `/api/v1/payments`, `/api/v1/invoices`
+- Razorpay checkout/webhook/refunds: `/api/v1/payments/razorpay/checkout`,
+  `/api/v1/webhooks/razorpay`, `/api/v1/payments/{id}/refunds`
+- Live technician tracking: `/api/v1/technician/me/jobs/{id}/location`,
+  `/api/v1/customers/me/service-requests/{id}/technician-location`
+- Support tickets: `/api/v1/support-tickets`
+- AMC renewal requests: `/api/v1/amc-renewal-requests`
+- Building/Lift documents: `/api/v1/buildings/{id}/documents`, `/api/v1/lifts/{id}/documents`,
+  `/api/v1/customers/me/buildings/{id}/documents`, `/api/v1/customers/me/lifts/{id}/documents`
+
+### Local file storage
+
+Service-request attachments are stored locally by default under
+`./data/request-attachments`. Building/Lift documents are stored locally by
+default under `./data/asset-documents`. These directories are local runtime
+storage, not source-controlled assets. The API returns safe metadata and file
+downloads; it never returns filesystem paths or storage keys.
+
+### Payments and invoices
+
+The backend keeps the internal payment and invoice domain as the business system
+of record and extends it with Razorpay Test Mode integration. Configure only
+environment-provided test credentials:
+
+```dotenv
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+RAZORPAY_WEBHOOK_SECRET=
+```
+
+Checkout creation is server-side and invoice-driven through
+`POST /api/v1/payments/razorpay/checkout`; clients must not submit arbitrary
+amounts. Razorpay webhook synchronization is exposed at
+`POST /api/v1/webhooks/razorpay` and verifies `X-Razorpay-Signature` before
+updating local payment/invoice/refund state. Refunds use
+`POST /api/v1/payments/{id}/refunds`; a refund is not completed locally until
+gateway/webhook state confirms it.
+
+Webhook delivery from Razorpay requires a public HTTPS endpoint. Localhost-only
+verification can test signature/idempotency behavior with simulated requests,
+but it is not real Razorpay delivery.
+
+Phase 1B local MySQL verification was completed on 2026-09-16 against the
+existing database without reset or data deletion. Flyway showed V1-V9 successful,
+including `payment_refunds`, `razorpay_webhook_events`, and
+`technician_latest_locations` with the expected PK/FK/unique/check/index
+metadata.
+
+Phase 1B.1 did not perform a real Razorpay Test Mode transaction or external
+webhook delivery test because `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
+`RAZORPAY_WEBHOOK_SECRET`, and a public HTTPS backend endpoint were not
+configured in the local environment. Do not mark real gateway verification
+complete from offline unit tests alone.
+
+### PDF service reports
+
+`GET /api/v1/service-requests/{id}/report.pdf` generates a PDF download from
+the persisted structured service report for authorized customers, assigned or
+historical technicians, and Admin/SUPER_ADMIN users. Generated PDFs are created
+on request and are not committed or stored as source files.
 
 ## Code Structure
 - `controller/` - HTTP API entry points
@@ -143,10 +219,11 @@ receive the deployed HTTPS URL through their environment configuration.
 
 ### Authentication
 
-- Customer: `POST /api/auth/register`, `POST /api/auth/login`,
-  `POST /api/auth/send-otp`, `POST /api/auth/verify-otp`
-- Admin: `POST /api/auth/admin/login`
-- Technician: `POST /api/auth/technician/login`
+- Customer: `POST /api/v1/auth/register`, `POST /api/v1/auth/login/customer`,
+  `POST /api/v1/auth/otp/send`, `POST /api/v1/auth/otp/verify`
+- Admin: `POST /api/v1/auth/login/admin`
+- Technician: `POST /api/v1/auth/login/technician`
+- Refresh/logout: `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`
 
 Successful login returns an access token and role. Send the token on every
 protected request:

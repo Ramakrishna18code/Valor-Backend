@@ -61,6 +61,7 @@ class AuthConfig {
                 .authorizeHttpRequests(routes -> routes
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**",
                                 "/api/v1/health", "/error").permitAll()
+                        .requestMatchers("/api/v1/webhooks/razorpay").permitAll()
                         .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login/**",
                                 "/api/v1/auth/otp/**", "/api/v1/auth/refresh").permitAll()
                         .requestMatchers("/api/v1/customers/**").hasRole("CUSTOMER")
@@ -70,6 +71,15 @@ class AuthConfig {
                         .requestMatchers("/api/v1/admin/customers", "/api/v1/admin/customers/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/service-visits/**", "/api/v1/admin/visit-change-requests/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/payments/*/status", "/api/v1/invoices/*/status",
+                                "/api/v1/support-tickets/*/status", "/api/v1/amc-renewal-requests/*/quote", "/api/v1/amc-renewal-requests/*/status")
+                                .hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/invoices").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/payments", "/api/v1/payments/**", "/api/v1/invoices", "/api/v1/invoices/**",
+                                "/api/v1/amc-renewal-requests", "/api/v1/amc-renewal-requests/**")
+                                .hasAnyRole("CUSTOMER", "ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/support-tickets", "/api/v1/support-tickets/**")
+                                .hasAnyRole("CUSTOMER", "ADMIN", "SUPER_ADMIN", "TECHNICIAN")
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/notifications")
                                 .hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/technician/**").hasRole("TECHNICIAN")

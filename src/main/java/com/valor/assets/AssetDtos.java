@@ -62,7 +62,7 @@ public final class AssetDtos {
 
     public record AmcWrite(
             @NotNull @Positive Long liftId,
-            @NotBlank @Size(max = 80) String amcNumber,
+            @Size(max = 80) String amcNumber,
             @NotBlank @Size(max = 80) String plan,
             String coverageDetails,
             @NotNull LocalDate startDate,

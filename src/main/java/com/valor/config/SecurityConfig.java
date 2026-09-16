@@ -45,6 +45,7 @@ public class SecurityConfig {
                                 "/",
                                 "/error",
                                 "/api/health",
+                                "/api/v1/webhooks/razorpay",
                                 "/api/auth/**",
                                 "/api/customers/signup",
                                 "/api/customers/signin",

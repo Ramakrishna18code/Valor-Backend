@@ -125,6 +125,9 @@ class Stage2AssetsTest {
             long l = lift(admin, b);
             request(put("/api/v1/lifts/" + l), admin, Map.of("buildingId", b, "name", "Updated lift", "currentStatus", "MAINTENANCE"), 200);
             assertEquals("MAINTENANCE", find(request(get("/api/v1/lifts"), admin, null, 200), l).get("currentStatus").asText());
+            JsonNode generated = request(post("/api/v1/amc-contracts"), admin,
+                    Map.of("liftId", l, "plan", "Basic Maintenance", "startDate", "2030-01-01", "endDate", "2030-12-31"), 200);
+            assertTrue(generated.get("amcNumber").asText().startsWith("AMC-2030-"));
             long a = amc(admin, l);
             request(put("/api/v1/amc-contracts/" + a + "/renew"), admin, Map.of("plan", "Renewed", "startDate", "2031-01-01", "endDate", "2031-12-31"), 200);
             assertEquals(1, find(request(get("/api/v1/amc-contracts"), admin, null, 200), a).get("renewalCount").asInt());

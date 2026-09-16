@@ -123,7 +123,9 @@ public class AssetService {
         dates(input.startDate(), input.endDate());
         AmcContract contract = new AmcContract();
         contract.setLift(lift);
-        contract.setAmcNumber(input.amcNumber().trim());
+        contract.setAmcNumber(input.amcNumber() == null || input.amcNumber().isBlank()
+                ? generatedAmcNumber()
+                : input.amcNumber().trim());
         contract.setPlan(input.plan().trim());
         contract.setCoverageDetails(input.coverageDetails());
         contract.setStartDate(input.startDate());
@@ -262,6 +264,10 @@ public class AssetService {
         if (start == null || end == null || end.isBefore(start)) {
             throw new AssetException(400, "Invalid date range");
         }
+    }
+
+    private String generatedAmcNumber() {
+        return "AMC-" + LocalDate.now(clock).getYear() + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
     }
 
     private void apply(Building entity, BuildingWrite input) {

@@ -1,12 +1,12 @@
 # Canonical backend API contract
 
-Scope: canonical Stage 1-4 API on main, reconciled with ../TARGET_VALOR_SCHEMA_SPEC.md, plus the approved Scheduling / Service Visit contract below. Flyway V1-V4 remain unchanged; Scheduling / Service Visits are added in V5. This reconciliation is verified using isolated H2/MockMvc; real-MySQL endpoint verification and client migration have not been performed. Android, Admin Portal, Website and Valor-technician remain unchanged.
+Scope: canonical Stage 1-4 API on main, reconciled with ../TARGET_VALOR_SCHEMA_SPEC.md, plus the approved Scheduling / Service Visit contract below. Flyway V1-V4 remain unchanged; Scheduling / Service Visits are added in V5, Admin Settings in V6, request attachments/feedback in V7, and payments/invoices/support tickets/AMC renewal requests/asset documents in V8. This reconciliation is covered by automated tests and the V1-V8 migration chain/current `/api/v1` endpoint set has been verified against the local MySQL dev database.
 
 ## Common contract
 
 All paths below have prefix `/api/v1`. Success is HTTP 200 with `ApiResponse<T>`: success, message, data, status, timestamp. Staff and domain views are flat DTOs; no identity entities or passwordHash/otpHash/tokenHash fields are serialized. Input passwords are writeOnly with password format in OpenAPI. Every operation has an explicit stable operationId. Shared ApiErrorResponse components describe safe 400 validation/authentication/OTP/refresh failures, 401 unauthenticated, 403 forbidden, 404 missing resources and 409 conflicts. Error data is null or an empty object; errors never return submitted secrets or internal exception details. Logout and asset deactivation retain their existing message envelopes with data=null, not a fabricated result object.
 
-Default port: 8081. Swagger: /swagger-ui.html. OpenAPI: /v3/api-docs. Public health: GET /api/v1/health with data.status=UP. Other routes require authentication except register, login, OTP send/verify and refresh. Runtime configuration is unchanged: Flyway enabled, Hibernate validate, SQL initialization disabled; credentials come from the process environment, not automatic .env loading. Production requires external credentials and never enables development bootstrap.
+Default port: 8081. Swagger: /swagger-ui.html. OpenAPI: /v3/api-docs. Public health: GET /api/v1/health with data.status=UP. Other routes require authentication except register, login, OTP send/verify and refresh. Runtime configuration is unchanged: Flyway enabled, Hibernate validate, SQL initialization disabled; local development may load optional `.env` values through Spring config import, while production requires external credentials and never enables development bootstrap.
 
 ## Authentication and identity
 
@@ -117,7 +117,7 @@ BuildingWrite requires customerProfileId and buildingName; accepts buildingType,
 
 LiftWrite requires buildingId and name; accepts liftNumber, model, manufacturer, capacity, floorCount, serialNumber, installationDate, location, currentStatus, warrantyStatus, warrantyStartDate, warrantyEndDate, lastMaintenanceDate, nextMaintenanceDate, healthScore, machineRoom, qrCode, specifications. customerId is rejected. LiftView includes these fields, id, isActive, amcCoverage, asOfDate, createdAt, updatedAt. healthScore is a nullable JSON integer 0-100 in both directions (numeric Byte mapping to existing TINYINT); no String conversion or migration. Lift statuses: ACTIVE, DOWN, MAINTENANCE, OUT_OF_SERVICE. Derived amcCoverage is ACTIVE or NON_AMC. Ownership cannot be transferred by update.
 
-AmcWrite requires liftId, amcNumber, plan, startDate, endDate; accepts coverageDetails, renewalDate. AmcRenew requires plan/startDate/endDate and accepts coverageDetails/renewalDate. AmcView adds id, status, lastReminderSentAt, renewalCount, covered, asOfDate and timestamps. AMC statuses: ACTIVE, EXPIRED, NON_AMC, CANCELLED, RENEWED. Renewal must begin after the existing end date; endDate cannot precede startDate. Coverage uses one service-supplied business date and contract queries. Lift counts remain repository projections; no derived columns are introduced. Deactivation never deletes rows. New asset operations require active account/profile/building/lift parents.
+AmcWrite requires liftId, plan, startDate, endDate; accepts coverageDetails, renewalDate, and an optional legacy amcNumber. When amcNumber is omitted, the backend generates the contract number and returns it in AmcView. AmcRenew requires plan/startDate/endDate and accepts coverageDetails/renewalDate. AmcView adds id, amcNumber, status, lastReminderSentAt, renewalCount, covered, asOfDate and timestamps. AMC statuses: ACTIVE, EXPIRED, NON_AMC, CANCELLED, RENEWED. Renewal must begin after the existing end date; endDate cannot precede startDate. Coverage uses one service-supplied business date and contract queries. Lift counts remain repository projections; no derived columns are introduced. Deactivation never deletes rows. New asset operations require active account/profile/building/lift parents.
 
 ## Service workflow
 
@@ -152,9 +152,88 @@ The approved transition graph is unchanged. Request row locking coordinates assi
 | GET /service-requests/{id}/feedback | owner CUSTOMER | nullable FeedbackView |
 | PUT /service-requests/{id}/feedback | owner CUSTOMER | FeedbackWrite -> FeedbackView |
 
-AttachmentView contains id, serviceRequestId, originalFilename, contentType, fileSize, uploadedByUserId and createdAt. Upload accepts JPEG, PNG, WebP and PDF only, uses the existing 10 MB multipart file limit, and validates content type, file size and basic file signatures server-side. Storage returns only opaque references internally; filesystem paths, storage credentials and provider details are never exposed to clients. Customer ownership derives from JWT and the Service Request owner, never from a submitted customerProfileId. Customers cannot access or delete another customer's attachment. Admin/SUPER_ADMIN may list/download from their normal operational view but do not use the customer upload/delete route. Building/Lift document management is deferred and is not part of this service-request attachment contract.
+AttachmentView contains id, serviceRequestId, originalFilename, contentType, fileSize, uploadedByUserId and createdAt. Upload accepts JPEG, PNG, WebP and PDF only, uses the existing 10 MB multipart file limit, and validates content type, file size and basic file signatures server-side. Storage returns only opaque references internally; filesystem paths, storage credentials and provider details are never exposed to clients. Customer ownership derives from JWT and the Service Request owner, never from a submitted customerProfileId. Customers cannot access or delete another customer's attachment. Admin/SUPER_ADMIN may list/download from their normal operational view but do not use the customer upload/delete route.
 
 Feedback belongs to one completed Service Request. FeedbackWrite contains rating 1-5 and optional comment up to 2000 characters. FeedbackView contains id, serviceRequestId, customerProfileId, rating, comment, createdAt and updatedAt. A customer can create or update feedback only for their own completed request. Active or uncompleted requests return conflict, foreign requests are forbidden, and repeated submissions update the existing feedback row rather than creating duplicates. No separate Admin feedback-moderation module exists.
+
+### Service Report PDF Download
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /service-requests/{id}/report.pdf | owner CUSTOMER, assigned/historical TECHNICIAN, ADMIN, SUPER_ADMIN | PDF download |
+
+The PDF endpoint renders the persisted structured `ServiceReport` for the authorized Service Request. It does not expose filesystem paths, storage keys, credentials or stack traces. The PDF is generated on request from current canonical report/request data and is not stored as a permanent generated artifact. The implemented PDF contains the service request reference, status, diagnosis, work performed and testing result. Branding, signatures, checklists and completion OTP are not part of the current report contract.
+
+## Payments and Invoices
+
+The canonical payment domain remains the application's business system of record. Phase 1B extends it with Razorpay Test Mode gateway fields and endpoints for server-created checkout orders, signed webhook synchronization, refunds, and lightweight reconciliation. Clients must not submit arbitrary payable amounts for invoice checkout; the backend derives the amount from trusted invoice/payment data. The backend must still be configured with Razorpay Test Mode credentials and a public HTTPS webhook endpoint before real external gateway verification can be completed.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /payments | CUSTOMER owner, ADMIN, SUPER_ADMIN | PageView<PaymentView> |
+| POST /payments | CUSTOMER owner, ADMIN, SUPER_ADMIN | PaymentCreate -> PaymentView |
+| GET /payments/{id} | CUSTOMER owner, ADMIN, SUPER_ADMIN | PaymentView |
+| PUT /payments/{id}/status | ADMIN, SUPER_ADMIN | PaymentStatusUpdate -> PaymentView |
+| GET /invoices | CUSTOMER owner, ADMIN, SUPER_ADMIN | PageView<InvoiceView> |
+| POST /invoices | ADMIN, SUPER_ADMIN | InvoiceCreate -> InvoiceView |
+| GET /invoices/{id} | CUSTOMER owner, ADMIN, SUPER_ADMIN | InvoiceView |
+| PUT /invoices/{id}/status | ADMIN, SUPER_ADMIN | InvoiceStatusUpdate -> InvoiceView |
+
+`PaymentCreate` requires `amount` and accepts `currency`, `purpose`, `customerProfileId`, `serviceRequestId`, `amcContractId`, `invoiceId`, and `providerReference`. Customers never submit or choose `customerProfileId`; ownership derives from JWT. Admin/SUPER_ADMIN may create a payment for a specified customer. If service request, AMC contract, or invoice IDs are supplied, they must belong to the same customer. `PaymentView` contains id, customerProfileId, serviceRequestId, amcContractId, invoiceId, amount, currency, purpose, status, providerReference, failureReason, createdAt and updatedAt. Payment statuses are `PENDING`, `PROCESSING`, `SUCCEEDED`, `FAILED`, `CANCELLED`, and `REFUNDED`. Purposes are `SERVICE_REQUEST`, `AMC_RENEWAL`, `INVOICE`, and `OTHER`.
+
+`InvoiceCreate` requires `customerProfileId`, `description`, and `subtotal`; it accepts `serviceRequestId`, `amcContractId`, `taxAmount`, `currency`, and `dueDate`. Invoice numbers are generated by the backend as `INV-000001` style references after persistence. `InvoiceView` contains id, invoiceNumber, customerProfileId, serviceRequestId, amcContractId, description, subtotal, taxAmount, totalAmount, currency, status, issuedDate, dueDate, createdAt and updatedAt. Invoice statuses are `DRAFT`, `ISSUED`, `PAID`, `VOID`, and `CANCELLED`.
+
+## Paid AMC Renewal Requests
+
+Paid renewal is represented as a customer renewal request that Admin/SUPER_ADMIN can quote and later mark renewed only after a linked payment has `SUCCEEDED`. Automated pricing rules are not defined; the current implemented pricing rule is an admin-supplied quote amount/currency.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /amc-renewal-requests | CUSTOMER owner, ADMIN, SUPER_ADMIN | PageView<RenewalView> |
+| POST /customers/me/amc-contracts/{id}/renewal-requests | CUSTOMER owner | RenewalCreate -> RenewalView |
+| GET /amc-renewal-requests/{id} | CUSTOMER owner, ADMIN, SUPER_ADMIN | RenewalView |
+| PUT /amc-renewal-requests/{id}/quote | ADMIN, SUPER_ADMIN | RenewalQuote -> RenewalView |
+| PUT /amc-renewal-requests/{id}/status | ADMIN, SUPER_ADMIN | RenewalStatusUpdate -> RenewalView |
+
+`RenewalCreate` requires requestedStartDate and requestedEndDate and accepts customerNotes. The requested period must start after the current AMC end date, and only one active request may exist per contract while status is `REQUESTED`, `QUOTED`, or `PAYMENT_PENDING`. `RenewalQuote` requires quotedAmount and currency and may link invoiceId/paymentId. `RenewalStatusUpdate` changes status and may link invoice/payment. Setting status to `RENEWED` requires a linked successful payment; it updates the existing AMC contract dates and increments renewalCount. Renewal statuses are `REQUESTED`, `QUOTED`, `PAYMENT_PENDING`, `RENEWED`, `REJECTED`, and `CANCELLED`.
+
+## Support Tickets
+
+Support tickets are separate from Service Requests. They represent product/support issues from customers or technicians and optional contextual links to an authorized Service Request.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /support-tickets | CUSTOMER own, TECHNICIAN own, ADMIN, SUPER_ADMIN | PageView<SupportTicketView> |
+| POST /support-tickets | CUSTOMER, TECHNICIAN, ADMIN, SUPER_ADMIN | SupportTicketCreate -> SupportTicketView |
+| GET /support-tickets/{id} | creator, ADMIN, SUPER_ADMIN | SupportTicketView |
+| PUT /support-tickets/{id}/status | ADMIN, SUPER_ADMIN | SupportTicketStatusUpdate -> SupportTicketView |
+
+`SupportTicketCreate` requires subject and description; accepts serviceRequestId, category, priority and preferredContact. If serviceRequestId is supplied, the caller must already be authorized for that request. Ticket references are generated by the backend as `SUP-000001` style references. Statuses are `SUBMITTED`, `UNDER_REVIEW`, `IN_PROGRESS`, `RESOLVED`, and `CLOSED`. Priorities are `LOW`, `MEDIUM`, `HIGH`, and `URGENT`. Categories are `ACCOUNT`, `SERVICE_REQUEST`, `TECHNICAL`, `BILLING`, and `OTHER`. Non-admin callers never receive adminNotes.
+
+## Building and Lift Documents
+
+Building/Lift document management reuses the local storage validation approach used by service-request attachments but stores separate asset document metadata. It does not expose storage keys or filesystem paths.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /buildings/{id}/documents | ADMIN, SUPER_ADMIN | AssetDocumentView[] |
+| POST /buildings/{id}/documents | ADMIN, SUPER_ADMIN | multipart `file` -> AssetDocumentView |
+| GET /buildings/{id}/documents/{documentId} | ADMIN, SUPER_ADMIN | file download |
+| DELETE /buildings/{id}/documents/{documentId} | ADMIN, SUPER_ADMIN | void |
+| GET /lifts/{id}/documents | ADMIN, SUPER_ADMIN | AssetDocumentView[] |
+| POST /lifts/{id}/documents | ADMIN, SUPER_ADMIN | multipart `file` -> AssetDocumentView |
+| GET /lifts/{id}/documents/{documentId} | ADMIN, SUPER_ADMIN | file download |
+| DELETE /lifts/{id}/documents/{documentId} | ADMIN, SUPER_ADMIN | void |
+| GET /customers/me/buildings/{id}/documents | CUSTOMER owner | AssetDocumentView[] |
+| POST /customers/me/buildings/{id}/documents | CUSTOMER owner | multipart `file` -> AssetDocumentView |
+| GET /customers/me/buildings/{id}/documents/{documentId} | CUSTOMER owner | file download |
+| DELETE /customers/me/buildings/{id}/documents/{documentId} | CUSTOMER owner | void |
+| GET /customers/me/lifts/{id}/documents | CUSTOMER owner | AssetDocumentView[] |
+| POST /customers/me/lifts/{id}/documents | CUSTOMER owner | multipart `file` -> AssetDocumentView |
+| GET /customers/me/lifts/{id}/documents/{documentId} | CUSTOMER owner | file download |
+| DELETE /customers/me/lifts/{id}/documents/{documentId} | CUSTOMER owner | void |
+
+`AssetDocumentView` contains id, ownerType (`BUILDING` or `LIFT`), ownerId, originalFilename, contentType, fileSize, uploadedByUserId and createdAt. Upload supports JPEG, PNG, WebP and PDF, validates size and basic signature server-side, and uses the existing 10 MB file limit. Customer authorization always resolves from JWT and the owned building/lift relationship; customers cannot manage another customer's asset documents. Admin/SUPER_ADMIN can manage documents for all assets.
 
 ## Scheduling / Service Visits
 
@@ -263,10 +342,6 @@ Configurable/service-type checklists are a PRODUCT DECISION REQUIRED item. The b
 
 Customer verification OTP for job completion is PRODUCT DECISION REQUIRED. The backend does not define who generates the OTP, when it is issued, who receives it, expiration, retry limits, who submits it, whether it gates completion, or customer-app display behavior. No OTP completion gate is implemented.
 
-PDF service report download is PRODUCT DECISION REQUIRED. The backend stores service-report data but does not define official PDF content, branding, signature/verification requirements, generation timing, retention, or download route.
-
-Technician support/report-an-issue is PRODUCT/BACKEND CONTRACT REQUIRED. No canonical support-ticket model exists for technician issue category, description, optional job link, screenshot, priority, preferred contact, ticket reference, status timeline or support notifications. Customer Service Requests must not be reused for internal technician support without a product decision.
-
 Extended technician personal profile fields are PRODUCT DECISION REQUIRED where not already modeled: profile photo, date of birth, gender, address, emergency contact, and technician-owned editing of phone/email. These fields are not added to the canonical profile in this readiness phase.
 
 Technician-private attachment visibility is PRODUCT DECISION REQUIRED if required later. Current attachments are request-scoped evidence visible to authorized customer owner, Admin/SUPER_ADMIN and assigned/historical technician.
@@ -275,6 +350,33 @@ Technician-private attachment visibility is PRODUCT DECISION REQUIRED if require
 
 Live technician tracking is FUTURE and not implemented in this backend readiness phase. A future contract must define location update endpoints, current-location reads, start/stop tracking, storage/retention, customer visibility authorization, privacy controls, polling versus websocket/SSE delivery, ETA calculation, and behavior after cancellation/completion.
 
+## Phase 1B Razorpay payments and live technician tracking
+
+The Phase 1 payment/invoice domain remains the application business system of record. Razorpay is an external gateway only. Backend secrets are configured by environment variables `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET`; clients receive only the public key id and checkout order details.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| POST /payments/razorpay/checkout | CUSTOMER owner, ADMIN/SUPER_ADMIN | invoiceId -> paymentId, invoiceId, razorpayKeyId, razorpayOrderId, amount, currency, status |
+| POST /webhooks/razorpay | Razorpay signed webhook | raw body plus `X-Razorpay-Signature`; verifies signature, stores event id, processes idempotently |
+| POST /payments/{id}/refunds | ADMIN/SUPER_ADMIN | amount, reason? -> current PaymentView |
+| GET /payments/{id}/refunds | owner CUSTOMER, ADMIN/SUPER_ADMIN | RefundView[] |
+| GET /admin/payments/reconciliation | ADMIN/SUPER_ADMIN | lightweight mismatch issue list |
+
+Checkout creation never trusts a frontend amount. It validates invoice ownership/eligibility, rejects paid/void/cancelled invoices, rejects an existing processing/succeeded payment attempt for the invoice, creates a local `payment_records` row, and creates a Razorpay Order for the trusted invoice total/currency. Browser/app checkout return is not authoritative; clients should poll `GET /payments/{id}` and show pending until webhook/API synchronization updates the local payment.
+
+Razorpay event mapping currently handles documented event names `payment.authorized`, `payment.captured`, `payment.failed`, `refund.processed`, and `refund.failed`. Internal statuses remain compatible: `PENDING`, `PROCESSING`, `SUCCEEDED`, `FAILED`, `CANCELLED`, `REFUNDED`, and `PARTIALLY_REFUNDED`. Unknown Razorpay events with valid signatures are stored as processed and ignored safely.
+
+Refund requests require an existing successful or partially refunded Razorpay payment, reject an active refund in progress, and reject over-refunding. Admin clicking refund creates a gateway refund request but does not mark completion; webhook synchronization updates refund/payment state.
+
+Live tracking is latest-location only. Tracking is active for canonical Service Request statuses `ON_THE_WAY`, `REACHED_SITE`, `DIAGNOSIS`, `REPAIR_IN_PROGRESS`, `WAITING_FOR_PARTS`, and `TESTING`; it stops for `COMPLETED`, `CANCELLED`, and other non-trackable states.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| POST /technician/me/jobs/{id}/location | assigned TECHNICIAN | latitude, longitude, timestamp? -> latitude, longitude, timestamp, stale, trackingState |
+| GET /customers/me/service-requests/{id}/technician-location | owner CUSTOMER | latest latitude, longitude, timestamp, stale, trackingState |
+
+Technician identity is always resolved from JWT; technician_id is never accepted from the client. Customers can only view their own request's assigned technician location while tracking is active. Coordinates are validated server-side and stored in `technician_latest_locations` as one latest row per service request.
+
 ## Migration and client readiness
 
-V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. V7 adds request-scoped attachments and one feedback row per service request. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. The user previously reported V1-V4 verified against real MySQL; the new code still needs real-MySQL endpoint verification before client migration. Payments, inventory, providers, checklists/parts, invoices, exports, Building/Lift document management, live tracking and paid AMC renewal remain unimplemented.
+V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. V7 adds request-scoped attachments and one feedback row per service request. V8 adds payment_records, invoices, support_tickets, amc_renewal_requests and asset_documents with restrictive foreign keys, owner indexes, status checks and no credential storage. V9 adds Razorpay identifiers to payment_records, payment_refunds, razorpay_webhook_events and technician_latest_locations. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. Local H2 verification validated V1-V9 in the focused backend context test. Live Razorpay Test Mode transaction verification and public HTTPS webhook delivery remain environment-dependent.
