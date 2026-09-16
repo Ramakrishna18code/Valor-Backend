@@ -18,14 +18,15 @@ class ServiceRequestEngagementService {
     private static final Set<String> TYPES = Set.of("image/jpeg", "image/png", "image/webp", "application/pdf");
     private final RequestRepository requests;
     private final ServiceRequestAttachmentRepository attachments;
+    private final AssignmentRepository assignments;
     private final ServiceRequestFeedbackRepository feedback;
     private final AssetIdentityAccess identities;
     private final WorkflowIdentityAccess profiles;
     private final RequestAttachmentStorage storage;
-    ServiceRequestEngagementService(RequestRepository requests, ServiceRequestAttachmentRepository attachments,
+    ServiceRequestEngagementService(RequestRepository requests, ServiceRequestAttachmentRepository attachments, AssignmentRepository assignments,
             ServiceRequestFeedbackRepository feedback, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
             RequestAttachmentStorage storage) {
-        this.requests = requests; this.attachments = attachments; this.feedback = feedback;
+        this.requests = requests; this.attachments = attachments; this.assignments = assignments; this.feedback = feedback;
         this.identities = identities; this.profiles = profiles; this.storage = storage;
     }
 
@@ -38,7 +39,7 @@ class ServiceRequestEngagementService {
     AttachmentView upload(Long requestId, MultipartFile file) {
         User actor = identities.actor();
         ServiceRequest request = authorizedRead(requestId, actor);
-        validateCustomerOwnerForWrite(request, actor);
+        validateRequestAttachmentWrite(request, actor);
         if (file == null || file.isEmpty()) throw new WorkflowException(400, "Attachment file is required");
         String type = Optional.ofNullable(file.getContentType()).orElse("").toLowerCase(Locale.ROOT);
         if (!TYPES.contains(type)) throw new WorkflowException(400, "Unsupported attachment type");
@@ -68,7 +69,7 @@ class ServiceRequestEngagementService {
     void delete(Long requestId, Long attachmentId) {
         User actor = identities.actor();
         ServiceRequest request = authorizedRead(requestId, actor);
-        validateCustomerOwnerForWrite(request, actor);
+        validateRequestAttachmentWrite(request, actor);
         ServiceRequestAttachment row = attachments.findById(attachmentId).orElseThrow(ServiceRequestEngagementService::missing);
         if (!row.getRequest().getId().equals(request.getId()) || !row.getUploadedBy().getId().equals(actor.getId())) throw missing();
         attachments.delete(row);
@@ -101,13 +102,33 @@ class ServiceRequestEngagementService {
         if (actor.getRole() == Role.CUSTOMER) {
             CustomerProfile customer = profiles.customer(actor);
             if (!request.getCustomer().getId().equals(customer.getId())) throw denied();
+        } else if (actor.getRole() == Role.TECHNICIAN) {
+            var technician = profiles.technician(actor);
+            if (request.getStatus() == RequestStatus.COMPLETED || request.getStatus() == RequestStatus.CANCELLED) {
+                if (!assignments.existsByRequestIdAndTechnicianId(request.getId(), technician.getId())) throw denied();
+            } else {
+                var assignment = assignments.active(request.getId()).orElseThrow(ServiceRequestEngagementService::denied);
+                if (!assignment.getTechnician().getId().equals(technician.getId())) throw denied();
+            }
         } else if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied();
         return request;
     }
-    private void validateCustomerOwnerForWrite(ServiceRequest request, User actor) {
-        if (actor.getRole() != Role.CUSTOMER) throw denied();
-        CustomerProfile customer = profiles.customer(actor);
-        if (!request.getCustomer().getId().equals(customer.getId())) throw denied();
+    private void validateRequestAttachmentWrite(ServiceRequest request, User actor) {
+        if (actor.getRole() == Role.CUSTOMER) {
+            CustomerProfile customer = profiles.customer(actor);
+            if (!request.getCustomer().getId().equals(customer.getId())) throw denied();
+            return;
+        }
+        if (actor.getRole() == Role.TECHNICIAN) {
+            if (request.getStatus() == RequestStatus.COMPLETED || request.getStatus() == RequestStatus.CANCELLED) {
+                throw new WorkflowException(409, "Terminal request attachments are read only");
+            }
+            var technician = profiles.technician(actor);
+            var assignment = assignments.active(request.getId()).orElseThrow(ServiceRequestEngagementService::denied);
+            if (!assignment.getTechnician().getId().equals(technician.getId())) throw denied();
+            return;
+        }
+        throw denied();
     }
     private AttachmentView view(ServiceRequestAttachment row) {
         return new AttachmentView(row.getId(), row.getRequest().getId(), row.getOriginalFilename(), row.getContentType(),

@@ -221,6 +221,52 @@ class Stage3WorkflowTest {
         assertEquals(3, events(f));
     }
 
+    @Test void technicianProfileDashboardAndHistoryUseOnlyOwnCanonicalJobs() throws Exception {
+        Fixture f = fixture(), other = fixture();
+        db.update("update service_requests set priority='EMERGENCY' where id=?", f.requestId());
+        long assignment = assign(f);
+        JsonNode profile = call(get("/api/v1/technician/me/profile"), f.technician(), null, 200);
+        assertEquals(f.technicianId(), profile.get("technicianProfileId").asLong());
+        assertFalse(profile.toString().contains("password"));
+        call(put("/api/v1/technician/me/profile"), f.technician(), Map.of("availabilityStatus", "OFF_DUTY"), 200);
+        assertEquals("OFF_DUTY", db.queryForObject("select availability_status from technician_profiles where id=?", String.class, f.technicianId()));
+        call(put("/api/v1/technician/me/profile"), f.technician(), Map.of("employeeId", "HACK"), 400);
+        call(get("/api/v1/technician/me/dashboard"), f.admin(), null, 403);
+        JsonNode assigned = call(get("/api/v1/technician/me/dashboard"), f.technician(), null, 200);
+        assertEquals(1, assigned.get("assignedJobs").asLong());
+        assertEquals(1, assigned.get("pendingJobs").asLong());
+        assertEquals(1, assigned.get("emergencyJobs").asLong());
+        accept(f, assignment, f.technician());
+        transition(f, f.technician(), "ON_THE_WAY", "Travel", 200);
+        assertEquals(1, call(get("/api/v1/technician/me/dashboard"), f.technician(), null, 200).get("inProgressJobs").asLong());
+        for (String next : List.of("REACHED_SITE", "DIAGNOSIS", "REPAIR_IN_PROGRESS", "TESTING")) transition(f, f.technician(), next, "Progress", 200);
+        report(f, f.technician(), 200);
+        transition(f, f.technician(), "COMPLETED", "Done", 200);
+        JsonNode completed = call(get("/api/v1/technician/me/dashboard"), f.technician(), null, 200);
+        assertTrue(completed.get("completedJobs").asLong() >= 1);
+        assertTrue(completed.get("completedThisQuarter").asLong() >= 1);
+        assertTrue(call(get("/api/v1/technician/me/jobs").param("status", "COMPLETED"), f.technician(), null, 200).get("totalElements").asLong() >= 1);
+        assertEquals(0, call(get("/api/v1/technician/me/jobs"), other.technician(), null, 200).get("totalElements").asLong());
+    }
+
+    @Test void assignedTechnicianCanUploadEvidenceButForeignTechnicianCannot() throws Exception {
+        Fixture f = fixture(); TechnicianProfile other = technician(); assign(f);
+        MockMultipartFile photo = new MockMultipartFile("file", "work.jpg", "image/jpeg", new byte[]{(byte)0xFF, (byte)0xD8, 0x01, 0x02});
+        String uploaded = mvc.perform(multipart(path(f) + "/attachments").file(photo)
+                .header("Authorization", "Bearer " + jwt.issue(f.technician())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.originalFilename").value("work.jpg"))
+                .andExpect(jsonPath("$.data.uploadedByUserId").value(f.technician().getId()))
+                .andReturn().getResponse().getContentAsString();
+        long attachmentId = json.readTree(uploaded).at("/data/id").asLong();
+        call(get(path(f) + "/attachments"), f.customer(), null, 200);
+        call(get(path(f) + "/attachments"), other.getUser(), null, 403);
+        MockMultipartFile otherPhoto = new MockMultipartFile("file", "other.jpg", "image/jpeg", new byte[]{(byte)0xFF, (byte)0xD8, 0x01, 0x02});
+        mvc.perform(multipart(path(f) + "/attachments").file(otherPhoto).header("Authorization", "Bearer " + jwt.issue(other.getUser())))
+                .andExpect(status().isForbidden());
+        call(delete(path(f) + "/attachments/" + attachmentId), other.getUser(), null, 403);
+        call(delete(path(f) + "/attachments/" + attachmentId), f.technician(), null, 200);
+    }
+
     @Test void reassignmentsKeepRowsAndAllowSameTechnicianAgain() throws Exception {
         Fixture f = fixture(); TechnicianProfile other = technician();
         long first = assign(f), second = assign(f, other.getId()), third = assign(f);

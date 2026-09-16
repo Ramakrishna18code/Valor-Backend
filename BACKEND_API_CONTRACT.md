@@ -216,6 +216,65 @@ There is one global settings record. `SettingsView` contains `companyName`, null
 
 ADMIN and SUPER_ADMIN can read and update settings. CUSTOMER and TECHNICIAN cannot access these routes. Settings changes do not mutate existing service requests, visits, assignments, customers, assets, AMCs, notifications or staff accounts. The settings record is initialized by Flyway defaults and is recreated with defaults by service code only if missing in a nonstandard local/test database.
 
+## Technician application contract
+
+The Technician application is built on canonical Service Requests, technician assignments, Service Visits, reports, notifications and request attachments. There is no separate TechnicianJob, TechnicianVisit, TechnicianNotification, TechnicianReport or TechnicianAssignment table. A "job" is the authorized technician projection of a Service Request plus its current assignment/visit context.
+
+### Implemented
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /technician/me/profile | TECHNICIAN | TechnicianProfileView |
+| PUT /technician/me/profile | TECHNICIAN | TechnicianProfileUpdate -> TechnicianProfileView |
+| GET /technician/me/dashboard | TECHNICIAN | TechnicianDashboardSummary |
+| GET /technician/me/jobs | TECHNICIAN | status?, page=0, size=20 -> PageView<RequestView> |
+| GET /technician/me/jobs/{id} | current TECHNICIAN; historically assigned TECHNICIAN for terminal requests | Detail |
+| POST /technician/me/jobs/{id}/report | assigned TECHNICIAN | diagnosis, workPerformed, testingResult; completionNotes? -> ReportView |
+| GET /technician/me/visits | TECHNICIAN | fromDate?, toDate?, status?, page=0, size=20 -> PageView<VisitView> |
+| GET /technician/me/visits/{id} | assigned TECHNICIAN | VisitView |
+| PUT /technician/me/visits/{id}/status | assigned TECHNICIAN | IN_PROGRESS or COMPLETED, optional notes -> VisitView |
+| POST /technician/me/visits/{id}/reschedule-requests | assigned TECHNICIAN | required reason, requested date/start/end -> VisitChangeRequestView |
+| POST /technician/me/visits/{id}/additional-visit-requests | assigned TECHNICIAN | required reason, requested date/start/end -> VisitChangeRequestView |
+| POST /technician/me/visits/{id}/cancel | assigned TECHNICIAN | required reason -> VisitView |
+| GET /notifications | authenticated TECHNICIAN recipient | own notification inbox |
+| PUT /notifications/{id}/read | authenticated TECHNICIAN recipient | marks own due notification read |
+| GET /service-requests/{id}/attachments | assigned/historical TECHNICIAN | AttachmentView[] |
+| POST /service-requests/{id}/attachments | assigned TECHNICIAN on active nonterminal request | multipart file -> AttachmentView |
+| GET /service-requests/{id}/attachments/{attachmentId} | assigned/historical TECHNICIAN | file download |
+| DELETE /service-requests/{id}/attachments/{attachmentId} | assigned TECHNICIAN uploader on active nonterminal request | void |
+
+Technician authentication uses `POST /auth/login/technician`, the shared refresh/logout routes, and role-scoped bearer JWT authorization. TECHNICIAN cannot access Admin customer management, staff provisioning, Admin settings, unrelated jobs, unrelated visits, unrelated attachments, or another technician's private workload.
+
+TechnicianProfileView contains userId, technicianProfileId, email, phone, employeeId, assignedArea, specialization, availabilityStatus, active and lastActiveAt. Employee ID, assigned area, specialization, email, phone and active state are read-only in the technician app. TechnicianProfileUpdate currently accepts only `availabilityStatus`, with values `AVAILABLE`, `BUSY`, `OFF_DUTY`, and `ON_LEAVE`; unknown fields are rejected. Availability is operational metadata and never bypasses Visit conflict detection, assignment authorization, or Service Request state validation.
+
+TechnicianDashboardSummary contains assignedJobs, pendingJobs, inProgressJobs, completedJobs, completedThisQuarter, todaysScheduledVisits and emergencyJobs. Assigned jobs and emergency jobs count active assigned/accepted assignments. Pending jobs count assigned requests in `ASSIGNED`. In-progress jobs count `ACCEPTED`, `ON_THE_WAY`, `REACHED_SITE`, `DIAGNOSIS`, `REPAIR_IN_PROGRESS`, `WAITING_FOR_PARTS`, and `TESTING`. Completed jobs count all completed requests historically assigned to the technician. Completed this quarter uses the current calendar quarter in the backend clock. Today's scheduled visits count the technician's own visits on the backend current date.
+
+Technician job lists are limited to the signed-in technician. Active work requires a current assignment. Terminal completed/cancelled history may be read by a technician with any historical assignment row for that request. Filters use the canonical Service Request status values. The job detail provides the existing Detail projection, including customer/building/lift/service context already present in `RequestView`, activeAssignment, history and report. Customer contact information is limited to the safe fields already exposed by the authorized request projection; credentials, authentication state, password/token hashes and unrelated customer records are never returned.
+
+Technician progress uses the canonical Service Request lifecycle. There is no technician-only state machine. "Start travel" maps to `ON_THE_WAY`, "mark arrived" maps to `REACHED_SITE`, work execution maps through `DIAGNOSIS`, `REPAIR_IN_PROGRESS`, `WAITING_FOR_PARTS`, and `TESTING`, and completion uses `COMPLETED` after a valid report exists for the active assignment. Cancellation uses the existing `CANCELLED` transition rules and requires notes/reason. Visit progress remains on the Visit resource and must stay consistent with the Service Request/assignment authorization rules.
+
+Technician photos/evidence reuse Service Request attachments. A technician may upload JPEG, PNG, WebP or PDF files only to their active assigned nonterminal request. A technician may list/download attachments for an active assigned request and for completed/cancelled requests where they have historical assignment. A technician may delete only files they uploaded, and only while the request is nonterminal and assigned to them. Customer owners and Admin/SUPER_ADMIN can see request-scoped attachments through their existing authorization. No separate technician-private attachment visibility has been implemented.
+
+Technician notifications reuse the canonical notification inbox. Assignment, reassignment, Visit creation/reschedule/cancellation, change-request approval/rejection, emergency assignment and admin update messages should be represented as normal in-app notifications to the technician user where emitting services create them. No technician-specific notification table exists.
+
+### Deferred or product decision required
+
+Configurable/service-type checklists are a PRODUCT DECISION REQUIRED item. The backend currently supports structured reports and notes, not a checklist engine. A future checklist contract must define template ownership, checklist fields, required/optional items, service-type/lift applicability, versioning, completion rules and history.
+
+Customer verification OTP for job completion is PRODUCT DECISION REQUIRED. The backend does not define who generates the OTP, when it is issued, who receives it, expiration, retry limits, who submits it, whether it gates completion, or customer-app display behavior. No OTP completion gate is implemented.
+
+PDF service report download is PRODUCT DECISION REQUIRED. The backend stores service-report data but does not define official PDF content, branding, signature/verification requirements, generation timing, retention, or download route.
+
+Technician support/report-an-issue is PRODUCT/BACKEND CONTRACT REQUIRED. No canonical support-ticket model exists for technician issue category, description, optional job link, screenshot, priority, preferred contact, ticket reference, status timeline or support notifications. Customer Service Requests must not be reused for internal technician support without a product decision.
+
+Extended technician personal profile fields are PRODUCT DECISION REQUIRED where not already modeled: profile photo, date of birth, gender, address, emergency contact, and technician-owned editing of phone/email. These fields are not added to the canonical profile in this readiness phase.
+
+Technician-private attachment visibility is PRODUCT DECISION REQUIRED if required later. Current attachments are request-scoped evidence visible to authorized customer owner, Admin/SUPER_ADMIN and assigned/historical technician.
+
+### Future live tracking
+
+Live technician tracking is FUTURE and not implemented in this backend readiness phase. A future contract must define location update endpoints, current-location reads, start/stop tracking, storage/retention, customer visibility authorization, privacy controls, polling versus websocket/SSE delivery, ETA calculation, and behavior after cancellation/completion.
+
 ## Migration and client readiness
 
 V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. V7 adds request-scoped attachments and one feedback row per service request. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. The user previously reported V1-V4 verified against real MySQL; the new code still needs real-MySQL endpoint verification before client migration. Payments, inventory, providers, checklists/parts, invoices, exports, Building/Lift document management, live tracking and paid AMC renewal remain unimplemented.
