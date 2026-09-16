@@ -82,11 +82,18 @@ Reactivation sets the canonical user active, sets the customer profile active, a
 | GET /customers/me | CUSTOMER | CustomerSummary |
 | PUT /customers/me | CUSTOMER | fullName, alternatePhone?, companyName?, address? -> CustomerSummary |
 | GET /customers/me/buildings | CUSTOMER | owned BuildingView[] |
+| GET /customers/me/buildings/{id} | CUSTOMER owner | BuildingView |
 | POST /customers/me/buildings | CUSTOMER | buildingName; buildingType/address/city/state/pincode/emergencyContactName/emergencyContactPhone optional -> BuildingView |
+| PUT /customers/me/buildings/{id} | CUSTOMER owner | same fields as customer building creation -> BuildingView |
+| DELETE /customers/me/buildings/{id} | CUSTOMER owner | non-destructive deactivate; null data |
 | GET /customers/me/lifts | CUSTOMER | owned LiftView[] |
+| GET /customers/me/lifts/{id} | CUSTOMER owner | LiftView |
+| POST /customers/me/lifts | CUSTOMER owner of building | LiftWrite with buildingId and supported descriptive lift fields -> LiftView |
+| PUT /customers/me/lifts/{id} | CUSTOMER owner | LiftWrite with unchanged buildingId and supported descriptive lift fields -> LiftView |
+| DELETE /customers/me/lifts/{id} | CUSTOMER owner | non-destructive deactivate; null data |
 | GET /customers/me/service-requests | CUSTOMER | status?, page=0, size=20 -> PageView<RequestView> |
 
-Ownership always resolves from JWT; customer building creation accepts no customer/profile ID, status, or active flag. Profile updates cannot change identity, role or account state. Inactive profiles cannot initiate operations. There is exactly one customer request-creation route: POST /service-requests.
+Ownership always resolves from JWT; customer building creation/update accepts no customer/profile ID, status, or active flag. Customer lift creation/update accepts buildingId only to identify the owned parent building and never accepts customerProfileId, userId or owner IDs. Customers can only read, update or deactivate their own buildings and lifts; foreign assets return the safe missing-resource envelope rather than exposing ownership. Customer lift update cannot move a lift to another building. Customer asset deletes are soft deactivations and never remove buildings, lifts, AMCs, service requests, visits or history. Inactive profiles cannot initiate operations. Inactive buildings block new/updated lifts; inactive lifts cannot be used for new service requests. There is exactly one customer request-creation route: POST /service-requests.
 
 ## Admin assets and AMC
 
@@ -133,6 +140,21 @@ Detail contains request (RequestView), nullable activeAssignment (AssignmentView
 Request statuses: PENDING, ASSIGNED, ACCEPTED, ON_THE_WAY, REACHED_SITE, DIAGNOSIS, REPAIR_IN_PROGRESS, WAITING_FOR_PARTS, TESTING, COMPLETED, CANCELLED. Assignment statuses: ASSIGNED, ACCEPTED, REJECTED, RELEASED, COMPLETED. Priorities: LOW, MEDIUM, HIGH, EMERGENCY. Service types: ROUTINE_MAINTENANCE, BREAKDOWN, EMERGENCY, INSPECTION, INSTALLATION, MODERNIZATION. Java enums and V3 checks remain aligned.
 
 The approved transition graph is unchanged. Request row locking coordinates assignment, reassignment, report, status and completion; the existing generated unique active-assignment index remains authoritative. Creation writes one initial PENDING event; every accepted transition writes one event. Reassignment retains released rows and allows the same technician later without a status-history event when lifecycle state is unchanged. Acceptance after advanced reassignment likewise does not emit a same-status event. Event creation rejects equal from/to states; the initial NULL -> PENDING event remains valid. Supplied transition notes are persisted and returned, including waiting notes and cancellation reasons. Cancellation requires a reason and releases the active assignment. WAITING_FOR_PARTS requires notes. TESTING -> COMPLETED requires a nonblank report for the current active assignment, even for admins; completion atomically records completedAt, completes the assignment and writes history. Report POST does not complete a job; terminal reports are immutable.
+
+### Service Request Attachments and Feedback
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /service-requests/{id}/attachments | owner CUSTOMER, ADMIN, SUPER_ADMIN | AttachmentView[] |
+| POST /service-requests/{id}/attachments | owner CUSTOMER | multipart `file` -> AttachmentView |
+| GET /service-requests/{id}/attachments/{attachmentId} | owner CUSTOMER, ADMIN, SUPER_ADMIN | file download |
+| DELETE /service-requests/{id}/attachments/{attachmentId} | owner CUSTOMER uploader | void |
+| GET /service-requests/{id}/feedback | owner CUSTOMER | nullable FeedbackView |
+| PUT /service-requests/{id}/feedback | owner CUSTOMER | FeedbackWrite -> FeedbackView |
+
+AttachmentView contains id, serviceRequestId, originalFilename, contentType, fileSize, uploadedByUserId and createdAt. Upload accepts JPEG, PNG, WebP and PDF only, uses the existing 10 MB multipart file limit, and validates content type, file size and basic file signatures server-side. Storage returns only opaque references internally; filesystem paths, storage credentials and provider details are never exposed to clients. Customer ownership derives from JWT and the Service Request owner, never from a submitted customerProfileId. Customers cannot access or delete another customer's attachment. Admin/SUPER_ADMIN may list/download from their normal operational view but do not use the customer upload/delete route. Building/Lift document management is deferred and is not part of this service-request attachment contract.
+
+Feedback belongs to one completed Service Request. FeedbackWrite contains rating 1-5 and optional comment up to 2000 characters. FeedbackView contains id, serviceRequestId, customerProfileId, rating, comment, createdAt and updatedAt. A customer can create or update feedback only for their own completed request. Active or uncompleted requests return conflict, foreign requests are forbidden, and repeated submissions update the existing feedback row rather than creating duplicates. No separate Admin feedback-moderation module exists.
 
 ## Scheduling / Service Visits
 
@@ -196,4 +218,4 @@ ADMIN and SUPER_ADMIN can read and update settings. CUSTOMER and TECHNICIAN cann
 
 ## Migration and client readiness
 
-V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. The user previously reported V1-V4 verified against real MySQL; the new code still needs real-MySQL endpoint verification before client migration. All client repositories and unrelated README changes remain untouched. Payments, inventory, providers, checklists/parts/attachments, invoices, exports and other excluded features remain unimplemented.
+V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. V7 adds request-scoped attachments and one feedback row per service request. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. The user previously reported V1-V4 verified against real MySQL; the new code still needs real-MySQL endpoint verification before client migration. Payments, inventory, providers, checklists/parts, invoices, exports, Building/Lift document management, live tracking and paid AMC renewal remain unimplemented.

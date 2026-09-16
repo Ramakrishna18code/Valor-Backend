@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import java.nio.charset.StandardCharsets;
 import java.sql.*;
@@ -25,7 +26,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 // Each HTTP transaction really commits to this isolated in-memory database, including concurrent tests.
-@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:workflow_test;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE")
+@SpringBootTest(properties = {"spring.datasource.url=jdbc:h2:mem:workflow_test;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE", "app.attachments.local-root=target/test-request-attachments"})
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class Stage3WorkflowTest {
@@ -138,6 +139,40 @@ class Stage3WorkflowTest {
         assertEquals(1, detail.get("history").size()); assertTrue(detail.at("/history/0/fromStatus").isNull());
         assertEquals("PENDING", detail.at("/history/0/toStatus").asText());
         assertEquals(f.customer().getId(), detail.at("/history/0/changedByUserId").asLong());
+    }
+
+    @Test void customersManageOnlyOwnServiceRequestAttachmentsWithSafeTypeValidation() throws Exception {
+        Fixture f = fixture(), other = fixture();
+        MockMultipartFile png = new MockMultipartFile("file", "issue.png", "image/png",
+                new byte[]{(byte)0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A});
+        String uploaded = mvc.perform(multipart(path(f) + "/attachments").file(png)
+                .header("Authorization", "Bearer " + jwt.issue(f.customer())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.originalFilename").value("issue.png"))
+                .andExpect(jsonPath("$.data.storageKey").doesNotExist()).andReturn().getResponse().getContentAsString();
+        long attachmentId = json.readTree(uploaded).at("/data/id").asLong();
+        call(get(path(f) + "/attachments"), f.customer(), null, 200);
+        mvc.perform(get(path(f) + "/attachments/" + attachmentId).header("Authorization", "Bearer " + jwt.issue(f.customer())))
+                .andExpect(status().isOk()).andExpect(header().string("Content-Type", "image/png"));
+        call(get(path(f) + "/attachments"), other.customer(), null, 403);
+        call(delete(path(f) + "/attachments/" + attachmentId), other.customer(), null, 403);
+        MockMultipartFile exe = new MockMultipartFile("file", "bad.exe", "application/x-msdownload", new byte[]{0x4D, 0x5A, 0, 0});
+        mvc.perform(multipart(path(f) + "/attachments").file(exe).header("Authorization", "Bearer " + jwt.issue(f.customer())))
+                .andExpect(status().isBadRequest());
+        call(delete(path(f) + "/attachments/" + attachmentId), f.customer(), null, 200);
+        assertEquals(0, db.queryForObject("select count(*) from service_request_attachments where service_request_id=?", Integer.class, f.requestId()));
+    }
+
+    @Test void feedbackRequiresOwnCompletedRequestAndUpdatesSingleRow() throws Exception {
+        Fixture f = fixture(), other = fixture();
+        call(put(path(f) + "/feedback"), f.customer(), Map.of("rating", 5, "comment", "Great"), 409);
+        reach(f, "COMPLETED");
+        call(put(path(f) + "/feedback"), other.customer(), Map.of("rating", 5, "comment", "Nope"), 403);
+        call(put(path(f) + "/feedback"), f.customer(), Map.of("rating", 0, "comment", "Bad scale"), 400);
+        JsonNode first = call(put(path(f) + "/feedback"), f.customer(), Map.of("rating", 5, "comment", "Great"), 200);
+        JsonNode updated = call(put(path(f) + "/feedback"), f.customer(), Map.of("rating", 4, "comment", "Still good"), 200);
+        assertEquals(first.get("id").asLong(), updated.get("id").asLong());
+        assertEquals(4, call(get(path(f) + "/feedback"), f.customer(), null, 200).get("rating").asInt());
+        assertEquals(1, db.queryForObject("select count(*) from service_request_feedback where service_request_id=?", Integer.class, f.requestId()));
     }
 
     @Test void ownershipAndUnknownIdsAreRejectedBeforeCreatingAnyRequest() throws Exception {

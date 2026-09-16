@@ -131,11 +131,12 @@ class Phase1ContractTest {
         assertEquals(Set.of("ROUTINE_MAINTENANCE","BREAKDOWN","EMERGENCY","INSPECTION","INSTALLATION","MODERNIZATION"),values(schemas.get("CreateRequest").at("/properties/serviceType/enum")));
         assertEquals(Set.of("ASSIGNED","ACCEPTED","REJECTED","RELEASED","COMPLETED"),values(schemas.get("AssignmentView").at("/properties/status/enum")));
         Set<String> ids=new HashSet<>();doc.get("paths").fields().forEachRemaining(e->{if(e.getKey().startsWith("/api/v1"))e.getValue().forEach(op->{
-            assertTrue(ids.add(op.get("operationId").asText()));for(String code:List.of("400","401","403","404","409"))assertTrue(op.get("responses").get(code).toString().contains("ApiErrorResponse"));
+            String operationId=op.get("operationId").asText();assertTrue(ids.add(operationId));for(String code:List.of("400","401","403","404","409"))assertTrue(op.get("responses").get(code).toString().contains("ApiErrorResponse"));
+            if("serviceRequestAttachmentDownload".equals(operationId))return;
             JsonNode success=op.get("responses").get("200");assertNotNull(success);
             JsonNode envelope=resolve(doc,success.get("content").elements().next().get("schema"));
             JsonNode data=resolve(doc,envelope.at("/properties/data"));
-            assertTrue(data.has("properties")||data.has("items")||data.path("description").asText().contains("Always null"),op.get("operationId").asText());
+            assertTrue(data.has("properties")||data.has("items")||data.path("description").asText().contains("Always null"),operationId);
         });});
     }
 }

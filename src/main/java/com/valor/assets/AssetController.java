@@ -72,10 +72,24 @@ class AssetController {
 
     @Operation(operationId="getCustomerBuildings") @GetMapping("/customers/me/buildings")
     ApiResponse<List<BuildingView>> customerBuildings(){return ok(assets.customerBuildings());}
+    @Operation(operationId="getCustomerBuilding") @GetMapping("/customers/me/buildings/{id}")
+    ApiResponse<BuildingView> customerBuilding(@PathVariable Long id){return ok(assets.customerBuilding(id));}
     @Operation(operationId="createCustomerBuilding") @PostMapping("/customers/me/buildings")
     ApiResponse<BuildingView> customerBuilding(@Valid @RequestBody CustomerBuildingWrite input){return ok(assets.createCustomerBuilding(input));}
+    @Operation(operationId="updateCustomerBuilding") @PutMapping("/customers/me/buildings/{id}")
+    ApiResponse<BuildingView> updateCustomerBuilding(@PathVariable Long id, @Valid @RequestBody CustomerBuildingWrite input){return ok(assets.updateCustomerBuilding(id,input));}
+    @Operation(operationId="deactivateCustomerBuilding") @DeleteMapping("/customers/me/buildings/{id}")
+    ApiResponse<Void> deactivateCustomerBuilding(@PathVariable Long id){assets.deactivateCustomerBuilding(id);return ApiResponse.success("Building deactivated",null,200);}
     @Operation(operationId="getCustomerLifts") @GetMapping("/customers/me/lifts")
     ApiResponse<List<LiftView>> customerLifts(){return ok(assets.customerLifts());}
+    @Operation(operationId="getCustomerLift") @GetMapping("/customers/me/lifts/{id}")
+    ApiResponse<LiftView> customerLift(@PathVariable Long id){return ok(assets.customerLift(id));}
+    @Operation(operationId="createCustomerLift") @PostMapping("/customers/me/lifts")
+    ApiResponse<LiftView> customerLift(@Valid @RequestBody LiftWrite input){return ok(assets.createCustomerLift(input));}
+    @Operation(operationId="updateCustomerLift") @PutMapping("/customers/me/lifts/{id}")
+    ApiResponse<LiftView> updateCustomerLift(@PathVariable Long id,@Valid @RequestBody LiftWrite input){return ok(assets.updateCustomerLift(id,input));}
+    @Operation(operationId="deactivateCustomerLift") @DeleteMapping("/customers/me/lifts/{id}")
+    ApiResponse<Void> deactivateCustomerLift(@PathVariable Long id){assets.deactivateCustomerLift(id);return ApiResponse.success("Lift deactivated",null,200);}
 
     private <T> List<T> slice(List<T> rows,Integer page,Integer size) {
         if(page==null&&size==null)return rows;

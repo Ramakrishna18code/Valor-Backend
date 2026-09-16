@@ -3,14 +3,18 @@ import io.swagger.v3.oas.annotations.Operation;
 
 import com.valor.response.ApiResponse;
 import jakarta.validation.Valid;
+import org.springframework.core.io.Resource;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import static com.valor.workflow.WorkflowDtos.*;
 
 @RestController
 @RequestMapping("/api/v1")
 class WorkflowController {
     private final WorkflowService service;
-    WorkflowController(WorkflowService service) { this.service = service; }
+    private final ServiceRequestEngagementService engagement;
+    WorkflowController(WorkflowService service, ServiceRequestEngagementService engagement) { this.service = service; this.engagement = engagement; }
     @Operation(operationId="serviceRequestCreate")
     @PostMapping("/service-requests")
     ApiResponse<Detail> create(@Valid @RequestBody CreateRequest input) { return ok(service.create(input)); }
@@ -44,5 +48,28 @@ class WorkflowController {
     @Operation(operationId="getCustomerServiceRequests") @GetMapping("/customers/me/service-requests")
     ApiResponse<PageView<RequestView>> customerRequests(@RequestParam(required=false) RequestStatus status,
         @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size){return ok(service.customerRequests(status,page,size));}
+    @Operation(operationId="serviceRequestAttachmentList")
+    @GetMapping("/service-requests/{id}/attachments")
+    ApiResponse<java.util.List<AttachmentView>> attachments(@PathVariable Long id) { return ok(engagement.listAttachments(id)); }
+    @Operation(operationId="serviceRequestAttachmentUpload")
+    @PostMapping(value="/service-requests/{id}/attachments", consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
+    ApiResponse<AttachmentView> upload(@PathVariable Long id, @RequestPart("file") MultipartFile file) { return ok(engagement.upload(id, file)); }
+    @Operation(operationId="serviceRequestAttachmentDownload")
+    @GetMapping("/service-requests/{id}/attachments/{attachmentId}")
+    ResponseEntity<Resource> download(@PathVariable Long id, @PathVariable Long attachmentId) {
+        var file = engagement.download(id, attachmentId);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType(file.contentType())).contentLength(file.size())
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(file.filename()).build().toString())
+                .body(file.resource());
+    }
+    @Operation(operationId="serviceRequestAttachmentDelete")
+    @DeleteMapping("/service-requests/{id}/attachments/{attachmentId}")
+    ApiResponse<Void> deleteAttachment(@PathVariable Long id, @PathVariable Long attachmentId) { engagement.delete(id, attachmentId); return ok(null); }
+    @Operation(operationId="serviceRequestFeedbackRead")
+    @GetMapping("/service-requests/{id}/feedback")
+    ApiResponse<FeedbackView> feedback(@PathVariable Long id) { return ok(engagement.ownFeedback(id)); }
+    @Operation(operationId="serviceRequestFeedbackSubmit")
+    @PutMapping("/service-requests/{id}/feedback")
+    ApiResponse<FeedbackView> feedback(@PathVariable Long id, @Valid @RequestBody FeedbackWrite input) { return ok(engagement.upsertFeedback(id, input)); }
     private <T> ApiResponse<T> ok(T data) { return ApiResponse.success("Success", data, 200); }
 }

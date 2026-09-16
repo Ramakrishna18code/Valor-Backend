@@ -161,6 +161,97 @@ class Stage2AssetsTest {
         assertEquals(0, request(get("/api/v1/amc-contracts"), customer().getUser(), null, 200).size());
     }
 
+    @Test void customersCanManageOnlyTheirOwnBuildings() throws Exception {
+        User admin = user(Role.ADMIN);
+        CustomerProfile owner = customer(), other = customer();
+        long foreign = building(admin, other);
+        JsonNode created = request(post("/api/v1/customers/me/buildings"), owner.getUser(), Map.of(
+                "buildingName", "Customer Tower",
+                "buildingType", "Apartment",
+                "address", "1 Main Road",
+                "city", "Hyderabad"), 200);
+        long own = created.get("id").asLong();
+        assertEquals(owner.getId(), created.get("customerProfileId").asLong());
+        assertFalse(created.has("customerId"));
+
+        request(get("/api/v1/customers/me/buildings/" + own), owner.getUser(), null, 200);
+        request(get("/api/v1/customers/me/buildings/" + foreign), owner.getUser(), null, 404);
+        request(post("/api/v1/customers/me/buildings"), owner.getUser(), Map.of("buildingName", "Bad", "customerProfileId", other.getId()), 400);
+        JsonNode updated = request(put("/api/v1/customers/me/buildings/" + own), owner.getUser(), Map.of(
+                "buildingName", "Updated Tower",
+                "buildingType", "Office"), 200);
+        assertEquals("Updated Tower", updated.get("buildingName").asText());
+        request(put("/api/v1/customers/me/buildings/" + foreign), owner.getUser(), Map.of("buildingName", "Moved"), 404);
+        request(delete("/api/v1/customers/me/buildings/" + foreign), owner.getUser(), null, 404);
+        request(delete("/api/v1/customers/me/buildings/" + own), owner.getUser(), null, 200);
+        em.flush();
+        assertFalse(db.queryForObject("select is_active from buildings where id=?", Boolean.class, own));
+        assertEquals("INACTIVE", db.queryForObject("select status from buildings where id=?", String.class, own));
+        assertEquals(1, db.queryForObject("select count(*) from buildings where id=?", Integer.class, own));
+    }
+
+    @Test void customersCanCreateUpdateAndDeactivateLiftsUnderOwnedBuildingsOnly() throws Exception {
+        User admin = user(Role.ADMIN);
+        CustomerProfile owner = customer(), other = customer();
+        long ownBuilding = building(admin, owner), foreignBuilding = building(admin, other);
+        request(post("/api/v1/customers/me/lifts"), owner.getUser(), Map.of("buildingId", foreignBuilding, "name", "Foreign"), 404);
+        request(post("/api/v1/customers/me/lifts"), owner.getUser(), Map.of("buildingId", ownBuilding, "name", "Bad", "customerProfileId", owner.getId()), 400);
+
+        JsonNode created = request(post("/api/v1/customers/me/lifts"), owner.getUser(), Map.of(
+                "buildingId", ownBuilding,
+                "name", "Tower A Lift",
+                "liftNumber", "A-1",
+                "manufacturer", "Kone",
+                "model", "MX-10",
+                "capacity", 8,
+                "floorCount", 12,
+                "serialNumber", "SER-" + UUID.randomUUID(),
+                "installationDate", "2030-01-15",
+                "location", "Tower A lobby"), 200);
+        long lift = created.get("id").asLong();
+        assertEquals(ownBuilding, created.get("buildingId").asLong());
+        assertEquals("ACTIVE", created.get("currentStatus").asText());
+        assertFalse(created.has("customerId"));
+        assertEquals(lift, request(get("/api/v1/customers/me/lifts/" + lift), owner.getUser(), null, 200).get("id").asLong());
+        request(get("/api/v1/customers/me/lifts/" + lift), other.getUser(), null, 404);
+
+        JsonNode updated = request(put("/api/v1/customers/me/lifts/" + lift), owner.getUser(), Map.of(
+                "buildingId", ownBuilding,
+                "name", "Tower A Service Lift",
+                "liftNumber", "A-1",
+                "currentStatus", "MAINTENANCE"), 200);
+        assertEquals("Tower A Service Lift", updated.get("name").asText());
+        assertEquals("MAINTENANCE", updated.get("currentStatus").asText());
+        request(put("/api/v1/customers/me/lifts/" + lift), owner.getUser(), Map.of("buildingId", foreignBuilding, "name", "Moved"), 400);
+        request(put("/api/v1/customers/me/lifts/" + lift), other.getUser(), Map.of("buildingId", ownBuilding, "name", "Stolen"), 404);
+        request(post("/api/v1/customers/me/lifts"), owner.getUser(), Map.of("buildingId", ownBuilding, "name", "Invalid", "capacity", -1), 400);
+
+        request(delete("/api/v1/customers/me/lifts/" + lift), owner.getUser(), null, 200);
+        em.flush();
+        assertFalse(db.queryForObject("select is_active from lifts where id=?", Boolean.class, lift));
+        request(get("/api/v1/customers/me/lifts/" + lift), owner.getUser(), null, 409);
+        assertEquals(1, db.queryForObject("select count(*) from lifts where id=?", Integer.class, lift));
+    }
+
+    @Test void customerCreatedLiftCanBeUsedForOwnServiceRequestButForeignLiftIsRejected() throws Exception {
+        User admin = user(Role.ADMIN);
+        CustomerProfile owner = customer(), other = customer();
+        long ownBuilding = building(admin, owner), otherBuilding = building(admin, other);
+        long ownLift = request(post("/api/v1/customers/me/lifts"), owner.getUser(), Map.of("buildingId", ownBuilding, "name", "Request lift"), 200).get("id").asLong();
+        long foreignLift = lift(admin, otherBuilding);
+        JsonNode detail = request(post("/api/v1/service-requests"), owner.getUser(), Map.of(
+                "liftId", ownLift,
+                "title", "New lift service",
+                "description", "Please inspect the new lift",
+                "serviceType", "INSPECTION"), 200);
+        assertEquals(ownLift, detail.get("request").get("liftId").asLong());
+        request(post("/api/v1/service-requests"), owner.getUser(), Map.of(
+                "liftId", foreignLift,
+                "title", "Foreign lift",
+                "description", "Should fail",
+                "serviceType", "INSPECTION"), 403);
+    }
+
     @Test void buildingOwnerIsRequiredValidAndImmutable() throws Exception {
         User admin = user(Role.ADMIN);
         CustomerProfile owner = customer(), other = customer();
@@ -287,7 +378,9 @@ class Stage2AssetsTest {
 
     @Test void canonicalAssetRoutesHaveNoUnversionedAliases() {
         var routes = mappings.getHandlerMethods().keySet().stream().flatMap(m -> m.getPatternValues().stream()).toList();
-        assertTrue(routes.containsAll(List.of("/api/v1/buildings", "/api/v1/lifts", "/api/v1/amc-contracts")));
+        assertTrue(routes.containsAll(List.of("/api/v1/buildings", "/api/v1/lifts", "/api/v1/amc-contracts",
+                "/api/v1/customers/me/buildings", "/api/v1/customers/me/buildings/{id}",
+                "/api/v1/customers/me/lifts", "/api/v1/customers/me/lifts/{id}")));
         assertFalse(routes.stream().anyMatch(p -> p.startsWith("/api/") && !p.startsWith("/api/v1/")));
     }
 }

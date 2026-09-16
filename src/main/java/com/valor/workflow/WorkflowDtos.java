@@ -39,6 +39,11 @@ public final class WorkflowDtos {
     public record ReportView(Long id, Long serviceRequestId, Long assignmentId, String diagnosis,
             String workPerformed, String testingResult, String completionNotes, Long reportedByUserId,
             LocalDateTime createdAt, LocalDateTime updatedAt) {}
+    public record AttachmentView(Long id, Long serviceRequestId, String originalFilename, String contentType,
+            Long fileSize, Long uploadedByUserId, LocalDateTime createdAt) {}
+    public record FeedbackWrite(@NotNull @Min(1) @Max(5) Integer rating, @Size(max = 2000) String comment) implements StrictWrite {}
+    public record FeedbackView(Long id, Long serviceRequestId, Long customerProfileId, Integer rating,
+            String comment, LocalDateTime createdAt, LocalDateTime updatedAt) {}
     public record Detail(RequestView request, @Schema(nullable=true) AssignmentView activeAssignment, List<HistoryView> history, @Schema(nullable=true) ReportView report) {}
     public record PageView<T>(List<T> items, int page, int size, long totalElements, int totalPages) {}
 }

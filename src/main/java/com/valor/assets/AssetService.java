@@ -167,6 +167,10 @@ public class AssetService {
         return buildings.findOwned(id).stream()
             .map(b->buildingView(b,lifts.countByBuildingIdAndActiveTrue(b.getId()))).toList();
     }
+    public BuildingView customerBuilding(Long id) {
+        Building building = ownedActiveBuilding(id, customerActor().getId());
+        return buildingView(building, lifts.countByBuildingIdAndActiveTrue(id));
+    }
     public List<LiftView> customerLifts() {
         Long id=customerActor().getId();LocalDate date=LocalDate.now(clock);Set<Long> covered=new HashSet<>(contracts.coveredLiftIds(date));
         return lifts.findOwned(id).stream()
@@ -178,6 +182,48 @@ public class AssetService {
         Building building=new Building();building.setCustomer(owner);
         apply(building,new BuildingWrite(owner.getId(),input.buildingName(),input.buildingType(),input.address(),input.city(),input.state(),input.pincode(),input.emergencyContactName(),input.emergencyContactPhone(),"ACTIVE"));
         buildings.saveAndFlush(building);return buildingView(building,0);
+    }
+    public BuildingView updateCustomerBuilding(Long id, CustomerBuildingWrite input) {
+        Long actorId = customerActor().getId();
+        Building building = ownedActiveBuilding(id, actorId);
+        apply(building, new BuildingWrite(building.getCustomer().getId(), input.buildingName(), input.buildingType(), input.address(), input.city(), input.state(), input.pincode(), input.emergencyContactName(), input.emergencyContactPhone(), "ACTIVE"));
+        buildings.flush();
+        return buildingView(building, lifts.countByBuildingIdAndActiveTrue(id));
+    }
+    public void deactivateCustomerBuilding(Long id) {
+        Long actorId = customerActor().getId();
+        Building building = ownedActiveBuilding(id, actorId);
+        building.setActive(false);
+        building.setStatus("INACTIVE");
+    }
+    public LiftView customerLift(Long id) {
+        Lift lift = ownedActiveLift(id, customerActor().getId());
+        LocalDate asOf = LocalDate.now(clock);
+        return liftView(lift, contracts.coveredLiftIds(asOf).contains(id), asOf);
+    }
+    public LiftView createCustomerLift(LiftWrite input) {
+        Long actorId = customerActor().getId();
+        Building building = ownedActiveBuilding(input.buildingId(), actorId);
+        Lift lift = new Lift();
+        lift.setBuilding(building);
+        apply(lift, input);
+        lifts.saveAndFlush(lift);
+        return liftView(lift, false, LocalDate.now(clock));
+    }
+    public LiftView updateCustomerLift(Long id, LiftWrite input) {
+        Long actorId = customerActor().getId();
+        Lift lift = ownedActiveLift(id, actorId);
+        if (!lift.getBuilding().getId().equals(input.buildingId())) {
+            throw new AssetException(400, "Lift building cannot be changed");
+        }
+        apply(lift, input);
+        lifts.flush();
+        LocalDate asOf = LocalDate.now(clock);
+        return liftView(lift, contracts.coveredLiftIds(asOf).contains(id), asOf);
+    }
+    public void deactivateCustomerLift(Long id) {
+        Lift lift = ownedActiveLift(id, customerActor().getId());
+        lift.setActive(false);
     }
 
     private Building activeBuilding(Long id) {
@@ -192,6 +238,21 @@ public class AssetService {
         activeBuilding(existing.getBuilding().getId());
         Lift lift = lifts.lockById(id).orElseThrow(() -> missing("Lift"));
         if (!lift.isActive()) throw new AssetException(409, "Lift is inactive");
+        return lift;
+    }
+    private Building ownedActiveBuilding(Long id, Long userId) {
+        Building building = buildings.lockById(id).orElseThrow(() -> missing("Building"));
+        if (!building.getCustomer().getUser().getId().equals(userId)) throw missing("Building");
+        if (!building.isActive()) throw new AssetException(409, "Building is inactive");
+        identities.requireActiveCustomerUser(building.getCustomer().getUser());
+        return building;
+    }
+    private Lift ownedActiveLift(Long id, Long userId) {
+        Lift lift = lifts.lockById(id).orElseThrow(() -> missing("Lift"));
+        if (!lift.getBuilding().getCustomer().getUser().getId().equals(userId)) throw missing("Lift");
+        if (!lift.getBuilding().isActive()) throw new AssetException(409, "Building is inactive");
+        if (!lift.isActive()) throw new AssetException(409, "Lift is inactive");
+        identities.requireActiveCustomerUser(lift.getBuilding().getCustomer().getUser());
         return lift;
     }
 
