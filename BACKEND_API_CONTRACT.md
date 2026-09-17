@@ -1,6 +1,6 @@
 # Canonical backend API contract
 
-Scope: canonical Stage 1-4 API on main, reconciled with ../TARGET_VALOR_SCHEMA_SPEC.md, plus the approved Scheduling / Service Visit contract below. Flyway V1-V4 remain unchanged; Scheduling / Service Visits are added in V5, Admin Settings in V6, request attachments/feedback in V7, and payments/invoices/support tickets/AMC renewal requests/asset documents in V8. This reconciliation is covered by automated tests and the V1-V8 migration chain/current `/api/v1` endpoint set has been verified against the local MySQL dev database.
+Scope: canonical Stage 1-4 API on main, reconciled with ../TARGET_VALOR_SCHEMA_SPEC.md, plus the approved Scheduling / Service Visit contract below. Flyway V1-V4 remain unchanged; Scheduling / Service Visits are added in V5, Admin Settings in V6, request attachments/feedback in V7, payments/invoices/support tickets/AMC renewal requests/asset documents in V8, and Razorpay/live-tracking storage in V9. This reconciliation is covered by automated tests and the V1-V9 migration chain/current `/api/v1` endpoint set has been verified against the local MySQL dev database.
 
 ## Common contract
 
@@ -346,9 +346,9 @@ Extended technician personal profile fields are PRODUCT DECISION REQUIRED where 
 
 Technician-private attachment visibility is PRODUCT DECISION REQUIRED if required later. Current attachments are request-scoped evidence visible to authorized customer owner, Admin/SUPER_ADMIN and assigned/historical technician.
 
-### Future live tracking
+### Live tracking scope
 
-Live technician tracking is FUTURE and not implemented in this backend readiness phase. A future contract must define location update endpoints, current-location reads, start/stop tracking, storage/retention, customer visibility authorization, privacy controls, polling versus websocket/SSE delivery, ETA calculation, and behavior after cancellation/completion.
+Live technician tracking is implemented as latest-location state only. It does not define routing, ETA, geofencing, background history, websocket/SSE delivery, or long-term location retention; those remain future product decisions.
 
 ## Phase 1B Razorpay payments and live technician tracking
 
