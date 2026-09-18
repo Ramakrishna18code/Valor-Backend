@@ -75,6 +75,32 @@ class Phase1CommerceTest {
                 .andExpect(jsonPath("$.status").value(expected)).andReturn().getResponse().getContentAsString();
         return json.readTree(text).get("data");
     }
+    @Test void adminRolesPermissionsAndAuditAreDatabaseBacked() throws Exception {
+        User superAdmin = user(Role.SUPER_ADMIN);
+        User admin = user(Role.ADMIN);
+        User customer = user(Role.CUSTOMER);
+
+        JsonNode roles = call(get("/api/v1/admin/roles"), superAdmin, null, 200);
+        assertTrue(roles.toString().contains("ADMIN"));
+        JsonNode permissions = call(get("/api/v1/admin/permissions"), superAdmin, null, 200);
+        assertTrue(permissions.toString().contains("AUDIT_READ"));
+        call(get("/api/v1/admin/audit-logs"), admin, null, 403);
+        call(get("/api/v1/admin/roles"), customer, null, 403);
+
+        JsonNode adminRole = call(put("/api/v1/admin/roles/ADMIN/permissions"), superAdmin,
+                Map.of("permissions", List.of("ROLE_READ", "AUDIT_READ")), 200);
+        assertTrue(adminRole.get("permissions").toString().contains("AUDIT_READ"));
+
+        JsonNode created = call(post("/api/v1/admin/users"), superAdmin,
+                Map.of("email", UUID.randomUUID() + "@example.test", "password", "Secret123", "role", "ADMIN"), 200);
+        assertTrue(created.has("userId"));
+
+        JsonNode audit = call(get("/api/v1/admin/audit-logs?action=STAFF_CREATE&page=0&size=10"), admin, null, 200);
+        assertTrue(audit.get("items").size() >= 1);
+        assertEquals("STAFF_CREATE", audit.at("/items/0/action").asText());
+        assertEquals("USER", audit.at("/items/0/entityType").asText());
+        assertFalse(audit.toString().toLowerCase(Locale.ROOT).contains("secret123"));
+    }
     private Fixture fixture() throws Exception {
         User admin = user(Role.ADMIN);
         CustomerProfile owner = customer();
@@ -162,6 +188,56 @@ class Phase1CommerceTest {
                 """.formatted(finalRefundId);
         webhook(finalRefundWebhook, 200);
         assertEquals("REFUNDED", call(get("/api/v1/payments/" + paymentId), f.admin(), null, 200).get("status").asText());
+    }
+
+    @Test void adminTransactionsReusePaymentsRefundsAndExportSafely() throws Exception {
+        Fixture f = fixture();
+        long invoice = call(post("/api/v1/invoices"), f.admin(), Map.of("customerProfileId", f.customerId(),
+                "serviceRequestId", f.requestId(), "description", "Transaction invoice", "subtotal", 1000, "taxAmount", 180, "currency", "INR"), 200).get("id").asLong();
+        JsonNode checkout = call(post("/api/v1/payments/razorpay/checkout"), f.customer(), Map.of("invoiceId", invoice), 200);
+        long paymentId = checkout.get("paymentId").asLong();
+        webhook("""
+                {"id":"evt_tx_capture","event":"payment.captured","payload":{"payment":{"entity":{"id":"pay_tx_1","order_id":"%s","status":"captured"}}}}
+                """.formatted(checkout.get("razorpayOrderId").asText()), 200);
+        call(post("/api/v1/payments/" + paymentId + "/refunds"), f.admin(), Map.of("amount", 100, "reason", "report refund"), 200);
+        String refundId = call(get("/api/v1/payments/" + paymentId + "/refunds"), f.admin(), null, 200).get(0).get("razorpayRefundId").asText();
+        webhook("""
+                {"id":"evt_tx_refund","event":"refund.processed","payload":{"refund":{"entity":{"id":"%s","status":"processed"}}}}
+                """.formatted(refundId), 200);
+
+        JsonNode page = call(get("/api/v1/admin/transactions?type=PAYMENT&status=PARTIALLY_REFUNDED&page=0&size=10"), f.admin(), null, 200);
+        assertEquals(1, page.get("items").size());
+        assertEquals("PAYMENT-" + paymentId, page.at("/items/0/id").asText());
+        JsonNode refundPage = call(get("/api/v1/admin/transactions?type=REFUND&q=" + refundId), f.admin(), null, 200);
+        assertEquals("REFUND", refundPage.at("/items/0/type").asText());
+        call(get("/api/v1/admin/transactions/PAYMENT-" + paymentId), f.admin(), null, 200);
+        call(get("/api/v1/admin/transactions?type=BOGUS"), f.admin(), null, 400);
+        call(get("/api/v1/admin/transactions?dateFrom=2030-02-01&dateTo=2030-01-01"), f.admin(), null, 400);
+        call(get("/api/v1/admin/transactions"), f.customer(), null, 403);
+        call(get("/api/v1/admin/transactions"), f.technician(), null, 403);
+        mvc.perform(get("/api/v1/admin/transactions.csv").header("Authorization", "Bearer " + jwt.issue(f.admin())))
+                .andExpect(status().isOk()).andExpect(header().string("Content-Type", "text/csv"));
+    }
+
+    @Test void adminReportsAggregateExistingDataAndExportCsv() throws Exception {
+        Fixture f = fixture();
+        long invoice = call(post("/api/v1/invoices"), f.admin(), Map.of("customerProfileId", f.customerId(),
+                "serviceRequestId", f.requestId(), "description", "Report invoice", "subtotal", 800, "taxAmount", 160, "currency", "INR"), 200).get("id").asLong();
+        long payment = call(post("/api/v1/payments"), f.customer(), Map.of("invoiceId", invoice, "amount", 960,
+                "currency", "INR", "purpose", "INVOICE"), 200).get("id").asLong();
+        call(put("/api/v1/payments/" + payment + "/status"), f.admin(), Map.of("status", "SUCCEEDED"), 200);
+        call(put("/api/v1/invoices/" + invoice + "/status"), f.admin(), Map.of("status", "PAID"), 200);
+
+        for (String report : List.of("revenue", "payments", "invoices", "services", "customers", "technicians")) {
+            JsonNode data = call(get("/api/v1/admin/reports/" + report), f.admin(), null, 200);
+            assertTrue(data.get("summary").isObject(), report);
+        }
+        assertTrue(call(get("/api/v1/admin/reports/revenue"), f.admin(), null, 200).at("/summary/netAmount").asDouble() >= 960);
+        call(get("/api/v1/admin/reports/payments?status=INVALID"), f.admin(), null, 400);
+        call(get("/api/v1/admin/reports/revenue?dateFrom=2030-02-01&dateTo=2030-01-01"), f.admin(), null, 400);
+        call(get("/api/v1/admin/reports/revenue"), f.customer(), null, 403);
+        mvc.perform(get("/api/v1/admin/reports/revenue.csv").header("Authorization", "Bearer " + jwt.issue(f.admin())))
+                .andExpect(status().isOk()).andExpect(header().string("Content-Type", "text/csv"));
     }
 
     @Test void technicianLatestLocationFollowsAssignmentOwnershipAndLifecycle() throws Exception {

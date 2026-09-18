@@ -41,7 +41,7 @@ class AdminCustomerController {
     }
     record BuildingSummary(Long id, String buildingName, String buildingType, String city, String status, boolean isActive) {}
     record LiftSummary(Long id, Long buildingId, String name, String liftNumber, String currentStatus, boolean isActive) {}
-    record AdminCustomerDetail(Long userId, Long customerProfileId, String email, String phone, String fullName,
+    record AdminCustomerDetail(Long id, Long userId, Long customerProfileId, String email, String phone, String fullName,
             String alternatePhone, String companyName, String address, boolean active, String status,
             LocalDateTime createdAt, LocalDateTime updatedAt, long buildingCount, long liftCount,
             long serviceRequestCount, List<BuildingSummary> buildings, List<LiftSummary> lifts,
@@ -73,10 +73,10 @@ class AdminCustomerController {
 @Transactional
 class AdminCustomerService {
     private final UserRepo users; private final CustomerRepo profiles; private final AuthService auth;
-    private final AssetIdentityAccess identities; private final PasswordEncoder encoder; private final EntityManager em;
+    private final AssetIdentityAccess identities; private final PasswordEncoder encoder; private final EntityManager em; private final AuditService audit;
     AdminCustomerService(UserRepo users, CustomerRepo profiles, AuthService auth, AssetIdentityAccess identities,
-            PasswordEncoder encoder, EntityManager em) {
-        this.users=users; this.profiles=profiles; this.auth=auth; this.identities=identities; this.encoder=encoder; this.em=em;
+            PasswordEncoder encoder, EntityManager em, AuditService audit) {
+        this.users=users; this.profiles=profiles; this.auth=auth; this.identities=identities; this.encoder=encoder; this.em=em; this.audit=audit;
     }
     AdminCustomerController.AdminCustomerDetail create(AdminCustomerController.CustomerCreateRequest input) {
         identities.requireAdmin();
@@ -89,21 +89,28 @@ class AdminCustomerService {
         User user=new User(); user.setEmail(email); user.setPhone(phone); user.setPasswordHash(encoder.encode(input.password())); user.setRole(Role.CUSTOMER); users.saveAndFlush(user);
         CustomerProfile profile=new CustomerProfile(); profile.user=user; profile.fullName=clean(input.fullName()); profile.alternatePhone=clean(input.alternatePhone());
         profile.companyName=clean(input.companyName()); profile.address=clean(input.address()); profile.status="ACTIVE"; profile.active=true; profiles.saveAndFlush(profile);
+        audit.record("CUSTOMER_CREATE", "CUSTOMER", profile.id, "Created customer userId=" + user.getId());
         return view(profile);
     }
     AdminCustomerController.AdminCustomerDetail update(Long id, AdminCustomerController.CustomerUpdateRequest input) {
         identities.requireAdmin();
         CustomerProfile profile=lock(id);
+        String before = customerSummary(profile);
         profile.fullName=clean(input.fullName()); profile.alternatePhone=clean(input.alternatePhone());
         profile.companyName=clean(input.companyName()); profile.address=clean(input.address());
         em.flush();
+        audit.record("CUSTOMER_UPDATE", "CUSTOMER", profile.id, "Updated customer profile", before, customerSummary(profile), "SUCCESS");
         return view(profile);
     }
     AdminCustomerController.AdminCustomerDetail setActive(Long id, boolean active) {
         identities.requireAdmin();
         CustomerProfile profile=lock(id);
+        String before = "active=" + profile.active + ",status=" + profile.status + ",userActive=" + profile.user.isActive();
         profile.active=active; profile.status=active ? "ACTIVE" : "INACTIVE"; profile.user.setActive(active);
         em.flush();
+        audit.record(active ? "CUSTOMER_REACTIVATE" : "CUSTOMER_DEACTIVATE", "CUSTOMER", profile.id,
+                (active ? "Reactivated" : "Deactivated") + " customer",
+                before, "active=" + profile.active + ",status=" + profile.status + ",userActive=" + profile.user.isActive(), "SUCCESS");
         return view(profile);
     }
     @Transactional(readOnly=true)
@@ -130,7 +137,7 @@ class AdminCustomerService {
         long liftCount=em.createQuery("select count(l) from Lift l where l.building.customer.id=:id", Long.class).setParameter("id", id).getSingleResult();
         long buildingCount=em.createQuery("select count(b) from Building b where b.customer.id=:id", Long.class).setParameter("id", id).getSingleResult();
         boolean active=profile.user.isActive() && profile.active;
-        return new AdminCustomerController.AdminCustomerDetail(profile.user.getId(), id, profile.user.getEmail(), profile.user.getPhone(), profile.fullName,
+        return new AdminCustomerController.AdminCustomerDetail(id, profile.user.getId(), id, profile.user.getEmail(), profile.user.getPhone(), profile.fullName,
             profile.alternatePhone, profile.companyName, profile.address, active, profile.status, profile.createdAt, profile.updatedAt,
             buildingCount, liftCount, serviceCount, buildings, lifts, requests);
     }
@@ -142,6 +149,11 @@ class AdminCustomerService {
             r.getCreatedAt(), r.getUpdatedAt());
     }
     private String clean(String value) { var result=value==null?null:value.trim(); return result==null||result.isEmpty()?null:result; }
+    private String customerSummary(CustomerProfile profile) {
+        return "fullName=" + profile.fullName + ",alternatePhone=" + profile.alternatePhone
+                + ",companyName=" + profile.companyName + ",addressSet=" + (profile.address != null)
+                + ",active=" + profile.active + ",status=" + profile.status;
+    }
 }
 
 class CustomerNotFoundException extends RuntimeException {}

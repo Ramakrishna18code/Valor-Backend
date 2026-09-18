@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 @Component
-class RazorpayGateway {
+class RazorpayGateway implements PaymentGateway {
     private final String keyId;
     private final String keySecret;
     private final String webhookSecret;
@@ -34,17 +34,17 @@ class RazorpayGateway {
         this.mapper = mapper;
     }
 
-    String keyId() { return keyId; }
-    boolean configured() { return !keyId.isBlank() && !keySecret.isBlank(); }
+    public String keyId() { return keyId; }
+    public boolean configured() { return !keyId.isBlank() && !keySecret.isBlank(); }
 
-    JsonNode createOrder(BigDecimal amount, String currency, String receipt) {
+    public JsonNode createOrder(BigDecimal amount, String currency, String receipt) {
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", "order_test_" + receipt, "status", "created"));
         Map<String,Object> body = Map.of("amount", paise(amount), "currency", currency, "receipt", receipt, "payment_capture", 1);
         return post("/orders", body);
     }
 
-    JsonNode createRefund(String razorpayPaymentId, BigDecimal amount, String notes) {
+    public JsonNode createRefund(String razorpayPaymentId, BigDecimal amount, String notes) {
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", "rfnd_test_" + razorpayPaymentId + "_" + paise(amount), "status", "pending"));
         Map<String,Object> body = notes == null || notes.isBlank()
@@ -53,7 +53,7 @@ class RazorpayGateway {
         return post("/payments/" + razorpayPaymentId + "/refund", body);
     }
 
-    boolean validWebhookSignature(String payload, String signature) {
+    public boolean validWebhookSignature(String payload, String signature) {
         if (webhookSecret.isBlank() || signature == null || signature.isBlank()) return false;
         return constantEquals(hmac(payload, webhookSecret), signature);
     }

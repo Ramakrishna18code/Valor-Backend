@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.*;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.math.BigDecimal;
 import java.time.*;
 
 /** Flat API data only: no JPA entity or identity graph is serialized. */
@@ -17,6 +18,8 @@ public final class AssetDtos {
             @Size(max = 100) String city,
             @Size(max = 100) String state,
             @Size(max = 20) String pincode,
+            @DecimalMin("-90.0") @DecimalMax("90.0") BigDecimal latitude,
+            @DecimalMin("-180.0") @DecimalMax("180.0") BigDecimal longitude,
             @Size(max = 160) String emergencyContactName,
             @Size(max = 20) String emergencyContactPhone,
             @Size(max = 20) String status) {
@@ -28,7 +31,10 @@ public final class AssetDtos {
 
     public record CustomerBuildingWrite(@NotBlank @Size(max=200) String buildingName,
         @Size(max=80) String buildingType,@Size(max=500) String address,@Size(max=100) String city,
-        @Size(max=100) String state,@Size(max=20) String pincode,@Size(max=160) String emergencyContactName,
+        @Size(max=100) String state,@Size(max=20) String pincode,
+        @DecimalMin("-90.0") @DecimalMax("90.0") BigDecimal latitude,
+        @DecimalMin("-180.0") @DecimalMax("180.0") BigDecimal longitude,
+        @Size(max=160) String emergencyContactName,
         @Size(max=20) String emergencyContactPhone) {
         @JsonAnySetter public void rejectUnknown(String field,JsonNode value){throw new IllegalArgumentException("Unsupported asset field");}
     }
@@ -95,6 +101,8 @@ public final class AssetDtos {
             String city,
             String state,
             String pincode,
+            BigDecimal latitude,
+            BigDecimal longitude,
             String emergencyContactName,
             String emergencyContactPhone,
             String status,

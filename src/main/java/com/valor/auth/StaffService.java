@@ -13,10 +13,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 class StaffService {
     private final UserRepo users; private final TechRepo technicians; private final AuthService auth;
-    private final AssetIdentityAccess identities; private final PasswordEncoder encoder; private final EntityManager em;
+    private final AssetIdentityAccess identities; private final PasswordEncoder encoder; private final EntityManager em; private final AuditService audit;
     StaffService(UserRepo users, TechRepo technicians, AuthService auth, AssetIdentityAccess identities,
-                 PasswordEncoder encoder, EntityManager em) {
-        this.users=users; this.technicians=technicians; this.auth=auth; this.identities=identities; this.encoder=encoder; this.em=em;
+                 PasswordEncoder encoder, EntityManager em, AuditService audit) {
+        this.users=users; this.technicians=technicians; this.auth=auth; this.identities=identities; this.encoder=encoder; this.em=em; this.audit=audit;
     }
     private User actor() {
         User actor=identities.actor();
@@ -43,7 +43,9 @@ class StaffService {
             profile.assignedArea=optional(input.assignedArea()); profile.specialization=optional(input.specialization()); profile.availabilityStatus=availability;
             technicians.saveAndFlush(profile);
         }
-        return view(user,profile);
+        StaffController.View result=view(user,profile);
+        audit.record("STAFF_CREATE", "USER", user.getId(), "Created staff role=" + user.getRole() + " email=" + user.getEmail());
+        return result;
     }
     StaffController.View deactivate(Long id) {
         User actor=actor();
@@ -58,7 +60,9 @@ class StaffService {
             profile.active=false;
         }
         em.flush();
-        return view(user,profile);
+        StaffController.View result=view(user,profile);
+        audit.record("STAFF_DEACTIVATE", "USER", user.getId(), "Deactivated staff role=" + user.getRole(), "active=true", "active=false", "SUCCESS");
+        return result;
     }
     private String optional(String value) { return value==null || value.isBlank() ? null : value.trim(); }
     private StaffController.View view(User user, TechnicianProfile profile) {

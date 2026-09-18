@@ -1,6 +1,7 @@
 package com.valor.notifications;
 
 import com.valor.auth.AssetIdentityAccess;
+import com.valor.auth.AuditService;
 import java.time.*;
 import java.time.temporal.ChronoUnit;
 import org.springframework.data.domain.*;
@@ -15,10 +16,11 @@ public class NotificationService {
     private final NotificationRepository notifications;
     private final NotificationRecipientRepository recipients;
     private final AssetIdentityAccess identities;
+    private final AuditService audit;
     private final Clock clock;
     public NotificationService(NotificationRepository notifications, NotificationRecipientRepository recipients,
-            AssetIdentityAccess identities, Clock clock) {
-        this.notifications = notifications; this.recipients = recipients; this.identities = identities; this.clock = clock;
+            AssetIdentityAccess identities, AuditService audit, Clock clock) {
+        this.notifications = notifications; this.recipients = recipients; this.identities = identities; this.audit = audit; this.clock = clock;
     }
 
     public View create(Create input) {
@@ -32,6 +34,23 @@ public class NotificationService {
         Notification notification = new Notification();
         notification.setRecipient(recipient); notification.setTitle(input.title()); notification.setMessage(input.message());
         notification.setScheduledAt(input.scheduledAt());
+        notifications.save(notification); notifications.flush();
+        audit.record("NOTIFICATION_CREATE", "NOTIFICATION", notification.getId(),
+                "Created notification recipient=" + recipient.getId(),
+                null, "recipient=" + recipient.getId() + ",channel=" + notification.getChannel() + ",status=" + notification.getStatus()
+                        + ",scheduledAt=" + notification.getScheduledAt(), "SUCCESS");
+        return view(notification);
+    }
+
+    public View createSystem(Long recipientUserId, String title, String message) {
+        var recipient = recipients.findById(recipientUserId)
+                .orElseThrow(() -> new NotificationException(404, "Recipient not found"));
+        Notification notification = new Notification();
+        notification.setRecipient(recipient);
+        notification.setTitle(title == null || title.isBlank() ? "Valor update" : title);
+        notification.setMessage(message == null || message.isBlank() ? "You have a new Valor update." : message);
+        notification.setChannel(NotificationChannel.IN_APP);
+        notification.setStatus(NotificationStatus.PENDING);
         notifications.save(notification); notifications.flush();
         return view(notification);
     }

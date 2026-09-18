@@ -9,7 +9,7 @@ interface TechnicianLatestLocationRepository extends JpaRepository<TechnicianLat
     Optional<TechnicianLatestLocation> findByServiceRequestId(Long requestId);
 }
 interface TrackingRequestRepository extends JpaRepository<ServiceRequest, Long> {
-    @Query("select r from ServiceRequest r join fetch r.customer c join fetch c.user where r.id=:id")
+    @Query("select r from ServiceRequest r join fetch r.customer c join fetch c.user join fetch r.lift l join fetch l.building where r.id=:id")
     Optional<ServiceRequest> withCustomer(@Param("id") Long id);
 }
 interface TrackingAssignmentRepository extends JpaRepository<TechnicianAssignment, Long> {

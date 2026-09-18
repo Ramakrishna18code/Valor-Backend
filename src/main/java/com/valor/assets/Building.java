@@ -1,6 +1,7 @@
 package com.valor.assets;
 
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import java.time.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -27,6 +28,10 @@ public class Building extends AssetRecord {
     private String state;
     @Column(name = "pincode", nullable = true, length = 20)
     private String pincode;
+    @Column(name = "latitude", nullable = true, precision = 9, scale = 6)
+    private BigDecimal latitude;
+    @Column(name = "longitude", nullable = true, precision = 9, scale = 6)
+    private BigDecimal longitude;
     @Column(name = "emergency_contact_name", nullable = true, length = 160)
     private String emergencyContactName;
     @Column(name = "emergency_contact_phone", nullable = true, length = 20)

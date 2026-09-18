@@ -36,6 +36,7 @@ class TechnicianMeController {
     ApiResponse<Profile> updateProfile(@Valid @RequestBody ProfileUpdate input) {
         TechnicianProfile profile = current();
         if (input.availabilityStatus() != null) profile.setAvailabilityStatus(input.availabilityStatus());
+        applyEditable(profile, input);
         profile.setLastActiveAt(LocalDateTime.now(clock));
         return ApiResponse.success("Technician profile updated", profile(profile), 200);
     }
@@ -70,6 +71,16 @@ class TechnicianMeController {
     private Profile profile(TechnicianProfile p) {
         User user = p.getUser();
         return new Profile(user.getId(), p.getId(), user.getEmail(), user.getPhone(), p.getEmployeeId(),
-                p.getAssignedArea(), p.getSpecialization(), p.getAvailabilityStatus(), p.isActive(), p.getLastActiveAt());
+                p.getAssignedArea(), p.getSpecialization(), p.getAvailabilityStatus(), p.isActive(), p.getLastActiveAt(),
+                p.getProfilePhotoUrl(), p.getDateOfBirth(), p.getGender(), p.getAddress(),
+                p.getEmergencyContactName(), p.getEmergencyContactPhone());
+    }
+    static void applyEditable(TechnicianProfile profile, ProfileUpdate input) {
+        profile.setProfilePhotoUrl(input.profilePhotoUrl());
+        profile.setDateOfBirth(input.dateOfBirth());
+        profile.setGender(input.gender());
+        profile.setAddress(input.address());
+        profile.setEmergencyContactName(input.emergencyContactName());
+        profile.setEmergencyContactPhone(input.emergencyContactPhone());
     }
 }

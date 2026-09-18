@@ -1,6 +1,6 @@
 # Canonical backend API contract
 
-Scope: canonical Stage 1-4 API on main, reconciled with ../TARGET_VALOR_SCHEMA_SPEC.md, plus the approved Scheduling / Service Visit contract below. Flyway V1-V4 remain unchanged; Scheduling / Service Visits are added in V5, Admin Settings in V6, request attachments/feedback in V7, payments/invoices/support tickets/AMC renewal requests/asset documents in V8, and Razorpay/live-tracking storage in V9. This reconciliation is covered by automated tests and the V1-V9 migration chain/current `/api/v1` endpoint set has been verified against the local MySQL dev database.
+Scope: canonical Stage 1-4 API on main, reconciled with ../TARGET_VALOR_SCHEMA_SPEC.md, plus the approved Scheduling / Service Visit contract below. Flyway V1-V4 remain unchanged; Scheduling / Service Visits are added in V5, Admin Settings in V6, request attachments/feedback in V7, payments/invoices/support tickets/AMC renewal requests/asset documents in V8, Razorpay/live-tracking storage in V9, and roles/permissions/audit logging in V10. This reconciliation is covered by automated tests and the V1-V10 migration chain/current `/api/v1` endpoint set has been verified against the local MySQL dev database.
 
 ## Common contract
 
@@ -36,6 +36,25 @@ OTP send is available only under dev/test, never with prod active. No production
 | DELETE /admin/users/{userId} | SUPER_ADMIN | StaffResponse with active=false |
 
 StaffCreateRequest: email, password, role (ADMIN/TECHNICIAN only, example TECHNICIAN), employeeId?, assignedArea?, specialization?, availabilityStatus?. Technician guidance calls for these fields; existing runtime permits nullable employeeId/area/specialization and defaults availability to AVAILABLE. ADMIN must omit profile fields. Availability values are AVAILABLE, BUSY, OFF_DUTY, ON_LEAVE. StaffResponse contains userId, email, role (ADMIN/TECHNICIAN only), active and applicable technicianProfileId/employeeId/assignedArea/specialization/availabilityStatus; no password fields. Staff creation/deactivation is atomic, retains related rows, is idempotent for deactivation and disallows customer/SUPER_ADMIN management and self-deactivation. No reactivation route exists. Development SUPER_ADMIN bootstrap remains profile/opt-in controlled and is not an API.
+
+## Admin roles, permissions, and audit log
+
+Roles and permissions are database-backed in V10 and extend the existing JWT role model. JWT roles remain authoritative for CUSTOMER and TECHNICIAN application access. Admin permission checks add granular backend authorization for active Admin modules; SUPER_ADMIN keeps all permissions and cannot be edited through the role-permission API.
+
+| Method/path | Authorization | Input / data |
+|---|---|---|
+| GET /admin/permissions | `PERM_ROLE_READ` | `PermissionView[]` |
+| GET /admin/roles | `PERM_ROLE_READ` | `RoleView[]` |
+| GET /admin/roles/{name} | `PERM_ROLE_READ` | `RoleView` |
+| PUT /admin/roles/{name}/permissions | `PERM_ROLE_WRITE`, SUPER_ADMIN actor only | `PermissionUpdate` -> `RoleView` |
+| GET /admin/audit-logs | `PERM_AUDIT_READ` | filters -> `PageView<AuditView>` |
+| GET /admin/audit-logs/{id} | `PERM_AUDIT_READ` | `AuditView` |
+
+Role names are the existing application roles: `SUPER_ADMIN`, `ADMIN`, `CUSTOMER`, and `TECHNICIAN`. Permission codes are uppercase capability names for implemented Admin capabilities, including customer/assets, service requests/visits, AMC, payment/refund, transactions, reports/export, notifications, settings, role management, and audit reading. The seeded ADMIN role can read roles but cannot write roles or read audit logs unless a SUPER_ADMIN explicitly grants those permissions. CUSTOMER and TECHNICIAN receive no Admin permissions.
+
+`PermissionView` contains `id`, `code`, `description`, and `category`. `RoleView` contains `id`, `name`, `description`, `enabled`, `systemRole`, `permissions`, `createdAt`, and `updatedAt`. `PermissionUpdate` contains `permissions`, a complete replacement list of valid permission codes. Attempts to edit `SUPER_ADMIN`, grant unknown permissions, or call role-write operations as a non-SUPER_ADMIN return safe 400/403 envelopes. A user-supplied actor or role is never trusted.
+
+Audit logs are append-only through normal application APIs. No update/delete audit API exists. `AuditView` contains `id`, nullable `actorUserId`, nullable `actorRole`, `action`, `entityType`, nullable `entityId`, `resultStatus`, nullable `summary`, nullable `beforeSummary`, nullable `afterSummary`, and `createdAt`. Filters support `actorUserId`, `role`, `action`, `entityType`, `entityId`, `dateFrom`, `dateTo`, `page`, and `size`. Results are ordered newest first by createdAt/id. Audited mutations include staff create/deactivate, customer create/update/deactivate/reactivate, building and lift create/update/deactivate, AMC create/renew and renewal-request state changes, service-request create/assignment/reassignment/status changes, service-visit create/update/technician-change/cancel, visit-change-request create/approve/reject, Admin notification creation, document deletes, Admin settings updates, payment refund requests, transaction/report exports, and role-permission changes. Audit summaries are intentionally compact and omit passwords, JWTs, refresh tokens, API keys, Razorpay secrets, OTP values, card data, CVV and PIN values.
 
 ## Admin workflow directories
 
@@ -183,6 +202,26 @@ The canonical payment domain remains the application's business system of record
 
 `InvoiceCreate` requires `customerProfileId`, `description`, and `subtotal`; it accepts `serviceRequestId`, `amcContractId`, `taxAmount`, `currency`, and `dueDate`. Invoice numbers are generated by the backend as `INV-000001` style references after persistence. `InvoiceView` contains id, invoiceNumber, customerProfileId, serviceRequestId, amcContractId, description, subtotal, taxAmount, totalAmount, currency, status, issuedDate, dueDate, createdAt and updatedAt. Invoice statuses are `DRAFT`, `ISSUED`, `PAID`, `VOID`, and `CANCELLED`.
 
+## Admin Transactions, Reports, and Exports
+
+Admin finance reporting is read from the application's existing normalized database records. It does not create a second payment ledger and does not query Razorpay directly for report generation. Transaction rows are derived from `PaymentRecord` and `PaymentRefund`; invoice, customer, service request and AMC context are returned only where already linked by those records.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /admin/transactions | ADMIN, SUPER_ADMIN | `page?`, `size?`, `sort?`, `status?`, `customerId?`, `type?`, `dateFrom?`, `dateTo?`, `q?` -> `PageView<TransactionView>` |
+| GET /admin/transactions/{id} | ADMIN, SUPER_ADMIN | `TransactionView` |
+| GET /admin/transactions.csv | ADMIN, SUPER_ADMIN | same filters as list -> CSV download |
+| GET /admin/reports/{type} | ADMIN, SUPER_ADMIN | `dateFrom?`, `dateTo?`, `status?`, `customerId?`, `technicianId?` -> `ReportView` |
+| GET /admin/reports/{type}.csv | ADMIN, SUPER_ADMIN | same filters as report -> CSV download |
+
+Transaction IDs are stable display identifiers in the form `PAYMENT-{id}` or `REFUND-{id}`. `TransactionView` contains id, type, status, amount, currency, customerProfileId, invoiceId, invoiceNumber, paymentId, refundId, serviceRequestId, amcContractId, purpose, providerReference, Razorpay order/payment/refund IDs where present, gatewayStatus, gatewaySyncedAt, createdAt and updatedAt. It never exposes card data, CVV, UPI PIN, webhook secrets, API keys, raw signatures or authentication material.
+
+Transaction list supports status filtering using existing payment/refund statuses, `type=PAYMENT|REFUND`, customer filtering by customer profile ID, inclusive `dateFrom` and `dateTo`, search across invoice and safe gateway reference identifiers, pagination with size 1-100, and sorting by `createdAt`, `amount`, or `status` ascending/descending. Invalid filters return 400. Empty results return a normal page with an empty `items` array.
+
+Report types are `revenue`, `payments`, `invoices`, `services`, `customers`, and `technicians`. `ReportView` contains `type`, a summary map and optional tabular rows. Revenue uses successful/refunded/partially-refunded payment gross amount minus successful refunds as net amount. Payments and invoices group by existing backend statuses. Services summarize service-request statuses and visit counts. Customer and technician reports use existing profile, AMC, availability and assignment data only; no SLA, ranking or performance-score calculation is defined in this phase.
+
+CSV exports respect the same Admin authorization and filters as their JSON endpoints, include headers, handle empty datasets, escape cells safely and prefix formula-like values to prevent spreadsheet formula execution. PDF and Excel exports are not implemented for Phase 13A.
+
 ## Paid AMC Renewal Requests
 
 Paid renewal is represented as a customer renewal request that Admin/SUPER_ADMIN can quote and later mark renewed only after a linked payment has `SUCCEEDED`. Automated pricing rules are not defined; the current implemented pricing rule is an admin-supplied quote amount/currency.
@@ -324,7 +363,7 @@ The Technician application is built on canonical Service Requests, technician as
 
 Technician authentication uses `POST /auth/login/technician`, the shared refresh/logout routes, and role-scoped bearer JWT authorization. TECHNICIAN cannot access Admin customer management, staff provisioning, Admin settings, unrelated jobs, unrelated visits, unrelated attachments, or another technician's private workload.
 
-TechnicianProfileView contains userId, technicianProfileId, email, phone, employeeId, assignedArea, specialization, availabilityStatus, active and lastActiveAt. Employee ID, assigned area, specialization, email, phone and active state are read-only in the technician app. TechnicianProfileUpdate currently accepts only `availabilityStatus`, with values `AVAILABLE`, `BUSY`, `OFF_DUTY`, and `ON_LEAVE`; unknown fields are rejected. Availability is operational metadata and never bypasses Visit conflict detection, assignment authorization, or Service Request state validation.
+TechnicianProfileView contains userId, technicianProfileId, email, phone, employeeId, assignedArea, specialization, availabilityStatus, active, lastActiveAt, profilePhotoUrl, dateOfBirth, gender, address, emergencyContactName, and emergencyContactPhone. Employee ID, assigned area, specialization, email, phone and active state are read-only in the technician app. TechnicianProfileUpdate accepts `availabilityStatus`, `profilePhotoUrl`, `dateOfBirth`, `gender`, `address`, `emergencyContactName`, and `emergencyContactPhone`; unknown fields are rejected. Availability is operational metadata and never bypasses Visit conflict detection, assignment authorization, or Service Request state validation.
 
 TechnicianDashboardSummary contains assignedJobs, pendingJobs, inProgressJobs, completedJobs, completedThisQuarter, todaysScheduledVisits and emergencyJobs. Assigned jobs and emergency jobs count active assigned/accepted assignments. Pending jobs count assigned requests in `ASSIGNED`. In-progress jobs count `ACCEPTED`, `ON_THE_WAY`, `REACHED_SITE`, `DIAGNOSIS`, `REPAIR_IN_PROGRESS`, `WAITING_FOR_PARTS`, and `TESTING`. Completed jobs count all completed requests historically assigned to the technician. Completed this quarter uses the current calendar quarter in the backend clock. Today's scheduled visits count the technician's own visits on the backend current date.
 
@@ -332,27 +371,63 @@ Technician job lists are limited to the signed-in technician. Active work requir
 
 Technician progress uses the canonical Service Request lifecycle. There is no technician-only state machine. "Start travel" maps to `ON_THE_WAY`, "mark arrived" maps to `REACHED_SITE`, work execution maps through `DIAGNOSIS`, `REPAIR_IN_PROGRESS`, `WAITING_FOR_PARTS`, and `TESTING`, and completion uses `COMPLETED` after a valid report exists for the active assignment. Cancellation uses the existing `CANCELLED` transition rules and requires notes/reason. Visit progress remains on the Visit resource and must stay consistent with the Service Request/assignment authorization rules.
 
-Technician photos/evidence reuse Service Request attachments. A technician may upload JPEG, PNG, WebP or PDF files only to their active assigned nonterminal request. A technician may list/download attachments for an active assigned request and for completed/cancelled requests where they have historical assignment. A technician may delete only files they uploaded, and only while the request is nonterminal and assigned to them. Customer owners and Admin/SUPER_ADMIN can see request-scoped attachments through their existing authorization. No separate technician-private attachment visibility has been implemented.
+Technician photos/evidence reuse Service Request attachments. A technician may upload JPEG, PNG, WebP or PDF files only to their active assigned nonterminal request. A technician may list/download attachments for an active assigned request and for completed/cancelled requests where they have historical assignment. A technician may delete only files they uploaded, and only while the request is nonterminal and assigned to them. Customer owners and Admin/SUPER_ADMIN can see request-scoped attachments through their existing authorization.
+
+Technician-private attachments are separate from request-scoped attachments. They are visible only to the technician owner and authorized Admin/SUPER_ADMIN users. Customers can never list, download, upload, or delete technician-private attachments. The API returns metadata and file downloads only; it never exposes filesystem paths or storage keys.
 
 Technician notifications reuse the canonical notification inbox. Assignment, reassignment, Visit creation/reschedule/cancellation, change-request approval/rejection, emergency assignment and admin update messages should be represented as normal in-app notifications to the technician user where emitting services create them. No technician-specific notification table exists.
 
 ### Deferred or product decision required
 
-Configurable/service-type checklists are a PRODUCT DECISION REQUIRED item. The backend currently supports structured reports and notes, not a checklist engine. A future checklist contract must define template ownership, checklist fields, required/optional items, service-type/lift applicability, versioning, completion rules and history.
-
-Customer verification OTP for job completion is PRODUCT DECISION REQUIRED. The backend does not define who generates the OTP, when it is issued, who receives it, expiration, retry limits, who submits it, whether it gates completion, or customer-app display behavior. No OTP completion gate is implemented.
-
-Extended technician personal profile fields are PRODUCT DECISION REQUIRED where not already modeled: profile photo, date of birth, gender, address, emergency contact, and technician-owned editing of phone/email. These fields are not added to the canonical profile in this readiness phase.
-
-Technician-private attachment visibility is PRODUCT DECISION REQUIRED if required later. Current attachments are request-scoped evidence visible to authorized customer owner, Admin/SUPER_ADMIN and assigned/historical technician.
+Routing, ETA, geofencing, background location history, websocket/SSE delivery, long-term location retention, and additional tracking intelligence remain deferred product decisions.
 
 ### Live tracking scope
 
 Live technician tracking is implemented as latest-location state only. It does not define routing, ETA, geofencing, background history, websocket/SSE delivery, or long-term location retention; those remain future product decisions.
 
+## Phase 15 technician advanced operations
+
+Checklist templates are managed by Admin/SUPER_ADMIN users and consumed by assigned technicians. Templates have active state, version, timestamps, optional description, and service-type applicability. Items belong to a template and include label, optional description, required flag, sort order, and input type (`CHECKBOX`, `TEXT`, `NUMBER`, or `PHOTO_NOTE`). Checklist questions are not hardcoded in the Technician app.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /admin/checklist-templates | ADMIN, SUPER_ADMIN | TemplateView[] |
+| POST /admin/checklist-templates | ADMIN, SUPER_ADMIN | name, description?, active?, serviceTypes? -> TemplateView |
+| PUT /admin/checklist-templates/{id} | ADMIN, SUPER_ADMIN | editable template fields -> TemplateView |
+| POST /admin/checklist-templates/{id}/items | ADMIN, SUPER_ADMIN | label, description?, required?, sortOrder, inputType -> TemplateView |
+| PUT /admin/checklist-templates/{id}/items/{itemId} | ADMIN, SUPER_ADMIN | editable item fields -> TemplateView |
+| DELETE /admin/checklist-templates/{id}/items/{itemId} | ADMIN, SUPER_ADMIN | no content |
+| GET /technician/me/jobs/{id}/checklist | assigned TECHNICIAN | JobChecklistView or null data when no active applicable template exists |
+| PUT /technician/me/jobs/{id}/checklist/responses | assigned TECHNICIAN | item response batch -> JobChecklistView |
+
+The backend creates a job checklist from the active applicable template when an assigned technician opens the checklist. Required items must be completed before the service request can transition to `COMPLETED`. If no active applicable template exists, checklist gating does not block completion.
+
+Completion OTP is backend-owned and gates service completion after the structured report and required checklist validations pass. OTP values are generated server-side, hashed with the configured password encoder, expire, enforce attempt limits and lockout, and are never returned in API responses or logs. Delivery uses the communication-provider abstraction; the current application-level implementation uses a no-op sender so real SMS/WhatsApp/email credentials are not required for tests.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| POST /technician/me/jobs/{id}/completion-otp/request | assigned TECHNICIAN | creates OTP state; does not return OTP |
+| POST /technician/me/jobs/{id}/completion-otp/verify | assigned TECHNICIAN | otpId, otp -> state |
+| GET /service-requests/{id}/completion-otp | owner CUSTOMER, assigned TECHNICIAN, ADMIN/SUPER_ADMIN | safe OTP state only |
+
+Technician-private attachments use the existing storage abstraction with MIME and size validation. The technician routes operate only on the signed-in technician's private files; Admin/SUPER_ADMIN routes require a target technician id. Customers have no route to these files.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /technician/me/private-attachments | TECHNICIAN | own private attachment metadata |
+| POST /technician/me/private-attachments | TECHNICIAN | multipart file -> metadata |
+| GET /technician/me/private-attachments/{id} | owner TECHNICIAN | file download |
+| DELETE /technician/me/private-attachments/{id} | owner TECHNICIAN | no content |
+| GET /admin/technicians/{id} | ADMIN, SUPER_ADMIN | expanded technician profile |
+| PUT /admin/technicians/{id} | ADMIN, SUPER_ADMIN | expanded editable technician fields -> profile |
+| GET /admin/technicians/{id}/private-attachments | ADMIN, SUPER_ADMIN | technician private attachment metadata |
+| POST /admin/technicians/{id}/private-attachments | ADMIN, SUPER_ADMIN | multipart file -> metadata |
+| GET /admin/technicians/{id}/private-attachments/{attachmentId} | ADMIN, SUPER_ADMIN | file download |
+| DELETE /admin/technicians/{id}/private-attachments/{attachmentId} | ADMIN, SUPER_ADMIN | no content |
+
 ## Phase 1B Razorpay payments and live technician tracking
 
-The Phase 1 payment/invoice domain remains the application business system of record. Razorpay is an external gateway only. Backend secrets are configured by environment variables `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET`; clients receive only the public key id and checkout order details.
+The Phase 1 payment/invoice domain remains the application business system of record. Razorpay is an external gateway only behind the backend `PaymentGateway` abstraction, currently implemented by `RazorpayGateway`. Backend secrets are configured by environment variables `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET`; clients receive only the public key id and checkout order details.
 
 | Method/path | Role | Input / data |
 |---|---|---|
@@ -362,7 +437,7 @@ The Phase 1 payment/invoice domain remains the application business system of re
 | GET /payments/{id}/refunds | owner CUSTOMER, ADMIN/SUPER_ADMIN | RefundView[] |
 | GET /admin/payments/reconciliation | ADMIN/SUPER_ADMIN | lightweight mismatch issue list |
 
-Checkout creation never trusts a frontend amount. It validates invoice ownership/eligibility, rejects paid/void/cancelled invoices, rejects an existing processing/succeeded payment attempt for the invoice, creates a local `payment_records` row, and creates a Razorpay Order for the trusted invoice total/currency. Browser/app checkout return is not authoritative; clients should poll `GET /payments/{id}` and show pending until webhook/API synchronization updates the local payment.
+Checkout creation never trusts a frontend amount. It validates invoice ownership/eligibility, rejects paid/void/cancelled invoices, rejects an existing processing/succeeded payment attempt for the invoice, creates a local `payment_records` row, and creates a Razorpay Order for the trusted invoice total/currency. Browser/app checkout return is not authoritative; clients should poll `GET /payments/{id}` and show pending until webhook/API synchronization updates the local payment. Application-level integration can be built without provider credentials; real gateway transactions require later external activation.
 
 Razorpay event mapping currently handles documented event names `payment.authorized`, `payment.captured`, `payment.failed`, `refund.processed`, and `refund.failed`. Internal statuses remain compatible: `PENDING`, `PROCESSING`, `SUCCEEDED`, `FAILED`, `CANCELLED`, `REFUNDED`, and `PARTIALLY_REFUNDED`. Unknown Razorpay events with valid signatures are stored as processed and ignored safely.
 
@@ -377,6 +452,72 @@ Live tracking is latest-location only. Tracking is active for canonical Service 
 
 Technician identity is always resolved from JWT; technician_id is never accepted from the client. Customers can only view their own request's assigned technician location while tracking is active. Coordinates are validated server-side and stored in `technician_latest_locations` as one latest row per service request.
 
+## Phase 16 advanced live tracking
+
+Phase 16 extends, but does not replace, the latest-location model. The existing
+`POST /technician/me/jobs/{id}/location` endpoint still updates the optimized
+latest row and now also writes append-only history, evaluates geofence state, and
+returns advanced tracking metadata. The existing customer endpoint remains
+compatible: older clients can keep reading `latitude`, `longitude`, `timestamp`,
+`stale`, and `trackingState`; newer clients may additionally read `geofence`,
+`route`, and `eta`.
+
+Location history is stored in `technician_location_history` with service request,
+technician, latitude, longitude, and recordedAt indexes. It is backend/internal
+tracking data in this phase; no customer history endpoint is exposed.
+
+Geofencing uses the service request's lift -> building relationship. Buildings
+now support nullable `latitude` and `longitude`. If a building has no coordinates,
+geofence state is `UNAVAILABLE`; no coordinates are invented. The geofence radius
+is configurable through `valor.tracking.geofence-radius-meters` and defaults to
+150 meters.
+
+Routing is behind `RoutingProvider`. The default provider is intentionally
+unconfigured and returns `PROVIDER_NOT_CONFIGURED`, so the backend never fabricates
+production route or ETA values. ETA is available only when the route provider
+returns a route and the latest technician location is not stale. Stale location,
+missing site coordinates, inactive jobs, and unconfigured providers all produce
+explicit unavailable states.
+
+Background tracking is a Technician client capability using Expo background
+location tasks. The backend still authorizes every submitted point by JWT,
+assignment, and active trackable request status.
+
+## Phase 17 communication platform foundation
+
+Phase 17 adds a provider-independent communication foundation. It does not
+activate real Email, SMS, MSG91, WhatsApp, or other external providers.
+
+Tables: `communication_templates`, `communication_preferences`,
+`communication_events`, and `communication_messages`.
+
+Channels: `EMAIL`, `SMS`, `WHATSAPP`, `IN_APP`.
+
+Message status lifecycle: `PENDING`, `PROCESSING`, `SENT`, `DELIVERED`,
+`FAILED`, `CANCELLED`.
+
+Idempotency rule: `communication_events.idempotency_key` is unique. Reprocessing
+the same idempotency key reuses the existing communication event and does not
+create duplicate per-channel messages.
+
+Provider abstraction: backend business logic uses communication providers
+(`EmailProvider`, `SmsProvider`, `WhatsAppProvider`) through
+`CommunicationService`; provider-specific SDK/API behavior remains outside the
+core communication domain. Current providers are mock/development providers.
+
+Recipient logging rule: normal logs and Admin visibility use masked recipients
+such as `g***@example.com` or `+91******1234`. Provider secrets, JWTs, passwords,
+OTP plaintext, and authorization tokens must not be logged.
+
+| Method/path | Role | Input / data |
+|---|---|---|
+| GET /admin/communications/messages | ADMIN/SUPER_ADMIN | status?, page?, size? -> paged communication messages |
+| POST /admin/communications/events | ADMIN/SUPER_ADMIN | eventType, recipientUserId, channels, templateKey?, variables?, idempotencyKey? -> messages |
+| POST /admin/communications/messages/{id}/process | ADMIN/SUPER_ADMIN | processes one pending/failed message through the configured mock/provider abstraction |
+| POST /admin/communications/retries/process | ADMIN/SUPER_ADMIN | limit? -> processed retry count |
+| GET /admin/communications/preferences/{userId} | ADMIN/SUPER_ADMIN | communication channel preferences |
+| PUT /admin/communications/preferences/{userId} | ADMIN/SUPER_ADMIN | emailEnabled, smsEnabled, whatsappEnabled, inAppEnabled |
+
 ## Migration and client readiness
 
-V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. V7 adds request-scoped attachments and one feedback row per service request. V8 adds payment_records, invoices, support_tickets, amc_renewal_requests and asset_documents with restrictive foreign keys, owner indexes, status checks and no credential storage. V9 adds Razorpay identifiers to payment_records, payment_refunds, razorpay_webhook_events and technician_latest_locations. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. Local H2 verification validated V1-V9 in the focused backend context test. Live Razorpay Test Mode transaction verification and public HTTPS webhook delivery remain environment-dependent.
+V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. V7 adds request-scoped attachments and one feedback row per service request. V8 adds payment_records, invoices, support_tickets, amc_renewal_requests and asset_documents with restrictive foreign keys, owner indexes, status checks and no credential storage. V9 adds Razorpay identifiers to payment_records, payment_refunds, razorpay_webhook_events and technician_latest_locations. V10 adds roles, permissions, role_permissions and audit_logs with seeded role capability mappings and audit indexes. V11 adds technician advanced operations tables for checklist, completion OTP, expanded profiles, and technician-private attachments. V12 adds nullable building coordinates plus location history and geofence state/event tables. V13 adds provider-independent communication templates, preferences, events, and messages with channel/status/retry/idempotency indexes. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. Live Razorpay Test Mode transaction verification, public HTTPS webhook delivery, routing provider activation, communication provider activation, and real background/device tracking validation remain environment-dependent.

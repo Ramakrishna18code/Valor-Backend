@@ -22,13 +22,14 @@ public class ServiceVisitService {
     private final AssignmentRepository assignments;
     private final WorkflowIdentityAccess profiles;
     private final AssetIdentityAccess identities;
+    private final AuditService audit;
 
     public ServiceVisitService(ServiceVisitRepository visits, VisitChangeRequestRepository changeRequests,
             VisitHistoryRepository history, VisitTechnicianRepository technicians, RequestRepository requests,
-            AssignmentRepository assignments, WorkflowIdentityAccess profiles, AssetIdentityAccess identities) {
+            AssignmentRepository assignments, WorkflowIdentityAccess profiles, AssetIdentityAccess identities, AuditService audit) {
         this.visits = visits; this.changeRequests = changeRequests; this.history = history;
         this.technicians = technicians; this.requests = requests; this.assignments = assignments;
-        this.profiles = profiles; this.identities = identities;
+        this.profiles = profiles; this.identities = identities; this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -58,6 +59,8 @@ public class ServiceVisitService {
         visit.setRequest(request); visit.setTechnician(technician); visit.setScheduledDate(input.scheduledDate());
         visit.setStartTime(input.startTime()); visit.setEndTime(input.endTime()); visit.setNotes(input.notes());
         visits.saveAndFlush(visit); record(visit, actor, "CREATED", null);
+        audit.record("SERVICE_VISIT_CREATE", "SERVICE_VISIT", visit.getId(), "Created service visit request=" + request.getId(),
+                null, visitSummary(visit), "SUCCESS");
         return view(visit, actor);
     }
 
@@ -71,6 +74,7 @@ public class ServiceVisitService {
         ensureAssigned(request, newTechnician);
         validateWindow(input.scheduledDate(), input.startTime(), input.endTime());
         ensureAvailable(request.getId(), newTechnician.getId(), input.scheduledDate(), input.startTime(), input.endTime(), visit.getId());
+        String before = visitSummary(visit);
         TechnicianProfile previousTechnician = visit.getTechnician();
         boolean technicianChanged = !previousTechnician.getId().equals(newTechnician.getId());
         visit.setTechnician(newTechnician); visit.setScheduledDate(input.scheduledDate());
@@ -78,6 +82,9 @@ public class ServiceVisitService {
         visits.flush();
         VisitHistory change = record(visit, actor, technicianChanged ? "TECHNICIAN_CHANGED" : "RESCHEDULED", input.notes());
         change.setFromTechnician(previousTechnician);
+        audit.record(technicianChanged ? "SERVICE_VISIT_TECHNICIAN_CHANGE" : "SERVICE_VISIT_UPDATE", "SERVICE_VISIT", visit.getId(),
+                technicianChanged ? "Changed service visit technician" : "Updated service visit",
+                before, visitSummary(visit), "SUCCESS");
         return view(visit, actor);
     }
 
@@ -89,9 +96,12 @@ public class ServiceVisitService {
         } else admin(actor);
         requireReason(reason);
         if (visit.getStatus() == VisitStatus.COMPLETED || visit.getStatus() == VisitStatus.CANCELLED) throw conflict("Visit is terminal");
+        String before = visitSummary(visit);
         VisitStatus from = visit.getStatus(); visit.setStatus(VisitStatus.CANCELLED);
         VisitHistory event = record(visit, actor, "CANCELLED", reason); event.setFromStatus(from); event.setToStatus(VisitStatus.CANCELLED);
         visits.flush();
+        audit.record("SERVICE_VISIT_CANCEL", "SERVICE_VISIT", visit.getId(), "Cancelled service visit",
+                before, visitSummary(visit), "SUCCESS");
         return view(visit, actor);
     }
 
@@ -134,6 +144,8 @@ public class ServiceVisitService {
         if (pendingForVisit(id, VisitChangeRequestType.RESCHEDULE)) throw conflict("A reschedule request is already pending");
         VisitChangeRequest request = newChange(visit, actor, technician, VisitChangeRequestType.RESCHEDULE, input);
         changeRequests.saveAndFlush(request); record(visit, actor, "RESCHEDULE_REQUESTED", input.reason());
+        audit.record("VISIT_CHANGE_REQUEST_CREATE", "VISIT_CHANGE_REQUEST", request.getId(), "Created visit change request visit=" + visit.getId(),
+                null, changeSummary(request), "SUCCESS");
         return changeView(request);
     }
 
@@ -147,6 +159,8 @@ public class ServiceVisitService {
         if (pendingForVisit(id, VisitChangeRequestType.ADDITIONAL_VISIT)) throw conflict("An additional visit request is already pending");
         VisitChangeRequest change = newChange(visit, actor, technician, VisitChangeRequestType.ADDITIONAL_VISIT, input);
         changeRequests.saveAndFlush(change); record(visit, actor, "ADDITIONAL_VISIT_REQUESTED", input.reason());
+        audit.record("VISIT_CHANGE_REQUEST_CREATE", "VISIT_CHANGE_REQUEST", change.getId(), "Created visit change request visit=" + visit.getId(),
+                null, changeSummary(change), "SUCCESS");
         return changeView(change);
     }
 
@@ -174,19 +188,32 @@ public class ServiceVisitService {
             ensureAvailable(request.getId(), technician.getId(), date, start, end, visit.getId());
             TechnicianProfile previousTechnician = visit.getTechnician();
             boolean technicianChanged = !previousTechnician.getId().equals(technician.getId());
+            String visitBefore = visitSummary(visit);
+            String before = changeSummary(change);
             visit.setTechnician(technician); visit.setScheduledDate(date); visit.setStartTime(start); visit.setEndTime(end);
             visits.flush();
             VisitHistory changeEvent = record(visit, actor, technicianChanged ? "TECHNICIAN_CHANGED" : "RESCHEDULED", input.reviewNotes());
             changeEvent.setFromTechnician(previousTechnician);
             change.setStatus(VisitChangeRequestStatus.APPROVED); review(change, actor, input.reviewNotes());
+            audit.record("VISIT_CHANGE_REQUEST_APPROVE", "VISIT_CHANGE_REQUEST", change.getId(), "Approved visit change request visit=" + visit.getId(),
+                    before, changeSummary(change), "SUCCESS");
+            audit.record(technicianChanged ? "SERVICE_VISIT_TECHNICIAN_CHANGE" : "SERVICE_VISIT_UPDATE", "SERVICE_VISIT", visit.getId(),
+                    technicianChanged ? "Changed service visit technician" : "Updated service visit",
+                    visitBefore, visitSummary(visit), "SUCCESS");
             changeRequests.flush(); return view(visit, actor);
         }
         if (!visits.activeForRequest(request.getId(), ACTIVE).isEmpty()) throw conflict("Service request already has an active visit");
         ensureAvailable(request.getId(), technician.getId(), date, start, end, null);
         ServiceVisit visit = new ServiceVisit(); visit.setRequest(request); visit.setTechnician(technician);
         visit.setScheduledDate(date); visit.setStartTime(start); visit.setEndTime(end); visit.setNotes(input.reviewNotes());
+        String before = changeSummary(change);
         visits.saveAndFlush(visit); record(visit, actor, "CREATED", input.reviewNotes());
-        change.setStatus(VisitChangeRequestStatus.APPROVED); review(change, actor, input.reviewNotes()); changeRequests.flush();
+        audit.record("SERVICE_VISIT_CREATE", "SERVICE_VISIT", visit.getId(), "Created service visit request=" + request.getId(),
+                null, visitSummary(visit), "SUCCESS");
+        change.setStatus(VisitChangeRequestStatus.APPROVED); review(change, actor, input.reviewNotes());
+        audit.record("VISIT_CHANGE_REQUEST_APPROVE", "VISIT_CHANGE_REQUEST", change.getId(), "Approved visit change request visit=" + id(change.getVisit()),
+                before, changeSummary(change), "SUCCESS");
+        changeRequests.flush();
         return view(visit, actor);
     }
 
@@ -194,8 +221,11 @@ public class ServiceVisitService {
         User actor = identities.actor(); admin(actor); requireReason(reason);
         VisitChangeRequest change = changeRequests.detail(id).orElseThrow(() -> missing("Visit change request not found"));
         if (change.getStatus() != VisitChangeRequestStatus.PENDING) throw conflict("Change request is already decided");
+        String before = changeSummary(change);
         change.setStatus(VisitChangeRequestStatus.REJECTED); review(change, actor, reason);
         if (change.getVisit() != null) record(change.getVisit(), actor, "REQUEST_REJECTED", reason);
+        audit.record("VISIT_CHANGE_REQUEST_REJECT", "VISIT_CHANGE_REQUEST", change.getId(), "Rejected visit change request visit=" + id(change.getVisit()),
+                before, changeSummary(change), "SUCCESS");
         changeRequests.flush(); return changeView(change);
     }
 
@@ -248,6 +278,25 @@ public class ServiceVisitService {
         event.setStartTime(visit.getStartTime()); event.setEndTime(visit.getEndTime()); event.setToStatus(visit.getStatus());
         event.setToTechnician(visit.getTechnician()); return history.save(event);
     }
+    private String visitSummary(ServiceVisit visit) {
+        return "request=" + visit.getRequest().getId()
+                + ",technician=" + visit.getTechnician().getId()
+                + ",date=" + visit.getScheduledDate()
+                + ",startTime=" + visit.getStartTime()
+                + ",endTime=" + visit.getEndTime()
+                + ",status=" + visit.getStatus();
+    }
+    private String changeSummary(VisitChangeRequest request) {
+        return "visit=" + id(request.getVisit())
+                + ",request=" + request.getRequest().getId()
+                + ",type=" + request.getType()
+                + ",status=" + request.getStatus()
+                + ",requestedDate=" + request.getRequestedDate()
+                + ",requestedStartTime=" + request.getRequestedStartTime()
+                + ",requestedEndTime=" + request.getRequestedEndTime()
+                + ",technician=" + request.getRequestedTechnician().getId();
+    }
+    private Long id(ServiceVisit visit) { return visit == null ? null : visit.getId(); }
     private VisitView view(ServiceVisit visit, User actor) {
         boolean customer = actor.getRole() == Role.CUSTOMER;
         List<VisitHistoryView> events = customer ? List.of() : history.findByVisitIdOrderByChangedAtAscIdAsc(visit.getId()).stream().map(this::historyView).toList();

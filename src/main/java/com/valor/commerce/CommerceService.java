@@ -39,18 +39,19 @@ class CommerceService {
     private final PaymentRefundRepository refunds;
     private final RazorpayWebhookEventRepository webhookEvents;
     private final AssetDocumentStorage storage;
-    private final RazorpayGateway razorpay;
+    private final PaymentGateway paymentGateway;
+    private final AuditService audit;
 
     CommerceService(AssetIdentityAccess identities, CommerceCustomerRepository customers, CommerceBuildingRepository buildings,
             CommerceLiftRepository lifts, CommerceAmcRepository amcs, CommerceRequestRepository requests,
             CommerceAssignmentRepository assignments, CommerceReportRepository reports, PaymentRecordRepository payments,
             InvoiceRepository invoices, SupportTicketRepository tickets, AmcRenewalRequestRepository renewals,
             AssetDocumentRepository documents, PaymentRefundRepository refunds, RazorpayWebhookEventRepository webhookEvents,
-            AssetDocumentStorage storage, RazorpayGateway razorpay) {
+            AssetDocumentStorage storage, PaymentGateway paymentGateway, AuditService audit) {
         this.identities = identities; this.customers = customers; this.buildings = buildings; this.lifts = lifts;
         this.amcs = amcs; this.requests = requests; this.assignments = assignments; this.reports = reports;
         this.payments = payments; this.invoices = invoices; this.tickets = tickets; this.renewals = renewals;
-        this.documents = documents; this.refunds = refunds; this.webhookEvents = webhookEvents; this.storage = storage; this.razorpay = razorpay;
+        this.documents = documents; this.refunds = refunds; this.webhookEvents = webhookEvents; this.storage = storage; this.paymentGateway = paymentGateway; this.audit = audit;
     }
 
     PageView<PaymentView> payments(Pageable page) {
@@ -106,9 +107,9 @@ class CommerceService {
         row.setAmount(invoice.getTotalAmount()); row.setCurrency(invoice.getCurrency()); row.setPurpose(PaymentPurpose.INVOICE);
         row.setStatus(PaymentStatus.PROCESSING);
         payments.saveAndFlush(row);
-        JsonNode order = razorpay.createOrder(row.getAmount(), row.getCurrency(), "valor-payment-" + row.getId());
+        JsonNode order = paymentGateway.createOrder(row.getAmount(), row.getCurrency(), "valor-payment-" + row.getId());
         row.setRazorpayOrderId(text(order, "id")); row.setGatewayStatus(text(order, "status")); row.setGatewaySyncedAt(java.time.LocalDateTime.now());
-        return new RazorpayCheckoutView(row.getId(), invoice.getId(), razorpay.keyId(), row.getRazorpayOrderId(), row.getAmount(), row.getCurrency(), row.getStatus().name());
+        return new RazorpayCheckoutView(row.getId(), invoice.getId(), paymentGateway.keyId(), row.getRazorpayOrderId(), row.getAmount(), row.getCurrency(), row.getStatus().name());
     }
 
     PaymentView requestRefund(Long paymentId, RefundCreate input) {
@@ -124,8 +125,10 @@ class CommerceService {
         refund.setPayment(payment); refund.setRequestedBy(identities.actor()); refund.setAmount(input.amount()); refund.setCurrency(payment.getCurrency());
         refund.setReason(clean(input.reason(), 500)); refund.setStatus(RefundStatus.PROCESSING);
         refunds.saveAndFlush(refund);
-        JsonNode node = razorpay.createRefund(payment.getRazorpayPaymentId(), refund.getAmount(), refund.getReason());
+        JsonNode node = paymentGateway.createRefund(payment.getRazorpayPaymentId(), refund.getAmount(), refund.getReason());
         refund.setRazorpayRefundId(text(node, "id")); refund.setGatewayStatus(text(node, "status"));
+        audit.record("PAYMENT_REFUND_REQUEST", "PAYMENT", payment.getId(), "Requested refund amount=" + refund.getAmount(),
+                "status=" + payment.getStatus(), "refundStatus=" + refund.getStatus(), "SUCCESS");
         return view(payment);
     }
 
@@ -135,7 +138,7 @@ class CommerceService {
     }
 
     void razorpayWebhook(String payload, String signature) {
-        if (!razorpay.validWebhookSignature(payload, signature)) throw new CommerceException(400, "Invalid Razorpay signature");
+        if (!paymentGateway.validWebhookSignature(payload, signature)) throw new CommerceException(400, "Invalid Razorpay signature");
         try {
             JsonNode root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(payload);
             String eventId = text(root, "id"), event = text(root, "event");
@@ -242,7 +245,10 @@ class CommerceService {
         row.setContract(contract); row.setCustomer(customer); row.setRequestedBy(actor);
         row.setRequestedStartDate(input.requestedStartDate()); row.setRequestedEndDate(input.requestedEndDate());
         row.setCustomerNotes(clean(input.customerNotes(), 1000));
-        return view(renewals.saveAndFlush(row));
+        renewals.saveAndFlush(row);
+        audit.record("AMC_RENEWAL_REQUEST_CREATE", "AMC_RENEWAL_REQUEST", row.getId(), "Created AMC renewal request amc=" + contract.getId(),
+                null, renewalSummary(row), "SUCCESS");
+        return view(row);
     }
     RenewalView quoteRenewal(Long id, RenewalQuote input) {
         requireAdmin();
@@ -250,16 +256,22 @@ class CommerceService {
         row.setQuotedAmount(input.quotedAmount()); row.setCurrency(currency(input.currency())); row.setAdminNotes(clean(input.adminNotes(), 1000));
         if (input.invoiceId() != null) row.setInvoice(authorized(invoices.findById(input.invoiceId()).orElseThrow(() -> missing("Invoice"))));
         if (input.paymentId() != null) row.setPayment(authorized(payments.findById(input.paymentId()).orElseThrow(() -> missing("Payment"))));
+        String before = renewalSummary(row);
         row.setStatus(RenewalRequestStatus.QUOTED);
+        audit.record("AMC_RENEWAL_QUOTE", "AMC_RENEWAL_REQUEST", row.getId(), "Quoted AMC renewal request amc=" + row.getContract().getId(),
+                before, renewalSummary(row), "SUCCESS");
         return view(row);
     }
     RenewalView updateRenewal(Long id, RenewalStatusUpdate input) {
         requireAdmin();
         AmcRenewalRequest row = renewals.findById(id).orElseThrow(() -> missing("AMC renewal request"));
+        String before = renewalSummary(row);
         row.setStatus(input.status()); row.setAdminNotes(clean(input.adminNotes(), 1000));
         if (input.invoiceId() != null) row.setInvoice(authorized(invoices.findById(input.invoiceId()).orElseThrow(() -> missing("Invoice"))));
         if (input.paymentId() != null) row.setPayment(authorized(payments.findById(input.paymentId()).orElseThrow(() -> missing("Payment"))));
         if (input.status() == RenewalRequestStatus.RENEWED) applyRenewal(row);
+        audit.record("AMC_RENEWAL_STATUS", "AMC_RENEWAL_REQUEST", row.getId(), "Changed AMC renewal status amc=" + row.getContract().getId(),
+                before, renewalSummary(row), "SUCCESS");
         return view(row);
     }
 
@@ -299,6 +311,9 @@ class CommerceService {
         if (row.getOwnerType() != type || !row.getOwnerId().equals(ownerId)) throw missing("Document");
         documents.delete(row);
         try { storage.delete(row.getStorageKey()); } catch (IOException ignored) { }
+        audit.record("DOCUMENT_DELETE", "DOCUMENT", row.getId(), "Deleted " + type + " document parent=" + ownerId,
+                "document=" + row.getId() + ",ownerType=" + type + ",ownerId=" + ownerId + ",contentType=" + row.getContentType() + ",size=" + row.getFileSize(),
+                "deleted=true", "SUCCESS");
     }
 
     Download serviceReportPdf(Long requestId) {
@@ -429,6 +444,16 @@ class CommerceService {
         if (entity instanceof Invoice i) return i.getId();
         if (entity instanceof PaymentRecord p) return p.getId();
         return null;
+    }
+    private String renewalSummary(AmcRenewalRequest r) {
+        return "amc=" + r.getContract().getId()
+                + ",customer=" + r.getCustomer().getId()
+                + ",status=" + r.getStatus()
+                + ",requestedStartDate=" + r.getRequestedStartDate()
+                + ",requestedEndDate=" + r.getRequestedEndDate()
+                + ",quotedAmount=" + r.getQuotedAmount()
+                + ",invoice=" + id(r.getInvoice())
+                + ",payment=" + id(r.getPayment());
     }
     private static CommerceException missing(String name) { return new CommerceException(404, name + " not found"); }
     private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }

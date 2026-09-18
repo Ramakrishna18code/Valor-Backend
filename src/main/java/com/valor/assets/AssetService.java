@@ -1,6 +1,7 @@
 package com.valor.assets;
 
 import com.valor.auth.AssetIdentityAccess;
+import com.valor.auth.AuditService;
 import com.valor.auth.Role;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -20,14 +21,16 @@ public class AssetService {
     private final AssetIdentityAccess identities;
     private final Clock clock;
     private final AssetCustomerRepository customerProfiles;
+    private final AuditService audit;
 
     public AssetService(BuildingRepository buildings, LiftRepository lifts,
-            AmcContractRepository contracts, AssetIdentityAccess identities, Clock clock, AssetCustomerRepository customerProfiles) {
+            AmcContractRepository contracts, AssetIdentityAccess identities, Clock clock, AssetCustomerRepository customerProfiles,
+            AuditService audit) {
         this.buildings = buildings;
         this.lifts = lifts;
         this.contracts = contracts;
         this.identities = identities;
-        this.clock = clock;this.customerProfiles=customerProfiles;
+        this.clock = clock;this.customerProfiles=customerProfiles;this.audit=audit;
     }
 
     @Transactional(readOnly = true)
@@ -44,6 +47,7 @@ public class AssetService {
         building.setCustomer(identities.activeCustomer(input.customerProfileId()));
         apply(building, input);
         buildings.saveAndFlush(building);
+        audit.record("BUILDING_CREATE", "BUILDING", building.getId(), "Created building customer=" + building.getCustomer().getId());
         return buildingView(building, 0);
     }
 
@@ -53,15 +57,20 @@ public class AssetService {
         if (!building.getCustomer().getId().equals(input.customerProfileId())) {
             throw new AssetException(400, "Building ownership cannot be changed");
         }
+        String before = buildingSummary(building);
         apply(building, input);
         buildings.flush();
+        audit.record("BUILDING_UPDATE", "BUILDING", building.getId(), "Updated building", before, buildingSummary(building), "SUCCESS");
         return buildingView(building, lifts.countByBuildingIdAndActiveTrue(id));
     }
 
     public void deactivateBuilding(Long id) {
         identities.requireAdmin();
         Building building = buildings.lockById(id).orElseThrow(() -> missing("Building"));
+        String before = "active=" + building.isActive() + ",status=" + building.getStatus();
         building.setActive(false);
+        audit.record("BUILDING_DEACTIVATE", "BUILDING", id, "Deactivated building",
+                before, "active=" + building.isActive() + ",status=" + building.getStatus(), "SUCCESS");
     }
 
     @Transactional(readOnly = true)
@@ -79,6 +88,7 @@ public class AssetService {
         lift.setBuilding(building);
         apply(lift, input);
         lifts.saveAndFlush(lift);
+        audit.record("LIFT_CREATE", "LIFT", lift.getId(), "Created lift building=" + lift.getBuilding().getId());
         return liftView(lift, false, LocalDate.now(clock));
     }
 
@@ -88,8 +98,10 @@ public class AssetService {
         if (!lift.getBuilding().getId().equals(input.buildingId())) {
             throw new AssetException(400, "Lift ownership cannot be changed");
         }
+        String before = liftSummary(lift);
         apply(lift, input);
         lifts.flush();
+        audit.record("LIFT_UPDATE", "LIFT", lift.getId(), "Updated lift", before, liftSummary(lift), "SUCCESS");
         LocalDate asOf = LocalDate.now(clock);
         return liftView(lift, contracts.coveredLiftIds(asOf).contains(id), asOf);
     }
@@ -97,7 +109,10 @@ public class AssetService {
     public void deactivateLift(Long id) {
         identities.requireAdmin();
         Lift lift = lifts.lockById(id).orElseThrow(() -> missing("Lift"));
+        String before = liftSummary(lift);
         lift.setActive(false);
+        audit.record("LIFT_DEACTIVATE", "LIFT", id, "Deactivated lift",
+                before, liftSummary(lift), "SUCCESS");
     }
 
     @Transactional(readOnly = true)
@@ -132,6 +147,8 @@ public class AssetService {
         contract.setEndDate(input.endDate());
         contract.setRenewalDate(input.renewalDate());
         contracts.saveAndFlush(contract);
+        audit.record("AMC_CREATE", "AMC", contract.getId(), "Created AMC lift=" + lift.getId(),
+                null, amcSummary(contract), "SUCCESS");
         return amcView(contract, LocalDate.now(clock));
     }
 
@@ -148,6 +165,7 @@ public class AssetService {
             throw new AssetException(409, "AMC contract cannot be renewed");
         }
         LocalDate asOf = LocalDate.now(clock);
+        String before = amcSummary(contract);
         contract.setStartDate(input.startDate());
         contract.setEndDate(input.endDate());
         contract.setPlan(input.plan().trim());
@@ -157,6 +175,8 @@ public class AssetService {
         contract.setLastReminderSentAt(null);
         contract.setStatus(AmcStatus.ACTIVE);
         contracts.flush();
+        audit.record("AMC_RENEW", "AMC", contract.getId(), "Renewed AMC lift=" + contract.getLift().getId(),
+                before, amcSummary(contract), "SUCCESS");
         return amcView(contract, asOf);
     }
 
@@ -182,21 +202,27 @@ public class AssetService {
         Long id=customerActor().getId();
         var owner=customerProfiles.findByUserId(id).orElseThrow();
         Building building=new Building();building.setCustomer(owner);
-        apply(building,new BuildingWrite(owner.getId(),input.buildingName(),input.buildingType(),input.address(),input.city(),input.state(),input.pincode(),input.emergencyContactName(),input.emergencyContactPhone(),"ACTIVE"));
-        buildings.saveAndFlush(building);return buildingView(building,0);
+        apply(building,new BuildingWrite(owner.getId(),input.buildingName(),input.buildingType(),input.address(),input.city(),input.state(),input.pincode(),input.latitude(),input.longitude(),input.emergencyContactName(),input.emergencyContactPhone(),"ACTIVE"));
+        buildings.saveAndFlush(building);
+        audit.record("BUILDING_CREATE", "BUILDING", building.getId(), "Created building customer=" + owner.getId());
+        return buildingView(building,0);
     }
     public BuildingView updateCustomerBuilding(Long id, CustomerBuildingWrite input) {
         Long actorId = customerActor().getId();
         Building building = ownedActiveBuilding(id, actorId);
-        apply(building, new BuildingWrite(building.getCustomer().getId(), input.buildingName(), input.buildingType(), input.address(), input.city(), input.state(), input.pincode(), input.emergencyContactName(), input.emergencyContactPhone(), "ACTIVE"));
+        String before = buildingSummary(building);
+        apply(building, new BuildingWrite(building.getCustomer().getId(), input.buildingName(), input.buildingType(), input.address(), input.city(), input.state(), input.pincode(), input.latitude(), input.longitude(), input.emergencyContactName(), input.emergencyContactPhone(), "ACTIVE"));
         buildings.flush();
+        audit.record("BUILDING_UPDATE", "BUILDING", building.getId(), "Updated building", before, buildingSummary(building), "SUCCESS");
         return buildingView(building, lifts.countByBuildingIdAndActiveTrue(id));
     }
     public void deactivateCustomerBuilding(Long id) {
         Long actorId = customerActor().getId();
         Building building = ownedActiveBuilding(id, actorId);
+        String before = buildingSummary(building);
         building.setActive(false);
         building.setStatus("INACTIVE");
+        audit.record("BUILDING_DEACTIVATE", "BUILDING", id, "Deactivated building", before, buildingSummary(building), "SUCCESS");
     }
     public LiftView customerLift(Long id) {
         Lift lift = ownedActiveLift(id, customerActor().getId());
@@ -210,6 +236,7 @@ public class AssetService {
         lift.setBuilding(building);
         apply(lift, input);
         lifts.saveAndFlush(lift);
+        audit.record("LIFT_CREATE", "LIFT", lift.getId(), "Created lift building=" + lift.getBuilding().getId());
         return liftView(lift, false, LocalDate.now(clock));
     }
     public LiftView updateCustomerLift(Long id, LiftWrite input) {
@@ -218,14 +245,18 @@ public class AssetService {
         if (!lift.getBuilding().getId().equals(input.buildingId())) {
             throw new AssetException(400, "Lift building cannot be changed");
         }
+        String before = liftSummary(lift);
         apply(lift, input);
         lifts.flush();
+        audit.record("LIFT_UPDATE", "LIFT", lift.getId(), "Updated lift", before, liftSummary(lift), "SUCCESS");
         LocalDate asOf = LocalDate.now(clock);
         return liftView(lift, contracts.coveredLiftIds(asOf).contains(id), asOf);
     }
     public void deactivateCustomerLift(Long id) {
         Lift lift = ownedActiveLift(id, customerActor().getId());
+        String before = liftSummary(lift);
         lift.setActive(false);
+        audit.record("LIFT_DEACTIVATE", "LIFT", id, "Deactivated lift", before, liftSummary(lift), "SUCCESS");
     }
 
     private Building activeBuilding(Long id) {
@@ -277,6 +308,8 @@ public class AssetService {
         entity.setCity(input.city());
         entity.setState(input.state());
         entity.setPincode(input.pincode());
+        entity.setLatitude(input.latitude());
+        entity.setLongitude(input.longitude());
         entity.setEmergencyContactName(input.emergencyContactName());
         entity.setEmergencyContactPhone(input.emergencyContactPhone());
         if (input.status() != null && input.status().isBlank()) throw new AssetException(400, "Invalid building status");
@@ -308,6 +341,31 @@ public class AssetService {
         entity.setSpecifications(input.specifications());
     }
 
+    private String buildingSummary(Building entity) {
+        return "buildingName=" + entity.getBuildingName()
+                + ",buildingType=" + entity.getBuildingType()
+                + ",city=" + entity.getCity()
+                + ",status=" + entity.getStatus()
+                + ",active=" + entity.isActive();
+    }
+
+    private String liftSummary(Lift entity) {
+        return "name=" + entity.getName()
+                + ",liftNumber=" + entity.getLiftNumber()
+                + ",currentStatus=" + entity.getCurrentStatus()
+                + ",healthScore=" + entity.getHealthScore()
+                + ",active=" + entity.isActive();
+    }
+
+    private String amcSummary(AmcContract entity) {
+        return "lift=" + entity.getLift().getId()
+                + ",plan=" + entity.getPlan()
+                + ",startDate=" + entity.getStartDate()
+                + ",endDate=" + entity.getEndDate()
+                + ",status=" + entity.getStatus()
+                + ",renewalCount=" + entity.getRenewalCount();
+    }
+
     private BuildingView buildingView(Building entity, long count) {
         return new BuildingView(
                 entity.getId(),
@@ -318,6 +376,8 @@ public class AssetService {
                 entity.getCity(),
                 entity.getState(),
                 entity.getPincode(),
+                entity.getLatitude(),
+                entity.getLongitude(),
                 entity.getEmergencyContactName(),
                 entity.getEmergencyContactPhone(),
                 entity.getStatus(),

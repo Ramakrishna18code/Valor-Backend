@@ -6,9 +6,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
-@SpringBootApplication(scanBasePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking"})
-@EntityScan(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking"})
-@EnableJpaRepositories(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking"})
+@SpringBootApplication(scanBasePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication"})
+@EntityScan(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication"})
+@EnableJpaRepositories(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication"})
 @EnableScheduling
 public class ValorBackendApplication {
     public static void main(String[] args) {

@@ -9,6 +9,7 @@ It covers:
 - AMC lifecycle management
 - Service request handling and tracking
 - Payments, invoices, support tickets, PDF service reports, and asset documents
+- Admin transactions, reports/CSV exports, roles/permissions, and audit logs
 - Swagger/OpenAPI documentation
 - MySQL persistence with JPA
 
@@ -140,6 +141,9 @@ client-facing endpoints use the `/api/v1` prefix and the standard
 - Admin operations: `/api/v1/admin/**`
 - Technician app: `/api/v1/technician/me/**`
 - Payments and invoices: `/api/v1/payments`, `/api/v1/invoices`
+- Admin transactions and reports: `/api/v1/admin/transactions`, `/api/v1/admin/reports/{type}`
+- Admin roles and audit: `/api/v1/admin/permissions`, `/api/v1/admin/roles`,
+  `/api/v1/admin/audit-logs`
 - Razorpay checkout/webhook/refunds: `/api/v1/payments/razorpay/checkout`,
   `/api/v1/webhooks/razorpay`, `/api/v1/payments/{id}/refunds`
 - Live technician tracking: `/api/v1/technician/me/jobs/{id}/location`,
@@ -160,8 +164,9 @@ downloads; it never returns filesystem paths or storage keys.
 ### Payments and invoices
 
 The backend keeps the internal payment and invoice domain as the business system
-of record and extends it with Razorpay Test Mode integration. Configure only
-environment-provided test credentials:
+of record and extends it through a `PaymentGateway` abstraction with
+`RazorpayGateway` as the current provider. Configure only environment-provided
+test/live credentials when external activation begins:
 
 ```dotenv
 RAZORPAY_KEY_ID=
@@ -177,15 +182,63 @@ updating local payment/invoice/refund state. Refunds use
 `POST /api/v1/payments/{id}/refunds`; a refund is not completed locally until
 gateway/webhook state confirms it.
 
+Provider activation remains environment-dependent. The local application can be
+built and tested without purchased credentials, live Test Mode credentials, or a
+public webhook endpoint; real Razorpay transactions and webhook delivery must be
+validated later with provider configuration.
+
 Webhook delivery from Razorpay requires a public HTTPS endpoint. Localhost-only
 verification can test signature/idempotency behavior with simulated requests,
 but it is not real Razorpay delivery.
+
+### Admin transactions, reports, and exports
+
+Admin/SUPER_ADMIN users can review finance movement through
+`GET /api/v1/admin/transactions` and `GET /api/v1/admin/transactions/{id}`.
+The transaction view is derived from existing payment and refund records; it is
+not a duplicate payment system. Filters include pagination, sort, status,
+customer profile, transaction type, date range, and safe search over invoice and
+gateway reference identifiers.
+
+Report endpoints are grouped under `/api/v1/admin/reports/{type}` for
+`revenue`, `payments`, `invoices`, `services`, `customers`, and `technicians`.
+The reports use persisted application data for payments, refunds, invoices,
+service requests, visits, customers, AMC contracts, technicians and reports.
+Revenue reports show gross successful payment amount, successful refunds and net
+amount; no external Razorpay query or additional accounting ledger is used.
+
+CSV export is available at `/api/v1/admin/transactions.csv` and
+`/api/v1/admin/reports/{type}.csv`. Exports respect the same filters and Admin
+authorization as the JSON endpoints, include safe CSV escaping, and do not
+export secrets. Excel and PDF report exports are not implemented in Phase 13A.
+
+### Admin roles, permissions, and audit log
+
+Roles and permissions are persisted by Flyway V10 and extend the existing JWT
+role model. `/api/v1/admin/permissions` and `/api/v1/admin/roles` expose the
+seeded capability model. SUPER_ADMIN can update non-SUPER_ADMIN role
+permissions through `/api/v1/admin/roles/{name}/permissions`; lower privileged
+admins cannot grant permissions or edit themselves through this API.
+
+The audit log is append-only through normal application mutations and can be
+read through `/api/v1/admin/audit-logs` by accounts with audit-read permission.
+It records actor, role, action, entity, timestamp, result, and compact safe
+before/after summaries for key mutations such as staff changes, settings
+updates, refund requests, role-permission changes, and finance/report exports.
+Audit entries never store passwords, JWTs, refresh tokens, provider secrets,
+OTP values, card data, CVV, or PIN values. No audit delete/update API exists.
 
 Phase 1B local MySQL verification was completed on 2026-09-16 against the
 existing database without reset or data deletion. Flyway showed V1-V9 successful,
 including `payment_refunds`, `razorpay_webhook_events`, and
 `technician_latest_locations` with the expected PK/FK/unique/check/index
 metadata.
+
+Phase 13B local MySQL verification was completed on 2026-09-17 against the same
+database without reset or broad deletion. Flyway advanced the schema to V10 and
+verified `roles`, `permissions`, `role_permissions`, and `audit_logs` with seeded
+permissions, foreign keys, indexes, role mutation enforcement, and append-only
+audit records.
 
 Phase 1B.1 did not perform a real Razorpay Test Mode transaction or external
 webhook delivery test because `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
@@ -248,3 +301,67 @@ status }`. The role values are `CUSTOMER`, `ADMIN`, `SUPER_ADMIN`, and
 Swagger documentation is available at `/swagger-ui.html` after startup. Do not
 point clients at the copied `Backend` folders inside another application; run and
 deploy this project as the shared service.
+
+## Phase 15 technician advanced operations
+
+Phase 15 adds the application-level backend for technician checklists,
+completion OTP gating, expanded technician profiles, and technician-private
+attachments.
+
+- Checklist templates and items are Admin/SUPER_ADMIN managed under
+  `/api/v1/admin/checklist-templates`. Assigned technicians consume job
+  checklists through `/api/v1/technician/me/jobs/{id}/checklist`.
+- Required checklist items are validated by the backend before a service request
+  can move to `COMPLETED`.
+- Completion OTP values are generated by the backend, stored only as hashes,
+  expire, enforce attempt limits, and are never returned in API responses or
+  logs. The current sender is a no-op communication-provider implementation for
+  application testing; real SMS/WhatsApp/email activation remains external work.
+- Technician profiles now include profile photo URL, date of birth, gender,
+  address, and emergency contact fields. Phone/email remain governed by the
+  existing identity model and are not technician self-editable.
+- Technician-private attachments are separate from request attachments and are
+  visible only to the technician owner plus authorized Admin/SUPER_ADMIN users.
+  Customers cannot access these files.
+
+## Phase 16 advanced live tracking
+
+The backend keeps the existing latest-location table/API and adds advanced
+tracking around it:
+
+- Each valid technician location update now writes a `technician_location_history`
+  row for retention-ready history while keeping `technician_latest_locations`
+  optimized for current map refreshes.
+- Buildings support nullable latitude/longitude. Geofence state is evaluated only
+  when real building coordinates exist; otherwise it remains unavailable.
+- Geofence radius is configurable with `VALOR_TRACKING_GEOFENCE_RADIUS_METERS`.
+- Route and ETA data are exposed through DTOs behind a `RoutingProvider`
+  abstraction. The default provider is unconfigured and never fabricates route or
+  ETA values.
+- External routing credentials, provider activation, and real background/device
+  validation remain later operational work.
+
+## Phase 17 communication platform foundation
+
+Phase 17 centralizes provider-independent communication records without
+activating any external messaging provider.
+
+- Communication templates, preferences, events, and per-channel messages are
+  stored in the Phase 17 communication tables.
+- Supported channels are `EMAIL`, `SMS`, `WHATSAPP`, and `IN_APP`.
+- Delivery status uses `PENDING`, `PROCESSING`, `SENT`, `DELIVERED`, `FAILED`,
+  and `CANCELLED`, with retry count, max retry count, next retry time, provider
+  metadata, and safe failure reason fields.
+- `EmailProvider`, `SmsProvider`, and `WhatsAppProvider` abstractions isolate
+  provider implementations. The current providers are mock/development
+  providers only and do not call Email, MSG91, WhatsApp, or other external APIs.
+- Idempotency is based on `communication_events.idempotency_key`; retrying the
+  same event key reuses the existing event/messages instead of creating
+  duplicates.
+- Communication logs use masked recipients and sanitized failure reasons. OTP
+  plaintext, provider keys, authorization tokens, passwords, and provider
+  secrets must not be logged.
+- Admin visibility is exposed under `/api/v1/admin/communications`.
+
+Real Email/SMS/WhatsApp provider credentials and delivery activation remain
+deferred to a later phase.

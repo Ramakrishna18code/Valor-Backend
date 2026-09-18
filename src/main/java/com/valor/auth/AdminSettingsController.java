@@ -66,10 +66,12 @@ class AdminSettingsService {
 
     private final EntityManager em;
     private final AssetIdentityAccess identities;
+    private final AuditService audit;
 
-    AdminSettingsService(EntityManager em, AssetIdentityAccess identities) {
+    AdminSettingsService(EntityManager em, AssetIdentityAccess identities, AuditService audit) {
         this.em = em;
         this.identities = identities;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -82,6 +84,7 @@ class AdminSettingsService {
         identities.requireAdmin();
         validate(input);
         AdminSettings settings = current(true);
+        String before = "currency=" + settings.currency + ",timezone=" + settings.timezone + ",autoAssign=" + settings.autoAssignRequestsEnabled;
         settings.companyName = clean(input.companyName());
         settings.supportEmail = clean(input.supportEmail());
         settings.supportPhone = clean(input.supportPhone());
@@ -95,6 +98,8 @@ class AdminSettingsService {
         settings.smsNotificationsEnabled = input.smsNotificationsEnabled();
         settings.autoAssignRequestsEnabled = input.autoAssignRequestsEnabled();
         em.flush();
+        String after = "currency=" + settings.currency + ",timezone=" + settings.timezone + ",autoAssign=" + settings.autoAssignRequestsEnabled;
+        audit.record("SETTINGS_UPDATE", "ADMIN_SETTINGS", 1, "Updated admin settings", before, after, "SUCCESS");
         return view(settings);
     }
 

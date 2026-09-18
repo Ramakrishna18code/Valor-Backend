@@ -68,8 +68,16 @@ class AuthConfig {
                         .requestMatchers("/api/v1/admin/dashboard/summary").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/admin/technicians").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/settings").hasAnyRole("ADMIN","SUPER_ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/admin/permissions", "/api/v1/admin/roles", "/api/v1/admin/roles/**").hasAuthority("PERM_ROLE_READ")
+                        .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/admin/roles/*/permissions").hasAuthority("PERM_ROLE_WRITE")
+                        .requestMatchers("/api/v1/admin/audit-logs", "/api/v1/admin/audit-logs/**").hasAuthority("PERM_AUDIT_READ")
+                        .requestMatchers("/api/v1/admin/communications", "/api/v1/admin/communications/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/customers", "/api/v1/admin/customers/**").hasAnyRole("ADMIN","SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/checklist-templates", "/api/v1/admin/checklist-templates/**",
+                                "/api/v1/admin/technicians/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/service-visits/**", "/api/v1/admin/visit-change-requests/**").hasAnyRole("ADMIN","SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/transactions", "/api/v1/admin/transactions/**", "/api/v1/admin/transactions.csv",
+                                "/api/v1/admin/reports/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/payments/*/status", "/api/v1/invoices/*/status",
                                 "/api/v1/support-tickets/*/status", "/api/v1/amc-renewal-requests/*/quote", "/api/v1/amc-renewal-requests/*/status")

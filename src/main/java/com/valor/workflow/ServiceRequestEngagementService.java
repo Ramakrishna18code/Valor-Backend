@@ -23,11 +23,12 @@ class ServiceRequestEngagementService {
     private final AssetIdentityAccess identities;
     private final WorkflowIdentityAccess profiles;
     private final RequestAttachmentStorage storage;
+    private final AuditService audit;
     ServiceRequestEngagementService(RequestRepository requests, ServiceRequestAttachmentRepository attachments, AssignmentRepository assignments,
             ServiceRequestFeedbackRepository feedback, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
-            RequestAttachmentStorage storage) {
+            RequestAttachmentStorage storage, AuditService audit) {
         this.requests = requests; this.attachments = attachments; this.assignments = assignments; this.feedback = feedback;
-        this.identities = identities; this.profiles = profiles; this.storage = storage;
+        this.identities = identities; this.profiles = profiles; this.storage = storage; this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -74,6 +75,9 @@ class ServiceRequestEngagementService {
         if (!row.getRequest().getId().equals(request.getId()) || !row.getUploadedBy().getId().equals(actor.getId())) throw missing();
         attachments.delete(row);
         try { storage.delete(row.getStorageKey()); } catch (IOException ignored) { }
+        audit.record("DOCUMENT_DELETE", "SERVICE_REQUEST_ATTACHMENT", row.getId(), "Deleted service request attachment request=" + request.getId(),
+                "document=" + row.getId() + ",request=" + request.getId() + ",contentType=" + row.getContentType() + ",size=" + row.getFileSize(),
+                "deleted=true", "SUCCESS");
     }
 
     FeedbackView upsertFeedback(Long requestId, FeedbackWrite input) {

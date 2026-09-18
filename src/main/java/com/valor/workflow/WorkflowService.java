@@ -20,12 +20,16 @@ public class WorkflowService {
     private final AssetIdentityAccess identities;
     private final WorkflowIdentityAccess profiles;
     private final ServiceVisitService visits;
+    private final AuditService audit;
+    private final ChecklistService checklists;
+    private final CompletionOtpService completionOtps;
 
     public WorkflowService(RequestRepository requests, AssignmentRepository assignments, HistoryRepository history,
             ReportRepository reports, WorkflowLiftRepository lifts, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
-            ServiceVisitService visits) {
+            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps) {
         this.requests = requests; this.assignments = assignments; this.history = history;
-        this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles; this.visits = visits;
+        this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles; this.visits = visits; this.audit = audit;
+        this.checklists = checklists; this.completionOtps = completionOtps;
     }
 
     @Transactional(readOnly=true)
@@ -62,6 +66,8 @@ public class WorkflowService {
         request.setInternalAdminNotes(input.internalAdminNotes()); request.setEstimatedCompletionMinutes(input.estimatedCompletionMinutes());
         requests.saveAndFlush(request);
         event(request, null, actor, null);
+        audit.record("SERVICE_REQUEST_CREATE", "SERVICE_REQUEST", request.getId(), "Created service request customer=" + owner.getId() + ",lift=" + lift.getId(),
+                null, requestSummary(request, null), "SUCCESS");
         return detail(request, actor);
     }
 
@@ -92,6 +98,7 @@ public class WorkflowService {
         ServiceRequest request = locked(id); nonterminal(request);
         var technician = profiles.activeTechnician(input.technicianProfileId());
         TechnicianAssignment previous = assignments.active(id).orElse(null);
+        Long previousTechnicianId = previous == null ? null : previous.getTechnician().getId();
         if (previous == null && request.getStatus() != RequestStatus.PENDING) throw conflict();
         if (previous != null) {
             previous.setStatus(AssignmentStatus.RELEASED); previous.setReleasedAt(LocalDateTime.now());
@@ -105,6 +112,10 @@ public class WorkflowService {
         // Reassignment is an operational event: preserve advanced lifecycle state, never regress it.
         event(request, from, actor, input.notes());
         requests.flush();
+        audit.record(previousTechnicianId == null ? "SERVICE_REQUEST_ASSIGN" : "SERVICE_REQUEST_REASSIGN", "SERVICE_REQUEST", request.getId(),
+                "Assigned technician request=" + request.getId(),
+                "status=" + from + ",technician=" + previousTechnicianId,
+                "status=" + request.getStatus() + ",technician=" + technician.getId(), "SUCCESS");
         return detail(request, actor);
     }
 
@@ -137,6 +148,9 @@ public class WorkflowService {
             if (active != null) { active.setStatus(AssignmentStatus.RELEASED); active.setReleasedAt(LocalDateTime.now()); }
             RequestStatus from = request.getStatus(); request.setStatus(RequestStatus.CANCELLED); event(request, from, actor, input.notes());
             requests.flush();
+            audit.record("SERVICE_REQUEST_STATUS", "SERVICE_REQUEST", request.getId(), "Changed service request status",
+                    "status=" + from + ",technician=" + assignmentTechnician(id),
+                    "status=" + request.getStatus() + ",technician=" + assignmentTechnician(id), "SUCCESS");
             return detail(request, actor);
         }
         TechnicianAssignment assignment;
@@ -158,6 +172,8 @@ public class WorkflowService {
         if (to == RequestStatus.COMPLETED) {
             ServiceReport report = reports.findByRequestId(id).orElseThrow(() -> new WorkflowException(409, "Valid report required"));
             if (!validReport(report, request, assignment)) throw new WorkflowException(409, "Valid report required");
+            checklists.requireComplete(id);
+            completionOtps.requireVerified(id);
             request.setCompletedAt(LocalDateTime.now()); assignment.setStatus(AssignmentStatus.COMPLETED);
         }
         if (to == RequestStatus.CANCELLED && assignment != null) {
@@ -165,6 +181,9 @@ public class WorkflowService {
         }
         request.setStatus(to); event(request, from, actor, input.notes());
         requests.flush();
+        audit.record("SERVICE_REQUEST_STATUS", "SERVICE_REQUEST", request.getId(), "Changed service request status",
+                "status=" + from + ",technician=" + (assignment == null ? null : assignment.getTechnician().getId()),
+                "status=" + request.getStatus() + ",technician=" + (assignment == null ? null : assignment.getTechnician().getId()), "SUCCESS");
         return detail(request, actor);
     }
 
@@ -214,6 +233,15 @@ public class WorkflowService {
     }
     private void event(ServiceRequest request, RequestStatus from, User actor, String notes) {
         if (from != request.getStatus()) history.save(new ServiceStatusHistory(request, from, request.getStatus(), actor, notes));
+    }
+    private Long assignmentTechnician(Long requestId) {
+        return assignments.active(requestId).map(a -> a.getTechnician().getId()).orElse(null);
+    }
+    private String requestSummary(ServiceRequest request, Long technicianId) {
+        return "customer=" + request.getCustomer().getId()
+                + ",lift=" + request.getLift().getId()
+                + ",status=" + request.getStatus()
+                + ",technician=" + technicianId;
     }
     private static void admin(User actor) {
         if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied();
