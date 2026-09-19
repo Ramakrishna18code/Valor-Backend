@@ -1,6 +1,7 @@
 package com.valor.commerce;
 
 import com.valor.auth.AssetIdentityAccess;
+import com.valor.communication.EmailEventService;
 import jakarta.persistence.*;
 import java.math.*;
 import java.nio.charset.StandardCharsets;
@@ -28,8 +29,9 @@ class AdminFinanceService {
             "status,desc", "status desc, created_at desc, numeric_id desc");
     private final EntityManager em;
     private final AssetIdentityAccess identities;
+    private final EmailEventService emails;
 
-    AdminFinanceService(EntityManager em, AssetIdentityAccess identities) { this.em = em; this.identities = identities; }
+    AdminFinanceService(EntityManager em, AssetIdentityAccess identities, EmailEventService emails) { this.em = em; this.identities = identities; this.emails = emails; }
 
     PageView<TransactionView> transactions(int page, int size, String sort, String status, Long customerId, String type,
             LocalDate from, LocalDate to, String q) {
@@ -79,6 +81,7 @@ class AdminFinanceService {
 
     byte[] reportCsv(String type, LocalDate from, LocalDate to, String status, Long customerId, Long technicianId) {
         ReportView report = report(type, from, to, status, customerId, technicianId);
+        emails.reportReady(report.type(), "admin-report-ready:" + report.type() + ":" + nullSafe(from) + ":" + nullSafe(to) + ":" + nullSafe(status) + ":" + nullSafe(customerId) + ":" + nullSafe(technicianId));
         List<List<?>> rows = new ArrayList<>();
         if (report.rows().isEmpty()) {
             rows.add(List.of("metric", "value"));

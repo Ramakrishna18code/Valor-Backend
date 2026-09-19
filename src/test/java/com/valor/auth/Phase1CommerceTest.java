@@ -107,7 +107,8 @@ class Phase1CommerceTest {
         TechnicianProfile tech = technician();
         long building = call(post("/api/v1/buildings"), admin,
                 Map.of("customerProfileId", owner.getId(), "buildingName", "Phase 1 Tower"), 200).get("id").asLong();
-        long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Phase 1 Lift"), 200).get("id").asLong();
+        long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Phase 1 Lift",
+                "floorCount", 5, "doorType", "MANUAL"), 200).get("id").asLong();
         long amc = call(post("/api/v1/amc-contracts"), admin, Map.of("liftId", lift, "amcNumber", UUID.randomUUID().toString(),
                 "plan", "Standard", "startDate", "2030-01-01", "endDate", "2030-12-31"), 200).get("id").asLong();
         long request = call(post("/api/v1/service-requests"), owner.getUser(), Map.of("liftId", lift, "title", "Need service",
@@ -129,7 +130,8 @@ class Phase1CommerceTest {
                 "serviceRequestId", f.requestId(), "description", "Service charge", "subtotal", 1000, "taxAmount", 180, "currency", "INR"), 200).get("id").asLong();
         call(post("/api/v1/payments"), f.customer(), Map.of("invoiceId", invoice, "amount", 10,
                 "currency", "INR", "purpose", "INVOICE"), 400);
-        JsonNode payment = call(post("/api/v1/payments"), f.customer(), Map.of("invoiceId", invoice, "amount", 1180,
+        assertEquals(999, call(get("/api/v1/invoices/" + invoice), f.customer(), null, 200).get("totalAmount").asInt());
+        JsonNode payment = call(post("/api/v1/payments"), f.customer(), Map.of("invoiceId", invoice, "amount", 999,
                 "currency", "INR", "purpose", "INVOICE"), 200);
         assertEquals("PENDING", payment.get("status").asText());
         call(put("/api/v1/payments/" + payment.get("id").asLong() + "/status"), f.admin(),
@@ -147,7 +149,7 @@ class Phase1CommerceTest {
                 "serviceRequestId", f.requestId(), "description", "Gateway invoice", "subtotal", 1000, "taxAmount", 180, "currency", "INR"), 200).get("id").asLong();
         call(post("/api/v1/payments/razorpay/checkout"), other, Map.of("invoiceId", invoice), 403);
         JsonNode checkout = call(post("/api/v1/payments/razorpay/checkout"), f.customer(), Map.of("invoiceId", invoice), 200);
-        assertEquals(1180, checkout.get("amount").asInt());
+        assertEquals(999, checkout.get("amount").asInt());
         assertEquals("INR", checkout.get("currency").asText());
         long paymentId = checkout.get("paymentId").asLong();
         String orderId = checkout.get("razorpayOrderId").asText();
@@ -181,7 +183,7 @@ class Phase1CommerceTest {
                 """.formatted(refundId);
         webhook(refundWebhook, 200);
         assertEquals("PARTIALLY_REFUNDED", call(get("/api/v1/payments/" + paymentId), f.admin(), null, 200).get("status").asText());
-        call(post("/api/v1/payments/" + paymentId + "/refunds"), f.admin(), Map.of("amount", 680, "reason", "rest"), 200);
+        call(post("/api/v1/payments/" + paymentId + "/refunds"), f.admin(), Map.of("amount", 499, "reason", "rest"), 200);
         String finalRefundId = call(get("/api/v1/payments/" + paymentId + "/refunds"), f.admin(), null, 200).get(1).get("razorpayRefundId").asText();
         String finalRefundWebhook = """
                 {"id":"evt_refund_2","event":"refund.processed","payload":{"refund":{"entity":{"id":"%s","status":"processed"}}}}

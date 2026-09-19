@@ -3,6 +3,7 @@ package com.valor.auth;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.valor.response.ApiResponse;
+import com.valor.communication.EmailEventService;
 import com.valor.workflow.WorkflowDtos;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,7 +29,7 @@ class AdminCustomerController {
     AdminCustomerController(AdminCustomerService customers) { this.customers = customers; }
 
     record CustomerCreateRequest(@Size(max=254) String email, @Size(max=20) String phone,
-            @Schema(accessMode=Schema.AccessMode.WRITE_ONLY, format="password") @NotBlank @Size(max=72) String password,
+            @Schema(accessMode=Schema.AccessMode.WRITE_ONLY, format="password", description="Optional legacy local password; onboarding email never includes it.") @Size(max=72) String password,
             @NotBlank @Size(max=160) String fullName, @Size(max=20) String alternatePhone,
             @Size(max=200) String companyName, @Size(max=500) String address) {
         @JsonAnySetter public void unknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); }
@@ -74,9 +76,11 @@ class AdminCustomerController {
 class AdminCustomerService {
     private final UserRepo users; private final CustomerRepo profiles; private final AuthService auth;
     private final AssetIdentityAccess identities; private final PasswordEncoder encoder; private final EntityManager em; private final AuditService audit;
+    private final EmailEventService emails; private final String setPasswordBaseUrl;
     AdminCustomerService(UserRepo users, CustomerRepo profiles, AuthService auth, AssetIdentityAccess identities,
-            PasswordEncoder encoder, EntityManager em, AuditService audit) {
-        this.users=users; this.profiles=profiles; this.auth=auth; this.identities=identities; this.encoder=encoder; this.em=em; this.audit=audit;
+            PasswordEncoder encoder, EntityManager em, AuditService audit, EmailEventService emails,
+            @Value("${app.set-password-url:${APP_SET_PASSWORD_URL:http://localhost:5173/set-password}}") String setPasswordBaseUrl) {
+        this.users=users; this.profiles=profiles; this.auth=auth; this.identities=identities; this.encoder=encoder; this.em=em; this.audit=audit; this.emails=emails; this.setPasswordBaseUrl=setPasswordBaseUrl;
     }
     AdminCustomerController.AdminCustomerDetail create(AdminCustomerController.CustomerCreateRequest input) {
         identities.requireAdmin();
@@ -84,12 +88,13 @@ class AdminCustomerService {
         String phone=input.phone()==null || input.phone().isBlank() ? null : auth.normPhone(input.phone());
         if(email!=null && !email.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) throw new IllegalArgumentException("Invalid email");
         if(email==null && phone==null) throw new IllegalArgumentException("Email or phone required");
-        if(input.password()==null || input.password().isBlank() || input.password().getBytes(StandardCharsets.UTF_8).length>72) throw new IllegalArgumentException("Invalid password");
+        if(input.password()!=null && !input.password().isBlank() && input.password().getBytes(StandardCharsets.UTF_8).length>72) throw new IllegalArgumentException("Invalid password");
         if((email!=null && users.findByEmail(email).isPresent()) || (phone!=null && users.findByPhone(phone).isPresent())) throw new IllegalArgumentException("Identity already exists");
-        User user=new User(); user.setEmail(email); user.setPhone(phone); user.setPasswordHash(encoder.encode(input.password())); user.setRole(Role.CUSTOMER); users.saveAndFlush(user);
+        User user=new User(); user.setEmail(email); user.setPhone(phone); user.setPasswordHash(input.password()==null||input.password().isBlank()?encoder.encode(java.util.UUID.randomUUID().toString()):encoder.encode(input.password())); user.setRole(Role.CUSTOMER); users.saveAndFlush(user);
         CustomerProfile profile=new CustomerProfile(); profile.user=user; profile.fullName=clean(input.fullName()); profile.alternatePhone=clean(input.alternatePhone());
         profile.companyName=clean(input.companyName()); profile.address=clean(input.address()); profile.status="ACTIVE"; profile.active=true; profiles.saveAndFlush(profile);
         audit.record("CUSTOMER_CREATE", "CUSTOMER", profile.id, "Created customer userId=" + user.getId());
+        if (email != null) emails.customerAccountCreated(user.getId(), profile.fullName, setPasswordUrl(auth.createOnboardingToken(user)));
         return view(profile);
     }
     AdminCustomerController.AdminCustomerDetail update(Long id, AdminCustomerController.CustomerUpdateRequest input) {
@@ -149,6 +154,7 @@ class AdminCustomerService {
             r.getCreatedAt(), r.getUpdatedAt());
     }
     private String clean(String value) { var result=value==null?null:value.trim(); return result==null||result.isEmpty()?null:result; }
+    private String setPasswordUrl(String token) { return setPasswordBaseUrl + (setPasswordBaseUrl.contains("?") ? "&" : "?") + "token=" + token; }
     private String customerSummary(CustomerProfile profile) {
         return "fullName=" + profile.fullName + ",alternatePhone=" + profile.alternatePhone
                 + ",companyName=" + profile.companyName + ",addressSet=" + (profile.address != null)

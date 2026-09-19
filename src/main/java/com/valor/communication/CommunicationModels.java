@@ -1,6 +1,7 @@
 package com.valor.communication;
 
 import com.valor.auth.User;
+import com.valor.auth.Role;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -37,6 +38,16 @@ class CommunicationPreference {
     @Column(nullable = false) boolean smsEnabled = true;
     @Column(nullable = false) boolean whatsappEnabled = true;
     @Column(nullable = false) boolean inAppEnabled = true;
+    @Column(nullable = false) boolean otpSmsEnabled = true;
+    @Column(nullable = false) boolean otpWhatsappEnabled;
+    @Column(nullable = false) boolean serviceNotificationsEnabled = true;
+    @Column(nullable = false) boolean billingNotificationsEnabled = true;
+    @Column(nullable = false) boolean appointmentNotificationsEnabled = true;
+    @Column(nullable = false) boolean jobNotificationsEnabled = true;
+    @Column(nullable = false) boolean visitNotificationsEnabled = true;
+    @Column(nullable = false) boolean systemNotificationsEnabled = true;
+    @Column(nullable = false) boolean criticalAlertsEnabled = true;
+    @Column(nullable = false) boolean reportNotificationsEnabled = true;
     @Column(nullable = false) LocalDateTime createdAt;
     @Column(nullable = false) LocalDateTime updatedAt;
     @PrePersist void pre() { createdAt = LocalDateTime.now(); updatedAt = createdAt; }
@@ -71,7 +82,11 @@ class CommunicationMessage {
     @Column(length = 160) String providerMessageId;
     @Column(length = 160) String recipientMasked;
     @Column(length = 200) String subject;
+    @Column(columnDefinition = "TEXT") String htmlBody;
     @Column(columnDefinition = "TEXT") String body;
+    @Column(length = 254) String fromAddress;
+    @Column(length = 120) String fromName;
+    @Column(length = 254) String replyTo;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20) CommunicationStatus status = CommunicationStatus.PENDING;
     @Column(nullable = false) int retryCount;
     @Column(nullable = false) int maxRetryCount = 3;
@@ -108,4 +123,6 @@ interface CommunicationMessageRepository extends JpaRepository<CommunicationMess
 }
 interface CommunicationUserRepository extends org.springframework.data.repository.Repository<User, Long> {
     Optional<User> findById(Long id);
+    @org.springframework.data.jpa.repository.Query("select u from User u where u.role in :roles and u.active=true")
+    java.util.List<User> activeRoles(@Param("roles") java.util.Collection<Role> roles);
 }

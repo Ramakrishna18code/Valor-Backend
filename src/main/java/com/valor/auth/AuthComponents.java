@@ -3,11 +3,12 @@ import org.springframework.data.jpa.repository.*; import org.springframework.dat
 interface UserRepo extends JpaRepository<User,Long>{@Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE) @Query("select u from User u where u.email=:email") Optional<User> lockEmail(@Param("email") String email);@Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE) @Query("select u from User u where u.phone=:phone") Optional<User> lockPhone(@Param("phone") String phone);Optional<User> findByEmail(String e); Optional<User> findByPhone(String p);}
 interface CustomerRepo extends JpaRepository<CustomerProfile,Long>{Optional<CustomerProfile> findByUserId(Long id);}
 interface TechRepo extends JpaRepository<TechnicianProfile,Long>{Optional<TechnicianProfile> findByUserId(Long id);}
-interface OtpRepo extends JpaRepository<OtpVerification,Long>{@Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE) @Query("select o from OtpVerification o where o.id=:id") Optional<OtpVerification> lockRequest(@Param("id") Long id);Optional<OtpVerification> findTopByPhoneAndVerifiedAtIsNullOrderByCreatedAtDesc(String p);}
+interface OtpRepo extends JpaRepository<OtpVerification,Long>{@Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE) @Query("select o from OtpVerification o where o.id=:id") Optional<OtpVerification> lockRequest(@Param("id") Long id);Optional<OtpVerification> findTopByPhoneAndVerifiedAtIsNullOrderByCreatedAtDesc(String p);long countByPhoneAndCreatedAtAfter(String phone,LocalDateTime after);}
 interface TokenRepo extends JpaRepository<RefreshToken,Long>{@Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE) @Query("select t from RefreshToken t where t.tokenHash=:hash") Optional<RefreshToken> lockHash(@Param("hash") String hash);Optional<RefreshToken> findByTokenHash(String h);}
+interface OnboardingTokenRepo extends JpaRepository<OnboardingToken,Long>{@Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE) @Query("select t from OnboardingToken t join fetch t.user where t.tokenHash=:hash") Optional<OnboardingToken> lockHash(@Param("hash") String hash);}
 @Service class AuthService {
- private final UserRepo users; private final CustomerRepo customers; private final OtpRepo otps; private final TokenRepo tokens; private final PasswordEncoder encoder; private final JwtService jwt;
- AuthService(UserRepo u,CustomerRepo c,OtpRepo o,TokenRepo t,PasswordEncoder e,JwtService j){users=u;customers=c;otps=o;tokens=t;encoder=e;jwt=j;}
+ private final UserRepo users; private final CustomerRepo customers; private final OtpRepo otps; private final TokenRepo tokens; private final OnboardingTokenRepo onboardingTokens; private final PasswordEncoder encoder; private final JwtService jwt; private final OtpProvider otpProvider; private final Msg91OtpProperties otpProps;
+ AuthService(UserRepo u,CustomerRepo c,OtpRepo o,TokenRepo t,OnboardingTokenRepo onboardingTokens,PasswordEncoder e,JwtService j,OtpProvider otpProvider,Msg91OtpProperties otpProps){users=u;customers=c;otps=o;tokens=t;this.onboardingTokens=onboardingTokens;encoder=e;jwt=j;this.otpProvider=otpProvider;this.otpProps=otpProps;}
  String normEmail(String s){return s==null?null:s.trim().toLowerCase(Locale.ROOT);} String normPhone(String s){if(s==null)return null; String p=s.trim().replaceAll("[\\s\\-()]",""); if(!p.matches("\\+[1-9]\\d{7,14}")) throw new IllegalArgumentException("Invalid phone"); return p;}
  @Transactional User register(String email,String phone,String password,String name){email=normEmail(email);phone=normPhone(phone); if(email!=null&&!email.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+"))throw new IllegalArgumentException("Invalid email"); if(password!=null&&(password.isBlank()||password.getBytes(StandardCharsets.UTF_8).length>72))throw new IllegalArgumentException("Invalid password"); if(email==null&&phone==null)throw new IllegalArgumentException("Email or phone required"); if(phone==null&&password==null)throw new IllegalArgumentException("Password required"); if(email!=null&&users.findByEmail(email).isPresent()||phone!=null&&users.findByPhone(phone).isPresent())throw new IllegalArgumentException("Registration unavailable"); User u=new User();u.setEmail(email);u.setPhone(phone);u.setPasswordHash(password==null?null:encoder.encode(password));u.setRole(Role.CUSTOMER);users.save(u);CustomerProfile p=new CustomerProfile();p.setUser(u);p.setFullName(name);customers.save(p);return u;}
  @Transactional User registerProfile(AuthDtos.Registration r) {
@@ -33,9 +34,20 @@ interface TokenRepo extends JpaRepository<RefreshToken,Long>{@Lock(jakarta.persi
  @Transactional AuthDtos.OtpSent sendOtpRequest(String phone) {
   phone=normPhone(phone);var now=LocalDateTime.now();
   var recent=otps.findTopByPhoneAndVerifiedAtIsNullOrderByCreatedAtDesc(phone);
-  if(recent.isPresent() && (recent.get().createdAt.isAfter(now.minusSeconds(60)) || recent.get().lockedUntil!=null&&recent.get().lockedUntil.isAfter(now)))throw new IllegalArgumentException("OTP unavailable");
+  if(recent.isPresent() && (recent.get().lastSentAt!=null&&recent.get().lastSentAt.isAfter(now.minusSeconds(10)) || recent.get().lockedUntil!=null&&recent.get().lockedUntil.isAfter(now)))throw new IllegalArgumentException("OTP unavailable");
+  if(otps.countByPhoneAndCreatedAtAfter(phone,now.minusHours(1))>=20)throw new IllegalArgumentException("OTP unavailable");
   String code=String.valueOf(100000+new java.security.SecureRandom().nextInt(900000));
-  OtpVerification o=new OtpVerification();o.phone=phone;o.otpHash=encoder.encode(code);o.expiresAt=now.plusMinutes(5);otps.saveAndFlush(o);
+  OtpVerification o=new OtpVerification();o.phone=phone;o.otpHash=encoder.encode(code);o.expiresAt=now.plusSeconds(otpProps.otpExpirySeconds());o.lastSentAt=now;otps.saveAndFlush(o);
+  OtpProviderResult sent=otpProvider.send(new OtpProviderRequest(phone,code,o.id,"otp-send:"+o.id));
+  o.provider=sent.provider();o.providerReference=sent.providerReference();if(!sent.success())throw new IllegalArgumentException("OTP unavailable");
+  return new AuthDtos.OtpSent(o.id,o.expiresAt,true,code);
+ }
+ @Transactional AuthDtos.OtpSent resendOtpRequest(String phone,Long requestId) {
+  phone=normPhone(phone);var now=LocalDateTime.now();OtpVerification o=otps.lockRequest(requestId).orElseThrow(()->new IllegalArgumentException("OTP unavailable"));
+  if(!o.phone.equals(phone)||o.verifiedAt!=null||!o.expiresAt.isAfter(now)||o.lockedUntil!=null&&o.lockedUntil.isAfter(now)||o.lastSentAt!=null&&o.lastSentAt.isAfter(now.minusSeconds(10)))throw new IllegalArgumentException("OTP unavailable");
+  String code=String.valueOf(100000+new java.security.SecureRandom().nextInt(900000));o.otpHash=encoder.encode(code);o.resendCount++;o.lastSentAt=now;o.expiresAt=now.plusSeconds(otpProps.otpExpirySeconds());
+  OtpProviderResult sent=otpProvider.resend(new OtpProviderRequest(phone,code,o.id,"otp-resend:"+o.id+":"+o.resendCount));
+  o.provider=sent.provider();o.providerReference=sent.providerReference();otps.saveAndFlush(o);if(!sent.success())throw new IllegalArgumentException("OTP unavailable");
   return new AuthDtos.OtpSent(o.id,o.expiresAt,true,code);
  }
  @Transactional(noRollbackFor=IllegalArgumentException.class) User verifyOtpRequest(String phone,String code,Long requestId) {
@@ -51,6 +63,16 @@ interface TokenRepo extends JpaRepository<RefreshToken,Long>{@Lock(jakarta.persi
  }
  @Transactional void logoutOwned(String raw,Long userId) {
   tokens.findByTokenHash(hash(raw)).ifPresent(t->{if(!t.getUser().getId().equals(userId))throw new org.springframework.security.access.AccessDeniedException("Access denied");t.setRevokedAt(LocalDateTime.now());});
+ }
+ @Transactional String createOnboardingToken(User user) {
+  String raw=UUID.randomUUID().toString()+UUID.randomUUID();
+  OnboardingToken token=new OnboardingToken();token.user=user;token.tokenHash=hash(raw);token.expiresAt=LocalDateTime.now().plusHours(24);onboardingTokens.saveAndFlush(token);return raw;
+ }
+ @Transactional(noRollbackFor=IllegalArgumentException.class) void setPassword(String raw,String password) {
+  if(raw==null||raw.isBlank()||password==null||password.isBlank()||password.getBytes(StandardCharsets.UTF_8).length>72)throw new IllegalArgumentException("Set-password token invalid");
+  OnboardingToken token=onboardingTokens.lockHash(hash(raw)).orElseThrow(()->new IllegalArgumentException("Set-password token invalid"));
+  if(token.usedAt!=null||!token.expiresAt.isAfter(LocalDateTime.now()))throw new IllegalArgumentException("Set-password token invalid");
+  token.user.setPasswordHash(encoder.encode(password));token.usedAt=LocalDateTime.now();users.save(token.user);onboardingTokens.save(token);
  }
  static String hash(String s){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
 }

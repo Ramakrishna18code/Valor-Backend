@@ -365,3 +365,71 @@ activating any external messaging provider.
 
 Real Email/SMS/WhatsApp provider credentials and delivery activation remain
 deferred to a later phase.
+## Phase 18 Email System
+
+Email delivery is implemented on top of the Phase 17 communication foundation. Business services enqueue communication events; `CommunicationService` creates idempotent `EMAIL` messages, renders templates, respects communication preferences for non-mandatory messages, and sends through the provider-neutral `EmailProvider` interface.
+
+Provider activation is deliberately deferred. The current runtime uses `MockEmailProvider` for development and tests, so no real email is delivered and no real SMTP/API vendor is selected. Future adapters should implement `EmailProvider` without exposing provider SDK models to business services.
+
+Generic configuration placeholders:
+
+```env
+EMAIL_PROVIDER=mock
+EMAIL_HOST=
+EMAIL_PORT=
+EMAIL_USERNAME=
+EMAIL_PASSWORD=
+EMAIL_API_KEY=
+EMAIL_FROM=
+EMAIL_FROM_NAME=
+EMAIL_REPLY_TO=
+EMAIL_ENABLED=false
+APP_SET_PASSWORD_URL=http://localhost:5173/set-password
+```
+
+Email templates support subject, HTML body, plain-text fallback, sender, reply-to, template variables, provider reference, retry count, and the existing communication statuses: `PENDING`, `PROCESSING`, `SENT`, `DELIVERED`, `FAILED`, and `CANCELLED`. Retry and idempotency reuse `communication_events.idempotency_key` and `communication_messages(event_id, channel)`.
+
+Supported backend-triggered email events include customer onboarding/set-password, service request create/status/completion/feedback, technician account/assignment/job/visit/change-decision notifications, appointment scheduled/changed/cancelled, AMC renewal request, invoice created, payment result, and admin alert template support for existing admin/report/payment alert flows.
+
+Security rules: never email raw passwords, OTPs, hashes, provider credentials, API keys, or tokens except the one-time set-password token embedded in the configured onboarding link. Onboarding tokens are hashed at rest, expire, and are single-use. Provider failure logging is sanitized and recipient logging remains masked.
+
+## Phases 19-21 SMS, WhatsApp, And Preferences
+
+SMS/OTP and WhatsApp continue to use provider abstractions. `OtpProvider` owns OTP send/resend delivery, with `MockOtpProvider` active for tests/dev and a dormant `Msg91OtpProvider` adapter shape for future activation. `SmsProvider` and `WhatsAppProvider` remain behind `CommunicationService`; `MockSmsProvider` and `MockWhatsAppProvider` are the only active providers.
+
+OTP login endpoints:
+
+```text
+POST /api/v1/auth/otp/send
+POST /api/v1/auth/otp/resend
+POST /api/v1/auth/otp/verify
+```
+
+OTP values are generated server-side, hashed at rest, expire according to `MSG91_OTP_EXPIRY_SECONDS`, enforce resend cooldown, hourly rate limit, wrong-attempt lockout, and masked provider metadata. OTPs, MSG91 auth keys, tokens, and provider secrets must never be logged. Dev/test responses may include the OTP for automated tests; production send remains disabled until external provider activation.
+
+Generic placeholders:
+
+```env
+MSG91_AUTH_KEY=
+MSG91_TEMPLATE_ID=
+MSG91_SENDER_ID=
+MSG91_OTP_EXPIRY_SECONDS=300
+WHATSAPP_PROVIDER=mock
+WHATSAPP_ENABLED=false
+WHATSAPP_API_KEY=
+WHATSAPP_TEMPLATE_ID=
+WHATSAPP_NAMESPACE=
+WHATSAPP_SENDER=
+```
+
+Communication preferences now remain in `communication_preferences` and include channel plus category switches: email, SMS, WhatsApp, in-app, OTP SMS/WhatsApp, service, billing, appointment, job, visit, system, critical alert, and report notifications. Business events enqueue provider-neutral messages and preferences decide which non-mandatory channel/category messages are created.
+
+Real MSG91 SMS/OTP and WhatsApp activation is not enabled in this phase.
+
+## Phase 22 Communication Event Automation
+
+Phase 22 wires real backend domain events into the existing communication stack instead of adding another notification system. Business services publish provider-neutral automation events; after the source transaction commits, `EmailEventService` opens a separate communication transaction, applies preferences and templates through `CommunicationService`, and persists delivery records in `communication_events` and `communication_messages`.
+
+Automated events currently include customer onboarding, service-request creation, admin critical service alerts, technician assignment/reassignment, service-request status changes, visit scheduling/rescheduling/cancellation, AMC creation/renewal, invoice creation, payment result, service completion/feedback, and report-ready admin broadcasts where those backend flows already exist.
+
+Automation uses the same idempotency keys, retry counters, failure reasons, provider references, and statuses from Phase 17-21. Non-mandatory messages respect channel/category preferences. Mandatory onboarding/security flows keep using the safe set-password/authentication rules and never email raw passwords. Email, SMS, MSG91 OTP, and WhatsApp providers remain mock or dormant unless explicitly activated in a later external-provider phase.

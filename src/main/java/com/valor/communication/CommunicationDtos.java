@@ -13,8 +13,16 @@ final class CommunicationDtos {
             Map<String,String> variables, @NotBlank @Size(max=160) String idempotencyKey) {
         @JsonAnySetter public void rejectUnknown(String k, JsonNode v) { throw new IllegalArgumentException("Unsupported communication field"); }
     }
-    record PreferenceRequest(boolean emailEnabled, boolean smsEnabled, boolean whatsappEnabled, boolean inAppEnabled) {}
-    record PreferenceView(Long userId, boolean emailEnabled, boolean smsEnabled, boolean whatsappEnabled, boolean inAppEnabled) {}
+    record PreferenceRequest(boolean emailEnabled, boolean smsEnabled, boolean whatsappEnabled, boolean inAppEnabled,
+            Boolean otpSmsEnabled, Boolean otpWhatsappEnabled, Boolean serviceNotificationsEnabled,
+            Boolean billingNotificationsEnabled, Boolean appointmentNotificationsEnabled, Boolean jobNotificationsEnabled,
+            Boolean visitNotificationsEnabled, Boolean systemNotificationsEnabled, Boolean criticalAlertsEnabled,
+            Boolean reportNotificationsEnabled) {}
+    record PreferenceView(Long userId, boolean emailEnabled, boolean smsEnabled, boolean whatsappEnabled, boolean inAppEnabled,
+            boolean otpSmsEnabled, boolean otpWhatsappEnabled, boolean serviceNotificationsEnabled,
+            boolean billingNotificationsEnabled, boolean appointmentNotificationsEnabled, boolean jobNotificationsEnabled,
+            boolean visitNotificationsEnabled, boolean systemNotificationsEnabled, boolean criticalAlertsEnabled,
+            boolean reportNotificationsEnabled) {}
     record MessageView(Long id, Long eventId, String eventType, Long recipientUserId, String recipientMasked,
             CommunicationChannel channel, CommunicationStatus status, String provider, String providerMessageId,
             String templateKey, int retryCount, int maxRetryCount, LocalDateTime nextRetryAt,

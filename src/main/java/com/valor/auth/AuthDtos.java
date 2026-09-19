@@ -19,8 +19,11 @@ final class AuthDtos {
     record EmailLogin(@NotBlank String email,
         @Schema(accessMode=Schema.AccessMode.WRITE_ONLY,format="password") @NotBlank String password) implements StrictInput {}
     record OtpSend(@NotBlank String phone) implements StrictInput {}
+    record OtpResend(@NotBlank String phone, @NotNull @Positive Long requestId) implements StrictInput {}
     record OtpVerify(@NotBlank String phone, @NotBlank String otp, @NotNull @Positive Long requestId) implements StrictInput {}
     record Refresh(@NotBlank String refreshToken) implements StrictInput {}
+    record SetPassword(@NotBlank String token,
+        @Schema(accessMode=Schema.AccessMode.WRITE_ONLY,format="password") @NotBlank @Size(max=72) String password) implements StrictInput {}
     record CustomerSummary(Long id,String fullName,String alternatePhone,String companyName,String address,String status,boolean active) {}
     record TechnicianSummary(Long id,String employeeId,String assignedArea,String specialization,
         @Schema(allowableValues={"AVAILABLE","BUSY","OFF_DUTY","ON_LEAVE"}) String availabilityStatus,boolean active) {}

@@ -3,6 +3,7 @@ package com.valor.assets;
 import com.valor.auth.AssetIdentityAccess;
 import com.valor.auth.AuditService;
 import com.valor.auth.Role;
+import com.valor.communication.EmailEventService;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.*;
@@ -22,15 +23,16 @@ public class AssetService {
     private final Clock clock;
     private final AssetCustomerRepository customerProfiles;
     private final AuditService audit;
+    private final EmailEventService emails;
 
     public AssetService(BuildingRepository buildings, LiftRepository lifts,
             AmcContractRepository contracts, AssetIdentityAccess identities, Clock clock, AssetCustomerRepository customerProfiles,
-            AuditService audit) {
+            AuditService audit, EmailEventService emails) {
         this.buildings = buildings;
         this.lifts = lifts;
         this.contracts = contracts;
         this.identities = identities;
-        this.clock = clock;this.customerProfiles=customerProfiles;this.audit=audit;
+        this.clock = clock;this.customerProfiles=customerProfiles;this.audit=audit;this.emails=emails;
     }
 
     @Transactional(readOnly = true)
@@ -149,6 +151,8 @@ public class AssetService {
         contracts.saveAndFlush(contract);
         audit.record("AMC_CREATE", "AMC", contract.getId(), "Created AMC lift=" + lift.getId(),
                 null, amcSummary(contract), "SUCCESS");
+        emails.amcCreated(lift.getBuilding().getCustomer().getUser().getId(), lift.getBuilding().getCustomer().getFullName(),
+                contract.getId(), contract.getAmcNumber());
         return amcView(contract, LocalDate.now(clock));
     }
 
@@ -326,6 +330,7 @@ public class AssetService {
         entity.setManufacturer(input.manufacturer());
         entity.setCapacity(input.capacity());
         entity.setFloorCount(input.floorCount());
+        entity.setDoorType(input.doorType());
         entity.setSerialNumber(input.serialNumber());
         entity.setInstallationDate(input.installationDate());
         entity.setLocation(input.location());
@@ -352,6 +357,8 @@ public class AssetService {
     private String liftSummary(Lift entity) {
         return "name=" + entity.getName()
                 + ",liftNumber=" + entity.getLiftNumber()
+                + ",doorType=" + entity.getDoorType()
+                + ",floorCount=" + entity.getFloorCount()
                 + ",currentStatus=" + entity.getCurrentStatus()
                 + ",healthScore=" + entity.getHealthScore()
                 + ",active=" + entity.isActive();
@@ -397,6 +404,7 @@ public class AssetService {
                 entity.getManufacturer(),
                 entity.getCapacity(),
                 entity.getFloorCount(),
+                entity.getDoorType(),
                 entity.getSerialNumber(),
                 entity.getInstallationDate(),
                 entity.getLocation(),

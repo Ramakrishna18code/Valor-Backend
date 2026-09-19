@@ -48,11 +48,21 @@ class AuthController {
             throw new IllegalArgumentException("OTP delivery unavailable");
         return ApiResponse.success("Development OTP generated",auth.sendOtpRequest(r.phone()),200);
     }
+    @Operation(operationId="resendOtp")
+    @PostMapping("/auth/otp/resend") ApiResponse<OtpSent> resendOtp(@Valid @RequestBody OtpResend r) {
+        if(env.acceptsProfiles(Profiles.of("prod")) || !env.acceptsProfiles(Profiles.of("dev","test")))
+            throw new IllegalArgumentException("OTP delivery unavailable");
+        return ApiResponse.success("Development OTP resent",auth.resendOtpRequest(r.phone(),r.requestId()),200);
+    }
     @Operation(operationId="verifyOtp")
     @PostMapping("/auth/otp/verify") ApiResponse<Authentication> verifyOtp(@Valid @RequestBody OtpVerify r) {return ok(auth.verifyOtpRequest(r.phone(),r.otp(),r.requestId()));}
     @Operation(operationId="refresh")
     @PostMapping("/auth/refresh") ApiResponse<Rotation> refresh(@Valid @RequestBody Refresh r) {
         String[] tokens=auth.refresh(r.refreshToken());return ApiResponse.success("Token refreshed",new Rotation(tokens[0],tokens[1]),200);
+    }
+    @Operation(operationId="setPassword")
+    @PostMapping("/auth/set-password") ApiResponse<Void> setPassword(@Valid @RequestBody SetPassword r) {
+        auth.setPassword(r.token(), r.password()); return ApiResponse.success("Password set", null, 200);
     }
     @Operation(operationId="logout")
     @PostMapping("/auth/logout") ApiResponse<Void> logout(@Valid @RequestBody Refresh r) {auth.logoutOwned(r.refreshToken(),identities.actor().getId());return ApiResponse.success("Logged out",null,200);}

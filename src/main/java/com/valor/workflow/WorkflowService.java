@@ -1,6 +1,7 @@
 package com.valor.workflow;
 
 import com.valor.auth.*;
+import com.valor.communication.EmailEventService;
 import java.time.LocalDateTime;
 import java.util.*;
 import org.springframework.data.domain.*;
@@ -23,13 +24,14 @@ public class WorkflowService {
     private final AuditService audit;
     private final ChecklistService checklists;
     private final CompletionOtpService completionOtps;
+    private final EmailEventService emails;
 
     public WorkflowService(RequestRepository requests, AssignmentRepository assignments, HistoryRepository history,
             ReportRepository reports, WorkflowLiftRepository lifts, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
-            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps) {
+            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps, EmailEventService emails) {
         this.requests = requests; this.assignments = assignments; this.history = history;
         this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles; this.visits = visits; this.audit = audit;
-        this.checklists = checklists; this.completionOtps = completionOtps;
+        this.checklists = checklists; this.completionOtps = completionOtps; this.emails = emails;
     }
 
     @Transactional(readOnly=true)
@@ -68,6 +70,7 @@ public class WorkflowService {
         event(request, null, actor, null);
         audit.record("SERVICE_REQUEST_CREATE", "SERVICE_REQUEST", request.getId(), "Created service request customer=" + owner.getId() + ",lift=" + lift.getId(),
                 null, requestSummary(request, null), "SUCCESS");
+        emails.serviceRequestCreated(owner.getUser().getId(), owner.getFullName(), request.getId(), request.getServiceId(), request.getTitle(), request.getStatus().name());
         return detail(request, actor);
     }
 
@@ -116,6 +119,7 @@ public class WorkflowService {
                 "Assigned technician request=" + request.getId(),
                 "status=" + from + ",technician=" + previousTechnicianId,
                 "status=" + request.getStatus() + ",technician=" + technician.getId(), "SUCCESS");
+        emails.technicianAssignment(technician.getUser().getId(), technician.getEmployeeId(), request.getId(), request.getServiceId(), request.getTitle());
         return detail(request, actor);
     }
 
@@ -151,6 +155,7 @@ public class WorkflowService {
             audit.record("SERVICE_REQUEST_STATUS", "SERVICE_REQUEST", request.getId(), "Changed service request status",
                     "status=" + from + ",technician=" + assignmentTechnician(id),
                     "status=" + request.getStatus() + ",technician=" + assignmentTechnician(id), "SUCCESS");
+            emails.serviceRequestStatusChanged(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(), request.getId(), request.getServiceId(), from.name(), request.getStatus().name());
             return detail(request, actor);
         }
         TechnicianAssignment assignment;
@@ -184,6 +189,9 @@ public class WorkflowService {
         audit.record("SERVICE_REQUEST_STATUS", "SERVICE_REQUEST", request.getId(), "Changed service request status",
                 "status=" + from + ",technician=" + (assignment == null ? null : assignment.getTechnician().getId()),
                 "status=" + request.getStatus() + ",technician=" + (assignment == null ? null : assignment.getTechnician().getId()), "SUCCESS");
+        emails.serviceRequestStatusChanged(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(), request.getId(), request.getServiceId(), from.name(), request.getStatus().name());
+        if (assignment != null) emails.technicianJobStatusChanged(assignment.getTechnician().getUser().getId(), assignment.getTechnician().getEmployeeId(), request.getId(), request.getServiceId(), from.name(), request.getStatus().name());
+        if (to == RequestStatus.COMPLETED) emails.serviceCompleted(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(), request.getId(), request.getServiceId());
         return detail(request, actor);
     }
 

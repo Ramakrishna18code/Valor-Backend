@@ -26,6 +26,9 @@ public class Lift extends AssetRecord {
     private Integer capacity;
     @Column(name = "floor_count", nullable = true)
     private Integer floorCount;
+    @Column(name = "door_type", nullable = true, length = 20)
+    @Enumerated(EnumType.STRING) @JdbcTypeCode(SqlTypes.VARCHAR)
+    private LiftDoorType doorType;
     @Column(name = "serial_number", nullable = true, length = 120)
     private String serialNumber;
     @Column(name = "installation_date", nullable = true)

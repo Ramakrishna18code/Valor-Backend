@@ -521,3 +521,86 @@ OTP plaintext, and authorization tokens must not be logged.
 ## Migration and client readiness
 
 V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. V7 adds request-scoped attachments and one feedback row per service request. V8 adds payment_records, invoices, support_tickets, amc_renewal_requests and asset_documents with restrictive foreign keys, owner indexes, status checks and no credential storage. V9 adds Razorpay identifiers to payment_records, payment_refunds, razorpay_webhook_events and technician_latest_locations. V10 adds roles, permissions, role_permissions and audit_logs with seeded role capability mappings and audit indexes. V11 adds technician advanced operations tables for checklist, completion OTP, expanded profiles, and technician-private attachments. V12 adds nullable building coordinates plus location history and geofence state/event tables. V13 adds provider-independent communication templates, preferences, events, and messages with channel/status/retry/idempotency indexes. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. Live Razorpay Test Mode transaction verification, public HTTPS webhook delivery, routing provider activation, communication provider activation, and real background/device tracking validation remain environment-dependent.
+## Phase 18 Email System Contract
+
+Email is a backend-driven communication channel under `/api/v1` and reuses the Phase 17 communication APIs and data model. Clients do not receive provider secrets or provider configuration.
+
+Architecture:
+
+```text
+CommunicationService
+  -> EmailProvider
+    -> MockEmailProvider
+    -> future provider adapter
+```
+
+`EmailProvider.send(...)` receives provider-neutral data only: recipient, sender, sender display name, reply-to, subject, HTML body, plain-text body, communication message id, event/template metadata, and idempotency key. No SMTP, SES, SendGrid, Mailgun, Resend, or other provider model is part of the core contract.
+
+Configuration is generic and optional: `EMAIL_PROVIDER`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME`, `EMAIL_REPLY_TO`, `EMAIL_ENABLED`, and `APP_SET_PASSWORD_URL`. Real provider activation is deferred.
+
+`communication_messages` remains the delivery source of truth. Email delivery uses the existing statuses `PENDING`, `PROCESSING`, `SENT`, `DELIVERED`, `FAILED`, and `CANCELLED`, stores provider/provider message references when available, retries transient failures with `retry_count`, `max_retry_count`, `next_retry_at`, and preserves sanitized `failure_reason`.
+
+Safe onboarding:
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| POST | `/api/v1/auth/set-password` | Public one-time token | Set a password using an expiring onboarding token |
+
+`POST /auth/set-password` accepts `{ token, password }`. Tokens are hashed at rest, expire, are single-use, and are not returned by read APIs. Account-created emails must use the configured set-password URL and must never include raw passwords.
+
+Backend-triggered email events currently include customer account/set-password, service request created/status/completed/feedback, appointment scheduled/changed/cancelled, technician account/assignment/job status/visit/change-request decision, AMC renewal request, invoice created, payment result, and admin alert template support where existing backend events dispatch it.
+
+## Phases 19-21 SMS, WhatsApp, And Preference Contract
+
+All paths remain under `/api/v1`. External MSG91 SMS/OTP and WhatsApp providers are not activated; tests/dev use mock providers only.
+
+OTP endpoints:
+
+| Method | Path | Auth | Request | Response |
+| --- | --- | --- | --- | --- |
+| POST | `/auth/otp/send` | Public dev/test only | `phone` | `OtpSent` |
+| POST | `/auth/otp/resend` | Public dev/test only | `phone`, `requestId` | `OtpSent` |
+| POST | `/auth/otp/verify` | Public | `phone`, `otp`, `requestId` | `Authentication` |
+
+OTP behavior: phone numbers use canonical normalization, OTPs are hashed at rest, expire by configured seconds, enforce resend cooldown, hourly request limits, attempt limits, temporary lockout, and masked/sanitized provider error handling. Responses must not expose OTP hashes, provider secrets, MSG91 auth keys, or internal provider payloads.
+
+Provider abstractions:
+
+```text
+OtpProvider -> MockOtpProvider -> future Msg91OtpProvider activation
+WhatsAppProvider -> MockWhatsAppProvider -> future Msg91WhatsAppProvider activation
+SmsProvider -> MockSmsProvider -> future SMS adapter activation
+```
+
+Preference contract expands `/admin/communications/preferences/{userId}` without creating a second preference system. `PreferenceView` includes:
+
+```text
+emailEnabled
+smsEnabled
+whatsappEnabled
+inAppEnabled
+otpSmsEnabled
+otpWhatsappEnabled
+serviceNotificationsEnabled
+billingNotificationsEnabled
+appointmentNotificationsEnabled
+jobNotificationsEnabled
+visitNotificationsEnabled
+systemNotificationsEnabled
+criticalAlertsEnabled
+reportNotificationsEnabled
+```
+
+`PUT /admin/communications/preferences/{userId}` accepts the same fields. The first four channel booleans remain required for compatibility; category booleans are optional and preserve previous values when omitted. Non-mandatory communication events are filtered by channel and category preferences before messages are created. Security/mandatory flows are handled by product/auth rules and are not silently blocked by generic marketing preferences.
+
+WhatsApp support uses existing communication events, templates, status, retry, failure, provider reference, and idempotency behavior. Supported template/event coverage includes OTP where selected, service-request updates, visit changes, technician assignment, AMC renewal, invoice/payment, service completion, and feedback requests.
+
+## Phase 22 Communication Event Automation Contract
+
+Communication automation is backend-owned and remains under `/api/v1`. Controllers and clients do not call Email, SMS, OTP, or WhatsApp providers directly. Existing business services publish application communication events, and the communication layer creates idempotent delivery records after the business transaction commits.
+
+Automated event coverage is limited to existing backend flows: customer created/onboarding, service request created with customer confirmation and admin critical alert, technician assigned/reassigned, visit scheduled/rescheduled/cancelled, service-request status changed, AMC created or renewal requested, invoice created, payment result, service completed plus feedback request, and report-ready admin broadcasts where report generation already exists.
+
+Delivery records continue to use `communication_events` and `communication_messages`; there is no second status table. Preference filtering, template rendering, retry/failure handling, provider reference storage, masked logging, and duplicate prevention reuse the Phase 17-21 contracts. External providers are not activated by Phase 22, and API responses never expose provider secrets.
+
+No new client-visible provider configuration API is added. Admin visibility remains the existing `/api/v1/admin/communications/**` surface.

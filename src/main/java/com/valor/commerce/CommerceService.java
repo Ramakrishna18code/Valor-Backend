@@ -2,6 +2,9 @@ package com.valor.commerce;
 
 import com.valor.assets.*;
 import com.valor.auth.*;
+import com.valor.communication.EmailEventService;
+import com.valor.pricing.PricingException;
+import com.valor.pricing.PricingService;
 import com.valor.workflow.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.*;
@@ -41,17 +44,20 @@ class CommerceService {
     private final AssetDocumentStorage storage;
     private final PaymentGateway paymentGateway;
     private final AuditService audit;
+    private final EmailEventService emails;
+    private final PricingService pricing;
 
     CommerceService(AssetIdentityAccess identities, CommerceCustomerRepository customers, CommerceBuildingRepository buildings,
             CommerceLiftRepository lifts, CommerceAmcRepository amcs, CommerceRequestRepository requests,
             CommerceAssignmentRepository assignments, CommerceReportRepository reports, PaymentRecordRepository payments,
             InvoiceRepository invoices, SupportTicketRepository tickets, AmcRenewalRequestRepository renewals,
             AssetDocumentRepository documents, PaymentRefundRepository refunds, RazorpayWebhookEventRepository webhookEvents,
-            AssetDocumentStorage storage, PaymentGateway paymentGateway, AuditService audit) {
+            AssetDocumentStorage storage, PaymentGateway paymentGateway, AuditService audit, EmailEventService emails,
+            PricingService pricing) {
         this.identities = identities; this.customers = customers; this.buildings = buildings; this.lifts = lifts;
         this.amcs = amcs; this.requests = requests; this.assignments = assignments; this.reports = reports;
         this.payments = payments; this.invoices = invoices; this.tickets = tickets; this.renewals = renewals;
-        this.documents = documents; this.refunds = refunds; this.webhookEvents = webhookEvents; this.storage = storage; this.paymentGateway = paymentGateway; this.audit = audit;
+        this.documents = documents; this.refunds = refunds; this.webhookEvents = webhookEvents; this.storage = storage; this.paymentGateway = paymentGateway; this.audit = audit; this.emails = emails; this.pricing = pricing;
     }
 
     PageView<PaymentView> payments(Pageable page) {
@@ -89,6 +95,7 @@ class CommerceService {
         PaymentRecord row = payments.findById(id).orElseThrow(() -> missing("Payment"));
         row.setStatus(input.status()); row.setFailureReason(clean(input.failureReason(), 500));
         row.setProviderReference(clean(input.providerReference(), 120));
+        emails.paymentResult(row.getCustomer().getUser().getId(), row.getCustomer().getFullName(), row.getId(), row.getStatus().name());
         return view(row);
     }
 
@@ -185,13 +192,25 @@ class CommerceService {
         CustomerProfile customer = customer(input.customerProfileId());
         Invoice row = new Invoice();
         row.setCustomer(customer); row.setCreatedBy(identities.actor()); row.setDescription(input.description().trim());
-        row.setSubtotal(input.subtotal()); row.setTaxAmount(input.taxAmount() == null ? BigDecimal.ZERO : input.taxAmount());
-        row.setTotalAmount(row.getSubtotal().add(row.getTaxAmount())); row.setCurrency(currency(input.currency()));
+        ServiceRequest serviceRequest = input.serviceRequestId() == null ? null : request(input.serviceRequestId(), customer);
+        AmcContract amcContract = input.amcContractId() == null ? null : amc(input.amcContractId(), customer);
+        row.setServiceRequest(serviceRequest);
+        row.setAmcContract(amcContract);
+        if (serviceRequest != null || amcContract != null) {
+            row.setSubtotal(calculatedAmount(serviceRequest, amcContract));
+            row.setTaxAmount(BigDecimal.ZERO);
+            row.setCurrency("INR");
+        } else {
+            row.setSubtotal(input.subtotal());
+            row.setTaxAmount(input.taxAmount() == null ? BigDecimal.ZERO : input.taxAmount());
+            row.setCurrency(currency(input.currency()));
+        }
+        row.setTotalAmount(row.getSubtotal().add(row.getTaxAmount()));
         row.setDueDate(input.dueDate());
-        row.setServiceRequest(input.serviceRequestId() == null ? null : request(input.serviceRequestId(), customer));
-        row.setAmcContract(input.amcContractId() == null ? null : amc(input.amcContractId(), customer));
         invoices.saveAndFlush(row);
         row.setInvoiceNumber("INV-%06d".formatted(row.getId()));
+        emails.invoiceCreated(customer.getUser().getId(), customer.getFullName(), row.getId(), row.getInvoiceNumber(),
+                String.valueOf(row.getTotalAmount()), row.getCurrency());
         return view(row);
     }
     InvoiceView updateInvoiceStatus(Long id, InvoiceStatusUpdate input) {
@@ -248,12 +267,13 @@ class CommerceService {
         renewals.saveAndFlush(row);
         audit.record("AMC_RENEWAL_REQUEST_CREATE", "AMC_RENEWAL_REQUEST", row.getId(), "Created AMC renewal request amc=" + contract.getId(),
                 null, renewalSummary(row), "SUCCESS");
+        emails.amcRenewalRequest(customer.getUser().getId(), customer.getFullName(), row.getId(), contract.getId());
         return view(row);
     }
     RenewalView quoteRenewal(Long id, RenewalQuote input) {
         requireAdmin();
         AmcRenewalRequest row = renewals.findById(id).orElseThrow(() -> missing("AMC renewal request"));
-        row.setQuotedAmount(input.quotedAmount()); row.setCurrency(currency(input.currency())); row.setAdminNotes(clean(input.adminNotes(), 1000));
+        row.setQuotedAmount(calculatedAmount(null, row.getContract())); row.setCurrency("INR"); row.setAdminNotes(clean(input.adminNotes(), 1000));
         if (input.invoiceId() != null) row.setInvoice(authorized(invoices.findById(input.invoiceId()).orElseThrow(() -> missing("Invoice"))));
         if (input.paymentId() != null) row.setPayment(authorized(payments.findById(input.paymentId()).orElseThrow(() -> missing("Payment"))));
         String before = renewalSummary(row);
@@ -333,6 +353,15 @@ class CommerceService {
         AmcContract contract = row.getContract();
         contract.setStartDate(row.getRequestedStartDate()); contract.setEndDate(row.getRequestedEndDate());
         contract.setRenewalCount(contract.getRenewalCount() + 1); contract.setStatus(AmcStatus.ACTIVE);
+    }
+    private BigDecimal calculatedAmount(ServiceRequest request, AmcContract contract) {
+        try {
+            if (request != null) return pricing.servicePrice(request);
+            if (contract != null) return pricing.amcPrice(contract.getLift());
+            throw new PricingException("Priced record is required");
+        } catch (PricingException ex) {
+            throw new CommerceException(400, ex.getMessage());
+        }
     }
     private void processGatewayEvent(String event, JsonNode paymentNode, JsonNode refundNode, String orderId, String paymentId, String refundId) {
         if (event.startsWith("payment.")) {

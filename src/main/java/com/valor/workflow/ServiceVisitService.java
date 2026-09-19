@@ -1,6 +1,7 @@
 package com.valor.workflow;
 
 import com.valor.auth.*;
+import com.valor.communication.EmailEventService;
 import com.valor.response.*;
 import java.time.*;
 import java.util.*;
@@ -23,13 +24,14 @@ public class ServiceVisitService {
     private final WorkflowIdentityAccess profiles;
     private final AssetIdentityAccess identities;
     private final AuditService audit;
+    private final EmailEventService emails;
 
     public ServiceVisitService(ServiceVisitRepository visits, VisitChangeRequestRepository changeRequests,
             VisitHistoryRepository history, VisitTechnicianRepository technicians, RequestRepository requests,
-            AssignmentRepository assignments, WorkflowIdentityAccess profiles, AssetIdentityAccess identities, AuditService audit) {
+            AssignmentRepository assignments, WorkflowIdentityAccess profiles, AssetIdentityAccess identities, AuditService audit, EmailEventService emails) {
         this.visits = visits; this.changeRequests = changeRequests; this.history = history;
         this.technicians = technicians; this.requests = requests; this.assignments = assignments;
-        this.profiles = profiles; this.identities = identities; this.audit = audit;
+        this.profiles = profiles; this.identities = identities; this.audit = audit; this.emails = emails;
     }
 
     @Transactional(readOnly = true)
@@ -61,6 +63,9 @@ public class ServiceVisitService {
         visits.saveAndFlush(visit); record(visit, actor, "CREATED", null);
         audit.record("SERVICE_VISIT_CREATE", "SERVICE_VISIT", visit.getId(), "Created service visit request=" + request.getId(),
                 null, visitSummary(visit), "SUCCESS");
+        emails.appointmentScheduled(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(),
+                technician.getUser().getId(), technician.getEmployeeId(), visit.getId(), request.getId(), request.getServiceId(),
+                String.valueOf(visit.getScheduledDate()), String.valueOf(visit.getStartTime()), String.valueOf(visit.getEndTime()));
         return view(visit, actor);
     }
 
@@ -85,6 +90,9 @@ public class ServiceVisitService {
         audit.record(technicianChanged ? "SERVICE_VISIT_TECHNICIAN_CHANGE" : "SERVICE_VISIT_UPDATE", "SERVICE_VISIT", visit.getId(),
                 technicianChanged ? "Changed service visit technician" : "Updated service visit",
                 before, visitSummary(visit), "SUCCESS");
+        emails.appointmentChanged(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(),
+                newTechnician.getUser().getId(), newTechnician.getEmployeeId(), visit.getId(), request.getServiceId(),
+                String.valueOf(visit.getScheduledDate()), String.valueOf(visit.getStartTime()), String.valueOf(visit.getEndTime()));
         return view(visit, actor);
     }
 
@@ -102,6 +110,8 @@ public class ServiceVisitService {
         visits.flush();
         audit.record("SERVICE_VISIT_CANCEL", "SERVICE_VISIT", visit.getId(), "Cancelled service visit",
                 before, visitSummary(visit), "SUCCESS");
+        emails.appointmentCancelled(visit.getRequest().getCustomer().getUser().getId(), visit.getRequest().getCustomer().getFullName(),
+                visit.getId(), visit.getRequest().getServiceId(), reason);
         return view(visit, actor);
     }
 
@@ -200,6 +210,9 @@ public class ServiceVisitService {
             audit.record(technicianChanged ? "SERVICE_VISIT_TECHNICIAN_CHANGE" : "SERVICE_VISIT_UPDATE", "SERVICE_VISIT", visit.getId(),
                     technicianChanged ? "Changed service visit technician" : "Updated service visit",
                     visitBefore, visitSummary(visit), "SUCCESS");
+            emails.appointmentChanged(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(),
+                    technician.getUser().getId(), technician.getEmployeeId(), visit.getId(), request.getServiceId(),
+                    String.valueOf(visit.getScheduledDate()), String.valueOf(visit.getStartTime()), String.valueOf(visit.getEndTime()));
             changeRequests.flush(); return view(visit, actor);
         }
         if (!visits.activeForRequest(request.getId(), ACTIVE).isEmpty()) throw conflict("Service request already has an active visit");
@@ -213,6 +226,11 @@ public class ServiceVisitService {
         change.setStatus(VisitChangeRequestStatus.APPROVED); review(change, actor, input.reviewNotes());
         audit.record("VISIT_CHANGE_REQUEST_APPROVE", "VISIT_CHANGE_REQUEST", change.getId(), "Approved visit change request visit=" + id(change.getVisit()),
                 before, changeSummary(change), "SUCCESS");
+        emails.appointmentScheduled(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(),
+                technician.getUser().getId(), technician.getEmployeeId(), visit.getId(), request.getId(), request.getServiceId(),
+                String.valueOf(visit.getScheduledDate()), String.valueOf(visit.getStartTime()), String.valueOf(visit.getEndTime()));
+        emails.changeRequestDecision(change.getRequestedTechnician().getUser().getId(), change.getRequestedTechnician().getEmployeeId(),
+                change.getId(), change.getType().name(), change.getStatus().name());
         changeRequests.flush();
         return view(visit, actor);
     }
@@ -226,6 +244,8 @@ public class ServiceVisitService {
         if (change.getVisit() != null) record(change.getVisit(), actor, "REQUEST_REJECTED", reason);
         audit.record("VISIT_CHANGE_REQUEST_REJECT", "VISIT_CHANGE_REQUEST", change.getId(), "Rejected visit change request visit=" + id(change.getVisit()),
                 before, changeSummary(change), "SUCCESS");
+        emails.changeRequestDecision(change.getRequestedTechnician().getUser().getId(), change.getRequestedTechnician().getEmployeeId(),
+                change.getId(), change.getType().name(), change.getStatus().name());
         changeRequests.flush(); return changeView(change);
     }
 

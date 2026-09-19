@@ -17,7 +17,7 @@ class StaffController {
     @Schema(name="StaffCreateRequest")
     record Create(@NotBlank @Size(max=254) String email,
                   @Schema(accessMode=Schema.AccessMode.WRITE_ONLY, format="password")
-                  @NotBlank @Size(max=72) String password,
+                  @Size(max=72) String password,
                   @Schema(implementation=String.class, allowableValues={"ADMIN","TECHNICIAN"}, example="TECHNICIAN")
                   @NotNull Role role,
                   @Schema(description="Required for TECHNICIAN provisioning; inapplicable for ADMIN (omit). Current runtime permits omission.")

@@ -63,7 +63,7 @@ class AuthConfig {
                                 "/api/v1/health", "/error").permitAll()
                         .requestMatchers("/api/v1/webhooks/razorpay").permitAll()
                         .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login/**",
-                                "/api/v1/auth/otp/**", "/api/v1/auth/refresh").permitAll()
+                                "/api/v1/auth/otp/**", "/api/v1/auth/refresh", "/api/v1/auth/set-password").permitAll()
                         .requestMatchers("/api/v1/customers/**").hasRole("CUSTOMER")
                         .requestMatchers("/api/v1/admin/dashboard/summary").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/admin/technicians").hasAnyRole("ADMIN","SUPER_ADMIN")
