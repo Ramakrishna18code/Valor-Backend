@@ -20,6 +20,8 @@ class CompletionOtp {
     @Column(name = "expires_at", nullable = false) LocalDateTime expiresAt;
     @Column(name = "locked_until") LocalDateTime lockedUntil;
     @Column(name = "verified_at") LocalDateTime verifiedAt;
+    @Column(name = "customer_visible_code", length = 16) String customerVisibleCode;
+    @Column(name = "customer_visible_until") LocalDateTime customerVisibleUntil;
     @Column(name = "created_at", nullable = false) LocalDateTime createdAt;
     @PrePersist void create() { createdAt = LocalDateTime.now(); }
 }

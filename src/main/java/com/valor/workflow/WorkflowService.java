@@ -64,9 +64,17 @@ public class WorkflowService {
             if (input.customerProfileId() == null) throw new WorkflowException(400, "Customer profile is required");
             owner = identities.activeCustomer(input.customerProfileId());
         }
-        var lift = lifts.forIntake(input.liftId()).orElseThrow(() -> missing());
-        if (!lift.getBuilding().getCustomer().getId().equals(owner.getId())) throw denied();
-        if (!lift.isActive() || !lift.getBuilding().isActive()) throw new WorkflowException(409, "Asset is inactive");
+        com.valor.assets.Lift lift = null;
+        if (input.serviceType() != WorkflowServiceType.INSTALLATION) {
+            if (input.liftId() == null) throw new WorkflowException(400, "Lift is required");
+            lift = lifts.forIntake(input.liftId()).orElseThrow(() -> missing());
+            if (!lift.getBuilding().getCustomer().getId().equals(owner.getId())) throw denied();
+            if (!lift.isActive() || !lift.getBuilding().isActive()) throw new WorkflowException(409, "Asset is inactive");
+        } else if (input.liftId() != null) {
+            lift = lifts.forIntake(input.liftId()).orElseThrow(() -> missing());
+            if (!lift.getBuilding().getCustomer().getId().equals(owner.getId())) throw denied();
+            if (!lift.isActive() || !lift.getBuilding().isActive()) throw new WorkflowException(409, "Asset is inactive");
+        }
         ServiceRequest request = new ServiceRequest();
         request.setCustomer(owner); request.setLift(lift); request.setServiceId("SR-" + UUID.randomUUID());
         request.setTitle(input.title()); request.setDescription(input.description()); request.setIssueCategory(input.issueCategory());
@@ -76,7 +84,7 @@ public class WorkflowService {
         request.setInternalAdminNotes(input.internalAdminNotes()); request.setEstimatedCompletionMinutes(input.estimatedCompletionMinutes());
         requests.saveAndFlush(request);
         event(request, null, actor, null);
-        audit.record("SERVICE_REQUEST_CREATE", "SERVICE_REQUEST", request.getId(), "Created service request customer=" + owner.getId() + ",lift=" + lift.getId(),
+        audit.record("SERVICE_REQUEST_CREATE", "SERVICE_REQUEST", request.getId(), "Created service request customer=" + owner.getId() + ",lift=" + (lift == null ? null : lift.getId()),
                 null, requestSummary(request, null), "SUCCESS");
         emails.serviceRequestCreated(owner.getUser().getId(), owner.getFullName(), request.getId(), request.getServiceId(), request.getTitle(), request.getStatus().name());
         return detail(request, actor);
@@ -255,7 +263,7 @@ public class WorkflowService {
     }
     private String requestSummary(ServiceRequest request, Long technicianId) {
         return "customer=" + request.getCustomer().getId()
-                + ",lift=" + request.getLift().getId()
+                + ",lift=" + (request.getLift() == null ? null : request.getLift().getId())
                 + ",status=" + request.getStatus()
                 + ",technician=" + technicianId;
     }
@@ -291,7 +299,7 @@ public class WorkflowService {
 
     private RequestView view(ServiceRequest r, User actor) {
         boolean admin = actor.getRole() == Role.ADMIN || actor.getRole() == Role.SUPER_ADMIN;
-        return new RequestView(r.getId(), r.getServiceId(), r.getCustomer().getId(), r.getLift().getId(), r.getTitle(),
+        return new RequestView(r.getId(), r.getServiceId(), r.getCustomer().getId(), r.getLift() == null ? null : r.getLift().getId(), r.getTitle(),
                 r.getDescription(), r.getIssueCategory(), r.getPriority(), r.getStatus(), r.getServiceType(), r.getCustomerRemarks(),
                 actor.getRole() == Role.CUSTOMER ? null : r.getTechnicianRemarks(), r.getServiceRequestedAt(), r.getPreferredVisitDate(),
                 r.getPreferredTimeSlot(), admin ? r.getInternalAdminNotes() : null, r.getCompletedAt(), r.getEstimatedCompletionMinutes(),

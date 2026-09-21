@@ -35,6 +35,8 @@ interface LiftRepository extends JpaRepository<Lift, Long> {
     List<BuildingCount> activeCounts();
 
     long countByBuildingIdAndActiveTrue(Long buildingId);
+    boolean existsByLiftNumber(String liftNumber);
+    boolean existsByLiftNumberAndIdNot(String liftNumber, Long id);
 }
 
 interface AmcContractRepository extends JpaRepository<AmcContract, Long> {

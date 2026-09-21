@@ -141,6 +141,43 @@ class Stage3WorkflowTest {
         assertEquals(f.customer().getId(), detail.at("/history/0/changedByUserId").asLong());
     }
 
+    @Test void installationRequestsCanBeCreatedWithoutExistingLiftOnlyForInstallation() throws Exception {
+        User customer = user(Role.CUSTOMER);
+        CustomerProfile owner = new CustomerProfile(); owner.setUser(customer); owner.setFullName("Install customer");
+        customers.saveAndFlush(owner);
+        JsonNode detail = call(post("/api/v1/service-requests"), customer, Map.of(
+                "title", "Install new lift", "description", "Need a new lift installation",
+                "serviceType", "INSTALLATION", "priority", "MEDIUM"), 200);
+        assertTrue(detail.at("/request/liftId").isNull());
+        assertEquals("INSTALLATION", detail.at("/request/serviceType").asText());
+        assertEquals(owner.getId(), detail.at("/request/customerProfileId").asLong());
+        call(get("/api/v1/service-requests/" + detail.at("/request/id").asLong()), customer, null, 200);
+        call(post("/api/v1/service-requests"), customer, Map.of(
+                "title", "Breakdown", "description", "No lift should be rejected", "serviceType", "BREAKDOWN"), 400);
+    }
+
+    @Test void completionOtpCodeIsCustomerVisibleOnlyWhilePendingAndClearedAfterVerify() throws Exception {
+        Fixture f = fixture();
+        long assignment = assign(f);
+        accept(f, assignment, f.technician());
+        JsonNode technicianState = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/completion-otp/request"), f.technician(), Map.of(), 200);
+        assertTrue(technicianState.get("code").isNull());
+        JsonNode customerState = call(get("/api/v1/service-requests/" + f.requestId() + "/completion-otp"), f.customer(), null, 200);
+        String code = customerState.get("code").asText();
+        assertEquals(6, code.length());
+        assertNotEquals(code, db.queryForObject("select otp_hash from completion_otps where id=?", String.class, customerState.get("id").asLong()));
+        assertTrue(call(get("/api/v1/service-requests/" + f.requestId() + "/completion-otp"), f.admin(), null, 200).get("code").isNull());
+        JsonNode verified = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/completion-otp/verify"), f.technician(),
+                Map.of("otpId", customerState.get("id").asLong(), "otp", code), 200);
+        assertEquals("VERIFIED", verified.get("status").asText());
+        call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/completion-otp/verify"), f.technician(),
+                Map.of("otpId", customerState.get("id").asLong(), "otp", code), 400);
+        JsonNode after = call(get("/api/v1/service-requests/" + f.requestId() + "/completion-otp"), f.customer(), null, 200);
+        assertEquals("VERIFIED", after.get("status").asText());
+        assertTrue(after.get("code").isNull());
+        assertNull(db.queryForObject("select customer_visible_code from completion_otps where id=?", String.class, customerState.get("id").asLong()));
+    }
+
     @Test void customersManageOnlyOwnServiceRequestAttachmentsWithSafeTypeValidation() throws Exception {
         Fixture f = fixture(), other = fixture();
         MockMultipartFile png = new MockMultipartFile("file", "issue.png", "image/png",

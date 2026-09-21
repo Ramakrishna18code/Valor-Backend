@@ -321,7 +321,7 @@ public class ServiceVisitService {
         boolean customer = actor.getRole() == Role.CUSTOMER;
         List<VisitHistoryView> events = customer ? List.of() : history.findByVisitIdOrderByChangedAtAscIdAsc(visit.getId()).stream().map(this::historyView).toList();
         return new VisitView(visit.getId(), visit.getRequest().getId(), visit.getRequest().getServiceId(), visit.getRequest().getCustomer().getId(),
-                visit.getRequest().getLift().getId(), visit.getRequest().getTitle(), customer ? null : visit.getTechnician().getId(),
+                visit.getRequest().getLift() == null ? null : visit.getRequest().getLift().getId(), visit.getRequest().getTitle(), customer ? null : visit.getTechnician().getId(),
                 customer ? null : visit.getTechnician().getEmployeeId(), customer ? null : visit.getTechnician().getSpecialization(),
                 visit.getScheduledDate(), visit.getStartTime(), visit.getEndTime(), visit.getStatus(), customer ? null : visit.getNotes(),
                 events, visit.getCreatedAt(), visit.getUpdatedAt());

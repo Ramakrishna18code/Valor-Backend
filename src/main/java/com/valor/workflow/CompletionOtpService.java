@@ -28,6 +28,7 @@ class CompletionOtpService {
         CompletionOtp otp = new CompletionOtp(); otp.request = request; otp.customer = request.getCustomer(); otp.technician = technician;
         String code = String.valueOf(100000 + random.nextInt(900000));
         otp.otpHash = encoder.encode(code); otp.expiresAt = LocalDateTime.now(clock).plusMinutes(10);
+        otp.customerVisibleCode = code; otp.customerVisibleUntil = otp.expiresAt;
         otps.saveAndFlush(otp); sender.sendCompletionOtp(request, code);
         return state(otp, false);
     }
@@ -44,6 +45,7 @@ class CompletionOtpService {
             throw invalid();
         }
         otp.verifiedAt = now;
+        otp.customerVisibleCode = null; otp.customerVisibleUntil = null;
         return state(otp, true);
     }
     void requireVerified(Long requestId) {
@@ -55,23 +57,29 @@ class CompletionOtpService {
     CompletionOtpView latest(Long requestId) {
         User actor = identities.actor();
         ServiceRequest request = requests.findById(requestId).orElseThrow(CompletionOtpService::invalid);
+        boolean exposeCode = false;
         if (actor.getRole() == Role.CUSTOMER) {
             CustomerProfile customer = profiles.customer(actor); if (!request.getCustomer().getId().equals(customer.getId())) throw denied();
+            exposeCode = true;
         } else if (actor.getRole() == Role.TECHNICIAN) assigned(requestId, profiles.technician(actor));
         else if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied();
-        return otps.findTopByRequestIdOrderByCreatedAtDesc(requestId).map(o -> state(o, o.verifiedAt != null)).orElse(null);
+        final boolean customerCanSeeCode = exposeCode;
+        return otps.findTopByRequestIdOrderByCreatedAtDesc(requestId).map(o -> state(o, o.verifiedAt != null, customerCanSeeCode)).orElse(null);
     }
     private ServiceRequest assigned(Long requestId, TechnicianProfile technician) {
         ServiceRequest request = requests.findById(requestId).orElseThrow(CompletionOtpService::invalid);
         if (!assignments.existsByRequestIdAndTechnicianId(requestId, technician.getId())) throw denied();
         return request;
     }
-    private CompletionOtpView state(CompletionOtp otp, boolean verified) {
+    private CompletionOtpView state(CompletionOtp otp, boolean verified) { return state(otp, verified, false); }
+    private CompletionOtpView state(CompletionOtp otp, boolean verified, boolean exposeCode) {
         LocalDateTime now = LocalDateTime.now(clock);
         String status = verified || otp.verifiedAt != null ? "VERIFIED" : otp.lockedUntil != null && otp.lockedUntil.isAfter(now) ? "LOCKED" : otp.expiresAt.isAfter(now) ? "PENDING" : "EXPIRED";
-        return new CompletionOtpView(otp.id, otp.request.getId(), status, otp.expiresAt, otp.attemptsRemaining, otp.lockedUntil, otp.verifiedAt);
+        String code = exposeCode && "PENDING".equals(status) && otp.customerVisibleCode != null && otp.customerVisibleUntil != null && otp.customerVisibleUntil.isAfter(now) ? otp.customerVisibleCode : null;
+        if (!"PENDING".equals(status) && otp.customerVisibleCode != null) { otp.customerVisibleCode = null; otp.customerVisibleUntil = null; }
+        return new CompletionOtpView(otp.id, otp.request.getId(), status, otp.expiresAt, otp.attemptsRemaining, otp.lockedUntil, otp.verifiedAt, code);
     }
     static WorkflowException invalid() { return new WorkflowException(400, "Invalid completion OTP"); }
     static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
-    record CompletionOtpView(Long id, Long serviceRequestId, String status, LocalDateTime expiresAt, short attemptsRemaining, LocalDateTime lockedUntil, LocalDateTime verifiedAt) {}
+    record CompletionOtpView(Long id, Long serviceRequestId, String status, LocalDateTime expiresAt, short attemptsRemaining, LocalDateTime lockedUntil, LocalDateTime verifiedAt, String code) {}
 }

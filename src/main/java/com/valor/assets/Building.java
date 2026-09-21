@@ -36,6 +36,8 @@ public class Building extends AssetRecord {
     private String emergencyContactName;
     @Column(name = "emergency_contact_phone", nullable = true, length = 20)
     private String emergencyContactPhone;
+    @Column(name = "building_preference", nullable = true, length = 20)
+    private String buildingPreference;
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
     @Column(name = "is_active", nullable = false)

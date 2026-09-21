@@ -244,7 +244,7 @@ public class AssetService {
         Long id=customerActor().getId();
         var owner=customerProfiles.findByUserId(id).orElseThrow();
         Building building=new Building();building.setCustomer(owner);
-        apply(building,new BuildingWrite(owner.getId(),input.buildingName(),input.buildingType(),input.address(),input.city(),input.state(),input.pincode(),input.latitude(),input.longitude(),input.emergencyContactName(),input.emergencyContactPhone(),"ACTIVE"));
+        apply(building,new BuildingWrite(owner.getId(),input.buildingName(),input.buildingType(),input.address(),input.city(),input.state(),input.pincode(),input.latitude(),input.longitude(),input.emergencyContactName(),input.emergencyContactPhone(),input.buildingPreference(),"ACTIVE"));
         buildings.saveAndFlush(building);
         audit.record("BUILDING_CREATE", "BUILDING", building.getId(), "Created building customer=" + owner.getId());
         return buildingView(building,0);
@@ -253,7 +253,7 @@ public class AssetService {
         Long actorId = customerActor().getId();
         Building building = ownedActiveBuilding(id, actorId);
         String before = buildingSummary(building);
-        apply(building, new BuildingWrite(building.getCustomer().getId(), input.buildingName(), input.buildingType(), input.address(), input.city(), input.state(), input.pincode(), input.latitude(), input.longitude(), input.emergencyContactName(), input.emergencyContactPhone(), "ACTIVE"));
+        apply(building, new BuildingWrite(building.getCustomer().getId(), input.buildingName(), input.buildingType(), input.address(), input.city(), input.state(), input.pincode(), input.latitude(), input.longitude(), input.emergencyContactName(), input.emergencyContactPhone(), input.buildingPreference(), "ACTIVE"));
         buildings.flush();
         audit.record("BUILDING_UPDATE", "BUILDING", building.getId(), "Updated building", before, buildingSummary(building), "SUCCESS");
         return buildingView(building, lifts.countByBuildingIdAndActiveTrue(id));
@@ -354,6 +354,7 @@ public class AssetService {
         entity.setLongitude(input.longitude());
         entity.setEmergencyContactName(input.emergencyContactName());
         entity.setEmergencyContactPhone(input.emergencyContactPhone());
+        entity.setBuildingPreference(preference(input.buildingPreference()));
         if (input.status() != null && input.status().isBlank()) throw new AssetException(400, "Invalid building status");
         entity.setStatus(input.status() == null ? "ACTIVE" : input.status());
     }
@@ -362,8 +363,13 @@ public class AssetService {
         if (input.warrantyStartDate() != null && input.warrantyEndDate() != null) {
             dates(input.warrantyStartDate(), input.warrantyEndDate());
         }
+        String normalizedLiftNumber = clean(input.liftNumber());
+        if (normalizedLiftNumber != null) {
+            boolean duplicate = entity.getId() == null ? lifts.existsByLiftNumber(normalizedLiftNumber) : lifts.existsByLiftNumberAndIdNot(normalizedLiftNumber, entity.getId());
+            if (duplicate) throw new AssetException(409, "Lift number already exists");
+        }
         entity.setName(input.name());
-        entity.setLiftNumber(input.liftNumber());
+        entity.setLiftNumber(normalizedLiftNumber);
         entity.setLiftType(input.liftType());
         entity.setModel(input.model());
         entity.setManufacturer(input.manufacturer());
@@ -406,6 +412,15 @@ public class AssetService {
                 + ",active=" + entity.isActive();
     }
 
+    private String preference(String value) {
+        String clean = clean(value);
+        if (clean == null) return null;
+        String upper = clean.toUpperCase(Locale.ROOT);
+        if (!Set.of("MAIN", "SECONDARY", "OTHER").contains(upper)) throw new AssetException(400, "Invalid building preference");
+        return upper;
+    }
+    private String clean(String value) { return value == null || value.isBlank() ? null : value.trim(); }
+
     private String amcSummary(AmcContract entity) {
         return "lift=" + entity.getLift().getId()
                 + ",plan=" + entity.getPlan()
@@ -429,6 +444,7 @@ public class AssetService {
                 entity.getLongitude(),
                 entity.getEmergencyContactName(),
                 entity.getEmergencyContactPhone(),
+                entity.getBuildingPreference(),
                 entity.getStatus(),
                 entity.isActive(),
                 count,

@@ -22,6 +22,7 @@ public final class AssetDtos {
             @DecimalMin("-180.0") @DecimalMax("180.0") BigDecimal longitude,
             @Size(max = 160) String emergencyContactName,
             @Size(max = 20) String emergencyContactPhone,
+            @Size(max = 20) String buildingPreference,
             @Size(max = 20) String status) {
         @JsonAnySetter
         public void rejectUnknown(String field, JsonNode value) {
@@ -35,7 +36,8 @@ public final class AssetDtos {
         @DecimalMin("-90.0") @DecimalMax("90.0") BigDecimal latitude,
         @DecimalMin("-180.0") @DecimalMax("180.0") BigDecimal longitude,
         @Size(max=160) String emergencyContactName,
-        @Size(max=20) String emergencyContactPhone) {
+        @Size(max=20) String emergencyContactPhone,
+        @Size(max=20) String buildingPreference) {
         @JsonAnySetter public void rejectUnknown(String field,JsonNode value){throw new IllegalArgumentException("Unsupported asset field");}
     }
 
@@ -107,6 +109,7 @@ public final class AssetDtos {
             BigDecimal longitude,
             String emergencyContactName,
             String emergencyContactPhone,
+            String buildingPreference,
             String status,
             boolean isActive, long activeLiftCount,
             LocalDateTime createdAt,

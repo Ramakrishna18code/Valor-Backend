@@ -21,7 +21,7 @@ class AuthController {
         return ApiResponse.success("Authenticated",new Authentication(tokens[0],tokens[1],user.getRole(),user.getId(),me.customerProfile(),me.technicianProfile()),200);
     }
     private CurrentUser summary(User u) {
-        CustomerSummary customer=customers.findByUserId(u.getId()).map(p->new CustomerSummary(p.id,p.fullName,p.alternatePhone,p.companyName,p.address,p.status,p.active)).orElse(null);
+        CustomerSummary customer=customers.findByUserId(u.getId()).map(p->new CustomerSummary(p.id,p.fullName,p.alternatePhone,p.companyName,p.address,p.status,p.active,p.referralCode)).orElse(null);
         TechnicianSummary technician=technicians.findByUserId(u.getId()).map(p->new TechnicianSummary(p.id,p.employeeId,p.assignedArea,p.specialization,p.availabilityStatus,p.active)).orElse(null);
         return new CurrentUser(u.getId(),u.getRole(),u.getEmail(),u.getPhone(),customer,technician);
     }

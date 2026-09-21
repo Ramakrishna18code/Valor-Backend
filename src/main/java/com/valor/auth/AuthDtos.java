@@ -13,7 +13,7 @@ final class AuthDtos {
     record Registration(String email, String phone,
         @Schema(accessMode=Schema.AccessMode.WRITE_ONLY,format="password") @Size(max=72) String password,
         @NotBlank @Size(max=160) String fullName, @Size(max=20) String alternatePhone,
-        @Size(max=200) String companyName,@Size(max=500) String address) implements StrictInput {}
+        @Size(max=200) String companyName,@Size(max=500) String address,@Size(max=32) String referralCode) implements StrictInput {}
     record CustomerLogin(@NotBlank String identity,
         @Schema(accessMode=Schema.AccessMode.WRITE_ONLY,format="password") @NotBlank String password) implements StrictInput {}
     record EmailLogin(@NotBlank String email,
@@ -24,7 +24,7 @@ final class AuthDtos {
     record Refresh(@NotBlank String refreshToken) implements StrictInput {}
     record SetPassword(@NotBlank String token,
         @Schema(accessMode=Schema.AccessMode.WRITE_ONLY,format="password") @NotBlank @Size(max=72) String password) implements StrictInput {}
-    record CustomerSummary(Long id,String fullName,String alternatePhone,String companyName,String address,String status,boolean active) {}
+    record CustomerSummary(Long id,String fullName,String alternatePhone,String companyName,String address,String status,boolean active,String referralCode) {}
     record TechnicianSummary(Long id,String employeeId,String assignedArea,String specialization,
         @Schema(allowableValues={"AVAILABLE","BUSY","OFF_DUTY","ON_LEAVE"}) String availabilityStatus,boolean active) {}
     record CurrentUser(Long userId,Role role,String email,String phone,

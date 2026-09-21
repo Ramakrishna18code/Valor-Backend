@@ -17,8 +17,8 @@ public class ServiceRequest extends AssetRecord {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "customer_id", nullable = false)
     private CustomerProfile customer;
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "lift_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "lift_id")
     private Lift lift;
     @Column(name = "service_id", nullable = false, length = 80)
     private String serviceId;

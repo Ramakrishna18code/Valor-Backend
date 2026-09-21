@@ -30,7 +30,7 @@ class AdminCustomerController {
 
     record CustomerCreateRequest(@Size(max=254) String email, @Size(max=20) String phone,
             @Schema(accessMode=Schema.AccessMode.WRITE_ONLY, format="password", description="Optional legacy local password; onboarding email never includes it.") @Size(max=72) String password,
-            @NotBlank @Size(max=160) String fullName, @Size(max=20) String alternatePhone,
+            @NotBlank @Size(max=160) String fullName, Boolean hasLift, @Size(max=32) String referralCode, @Size(max=20) String alternatePhone,
             @Size(max=200) String companyName, @Size(max=500) String address) {
         @JsonAnySetter public void unknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); }
     }
@@ -41,9 +41,10 @@ class AdminCustomerController {
     record StateRequest(@Size(max=2000) String reason) {
         @JsonAnySetter public void unknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); }
     }
-    record BuildingSummary(Long id, String buildingName, String buildingType, String city, String status, boolean isActive) {}
+    record BuildingSummary(Long id, String buildingName, String buildingType, String city, String buildingPreference, String status, boolean isActive) {}
     record LiftSummary(Long id, Long buildingId, String name, String liftNumber, String currentStatus, boolean isActive) {}
     record AdminCustomerDetail(Long id, Long userId, Long customerProfileId, String email, String phone, String fullName,
+            Boolean hasLift, String referralCode,
             String alternatePhone, String companyName, String address, boolean active, String status,
             LocalDateTime createdAt, LocalDateTime updatedAt, long buildingCount, long liftCount,
             long serviceRequestCount, List<BuildingSummary> buildings, List<LiftSummary> lifts,
@@ -92,7 +93,8 @@ class AdminCustomerService {
         if((email!=null && users.findByEmail(email).isPresent()) || (phone!=null && users.findByPhone(phone).isPresent())) throw new IllegalArgumentException("Identity already exists");
         User user=new User(); user.setEmail(email); user.setPhone(phone); user.setPasswordHash(input.password()==null||input.password().isBlank()?encoder.encode(java.util.UUID.randomUUID().toString()):encoder.encode(input.password())); user.setRole(Role.CUSTOMER); users.saveAndFlush(user);
         CustomerProfile profile=new CustomerProfile(); profile.user=user; profile.fullName=clean(input.fullName()); profile.alternatePhone=clean(input.alternatePhone());
-        profile.companyName=clean(input.companyName()); profile.address=clean(input.address()); profile.status="ACTIVE"; profile.active=true; profiles.saveAndFlush(profile);
+        profile.referralCode=input.referralCode()==null||input.referralCode().isBlank()?auth.generateReferralCode(input.fullName()):auth.claimReferralCode(input.referralCode(), input.fullName());
+        profile.hasLift=input.hasLift(); profile.companyName=clean(input.companyName()); profile.address=clean(input.address()); profile.status="ACTIVE"; profile.active=true; profiles.saveAndFlush(profile);
         audit.record("CUSTOMER_CREATE", "CUSTOMER", profile.id, "Created customer userId=" + user.getId());
         if (email != null) emails.customerAccountCreated(user.getId(), profile.fullName, setPasswordUrl(auth.createOnboardingToken(user)));
         return view(profile);
@@ -134,7 +136,7 @@ class AdminCustomerService {
     private AdminCustomerController.AdminCustomerDetail view(CustomerProfile profile) {
         Long id=profile.id;
         var buildings=em.createQuery("select b from Building b where b.customer.id=:id order by b.id", com.valor.assets.Building.class).setParameter("id", id).setMaxResults(25).getResultList().stream()
-            .map(b -> new AdminCustomerController.BuildingSummary(b.getId(), b.getBuildingName(), b.getBuildingType(), b.getCity(), b.getStatus(), b.isActive())).toList();
+            .map(b -> new AdminCustomerController.BuildingSummary(b.getId(), b.getBuildingName(), b.getBuildingType(), b.getCity(), b.getBuildingPreference(), b.getStatus(), b.isActive())).toList();
         var lifts=em.createQuery("select l from Lift l where l.building.customer.id=:id order by l.id", com.valor.assets.Lift.class).setParameter("id", id).setMaxResults(25).getResultList().stream()
             .map(l -> new AdminCustomerController.LiftSummary(l.getId(), l.getBuilding().getId(), l.getName(), l.getLiftNumber(), String.valueOf(l.getCurrentStatus()), l.isActive())).toList();
         var requests=em.createQuery("select r from ServiceRequest r where r.customer.id=:id order by r.serviceRequestedAt desc, r.id desc", com.valor.workflow.ServiceRequest.class).setParameter("id", id).setMaxResults(10).getResultList().stream().map(this::requestView).toList();
@@ -143,11 +145,11 @@ class AdminCustomerService {
         long buildingCount=em.createQuery("select count(b) from Building b where b.customer.id=:id", Long.class).setParameter("id", id).getSingleResult();
         boolean active=profile.user.isActive() && profile.active;
         return new AdminCustomerController.AdminCustomerDetail(id, profile.user.getId(), id, profile.user.getEmail(), profile.user.getPhone(), profile.fullName,
-            profile.alternatePhone, profile.companyName, profile.address, active, profile.status, profile.createdAt, profile.updatedAt,
+            profile.hasLift, profile.referralCode, profile.alternatePhone, profile.companyName, profile.address, active, profile.status, profile.createdAt, profile.updatedAt,
             buildingCount, liftCount, serviceCount, buildings, lifts, requests);
     }
     private WorkflowDtos.RequestView requestView(com.valor.workflow.ServiceRequest r) {
-        return new WorkflowDtos.RequestView(r.getId(), r.getServiceId(), r.getCustomer().getId(), r.getLift().getId(),
+        return new WorkflowDtos.RequestView(r.getId(), r.getServiceId(), r.getCustomer().getId(), r.getLift() == null ? null : r.getLift().getId(),
             r.getTitle(), r.getDescription(), r.getIssueCategory(), r.getPriority(), r.getStatus(), r.getServiceType(),
             r.getCustomerRemarks(), r.getTechnicianRemarks(), r.getServiceRequestedAt(), r.getPreferredVisitDate(),
             r.getPreferredTimeSlot(), r.getInternalAdminNotes(), r.getCompletedAt(), r.getEstimatedCompletionMinutes(),
@@ -157,7 +159,7 @@ class AdminCustomerService {
     private String setPasswordUrl(String token) { return setPasswordBaseUrl + (setPasswordBaseUrl.contains("?") ? "&" : "?") + "token=" + token; }
     private String customerSummary(CustomerProfile profile) {
         return "fullName=" + profile.fullName + ",alternatePhone=" + profile.alternatePhone
-                + ",companyName=" + profile.companyName + ",addressSet=" + (profile.address != null)
+                + ",hasLift=" + profile.hasLift + ",companyName=" + profile.companyName + ",addressSet=" + (profile.address != null)
                 + ",active=" + profile.active + ",status=" + profile.status;
     }
 }
