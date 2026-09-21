@@ -36,7 +36,8 @@ class AuthErrorHandler {
   @ExceptionHandler(IllegalArgumentException.class)
   ResponseEntity<ApiResponse<Map<String,Object>>> illegal(IllegalArgumentException ex) {
     int status=ex.getMessage()!=null && (ex.getMessage().contains("Registration unavailable")||ex.getMessage().contains("already exists"))?409:400;
-    return ResponseEntity.status(status).body(new ApiResponse<>(false, status==409?"Identity already exists":"Request could not be processed", Map.of(), status));
+    String message = status==409 ? "Identity already exists" : (ex.getMessage()==null || ex.getMessage().isBlank() ? "Request could not be processed" : ex.getMessage());
+    return ResponseEntity.status(status).body(new ApiResponse<>(false, message, Map.of(), status));
   }
   @ExceptionHandler(HttpMessageNotReadableException.class)
   ResponseEntity<ApiResponse<Map<String,Object>>> malformed(HttpMessageNotReadableException ex) {
