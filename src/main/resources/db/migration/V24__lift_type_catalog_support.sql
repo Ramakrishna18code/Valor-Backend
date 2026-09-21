@@ -1,0 +1,2 @@
+ALTER TABLE lifts
+    ADD COLUMN lift_type VARCHAR(120) NULL;

@@ -18,6 +18,8 @@ public class Lift extends AssetRecord {
     private String name;
     @Column(name = "lift_number", nullable = true, length = 80)
     private String liftNumber;
+    @Column(name = "lift_type", nullable = true, length = 120)
+    private String liftType;
     @Column(name = "model", nullable = true, length = 120)
     private String model;
     @Column(name = "manufacturer", nullable = true, length = 120)

@@ -35,11 +35,19 @@ public class WorkflowService {
     }
 
     @Transactional(readOnly=true)
-    public PageView<RequestView> customerRequests(RequestStatus status,int page,int size) {
+    public PageView<RequestView> customerRequests(RequestStatus status,Integer year,Integer month,int page,int size) {
         User actor=identities.actor();if(actor.getRole()!=Role.CUSTOMER)throw new org.springframework.security.access.AccessDeniedException("Access denied");
         var profile=profiles.customer(actor);
         if(page<0||size<1||size>100)throw new WorkflowException(400,"Invalid page");
-        var rows=requests.customerRequests(profile.getId(),status,PageRequest.of(page,size,Sort.by(Sort.Direction.DESC,"createdAt","id")));
+        if(month!=null&&year==null)throw new WorkflowException(400,"Year is required when month is provided");
+        if(year!=null&&(year<2000||year>2100))throw new WorkflowException(400,"Invalid year");
+        if(month!=null&&(month<1||month>12))throw new WorkflowException(400,"Invalid month");
+        LocalDateTime from=null,to=null;
+        if(year!=null){
+            from=month==null?LocalDateTime.of(year,1,1,0,0):LocalDateTime.of(year,month,1,0,0);
+            to=month==null?from.plusYears(1):from.plusMonths(1);
+        }
+        var rows=requests.customerRequests(profile.getId(),status,from,to,PageRequest.of(page,size,Sort.by(Sort.Direction.DESC,"createdAt","id")));
         return new PageView<>(rows.getContent().stream().map(r->view(r,actor)).toList(),page,size,rows.getTotalElements(),rows.getTotalPages());
     }
 

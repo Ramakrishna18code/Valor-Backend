@@ -43,6 +43,7 @@ public final class AssetDtos {
             @NotNull @Positive Long buildingId,
             @NotBlank @Size(max = 160) String name,
             @Size(max = 80) String liftNumber,
+            @Size(max = 120) String liftType,
             @Size(max = 120) String model,
             @Size(max = 120) String manufacturer,
             @PositiveOrZero Integer capacity,
@@ -116,6 +117,7 @@ public final class AssetDtos {
             Long buildingId,
             String name,
             String liftNumber,
+            String liftType,
             String model,
             String manufacturer,
             Integer capacity,
@@ -137,6 +139,9 @@ public final class AssetDtos {
             boolean isActive, @Schema(allowableValues={"ACTIVE","NON_AMC"}) String amcCoverage, LocalDate asOfDate,
             LocalDateTime createdAt,
             LocalDateTime updatedAt) {}
+
+    public record LiftBrandModels(String brand, java.util.List<String> models) {}
+    public record LiftCatalog(java.util.List<String> liftTypes, java.util.List<LiftBrandModels> brands) {}
 
     public record AmcView(
             Long id,

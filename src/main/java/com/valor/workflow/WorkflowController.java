@@ -47,7 +47,8 @@ class WorkflowController {
     ApiResponse<ReportView> report(@PathVariable Long id, @Valid @RequestBody ReportRequest input) { return ok(service.report(id, input)); }
     @Operation(operationId="getCustomerServiceRequests") @GetMapping("/customers/me/service-requests")
     ApiResponse<PageView<RequestView>> customerRequests(@RequestParam(required=false) RequestStatus status,
-        @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size){return ok(service.customerRequests(status,page,size));}
+        @RequestParam(required=false) Integer year, @RequestParam(required=false) Integer month,
+        @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size){return ok(service.customerRequests(status,year,month,page,size));}
     @Operation(operationId="serviceRequestAttachmentList")
     @GetMapping("/service-requests/{id}/attachments")
     ApiResponse<java.util.List<AttachmentView>> attachments(@PathVariable Long id) { return ok(engagement.listAttachments(id)); }

@@ -40,6 +40,9 @@ class AssetController {
             @RequestParam(required=false) Integer page,@RequestParam(required=false) Integer size) {
         return ok(slice(assets.lifts().stream().filter(l->status==null||status==l.currentStatus()).toList(),page,size));
     }
+    @Operation(operationId="liftCatalog")
+    @GetMapping("/lift-catalog")
+    ApiResponse<LiftCatalog> liftCatalog() { return ok(assets.liftCatalog()); }
     @Operation(operationId="createLift")
     @PostMapping("/lifts")
     ApiResponse<LiftView> createLift(@Valid @RequestBody LiftWrite input) { return ok(assets.createLift(input)); }

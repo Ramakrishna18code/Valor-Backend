@@ -16,6 +16,39 @@ import static com.valor.assets.AssetDtos.*;
 @Service
 @Transactional
 public class AssetService {
+    private static final List<String> LIFT_TYPES = List.of(
+            "Hydraulic Lifts",
+            "Geared Traction Lifts",
+            "Gearless Traction Lifts",
+            "Machine Room-Less (MRL) Lifts",
+            "Goods/Freight Lifts",
+            "Hospital Lifts",
+            "Residential/Home Lifts",
+            "Pneumatic (Vacuum) Lifts",
+            "Screw-Driven Lifts",
+            "Stairlifts");
+    private static final List<LiftBrandModels> LIFT_BRANDS = List.of(
+            brand("Otis Elevator Company (India)", "Gen2 Premier", "Gen2 Switch", "Gen2 Comfort", "Gen2 Life", "SkyRise", "CompassPlus (Destination Control)"),
+            brand("KONE Elevator India", "KONE MonoSpace 500 (MRL)", "KONE MonoSpace 700", "KONE MiniSpace", "KONE TranSys", "KONE Destination Control System (DCS)"),
+            brand("Schindler India", "Schindler 1000", "Schindler 3000", "Schindler 5000", "Schindler 5500", "Schindler 7000", "Schindler PORT Technology"),
+            brand("Johnson Lifts", "Johnson Passenger Lifts", "Johnson Residential/Home Lifts", "Johnson MRL Lifts", "Johnson Hospital Lifts", "Johnson Goods/Freight Lifts", "Johnson Capsule Lifts"),
+            brand("ThyssenKrupp Elevator (TKE India)", "symergy (MRL)", "evolution", "TWIN", "MULTI", "Destination Selection Control (DSC)"),
+            brand("Mitsubishi Electric India", "NEXIEZ-S (Low-to-Mid Rise)", "NEXIEZ-M", "NEXIEZ-L", "ELENESSA (MRL)", "AXIEZ"),
+            brand("SWIFT Lifts", "SWIFT Pro", "SWIFT Lite", "SWIFT Air (Pneumatic)"),
+            brand("Hitachi Lift India", "UCNX Series", "HGeared Series", "VF-MR Series", "MRL Series"),
+            brand("Fujitec India", "NEXIEZ", "GS8 Series", "MRL-Eco", "Flex-i"),
+            brand("Omega Elevators", "Omega Passenger Lifts", "Omega Capsule Lifts", "Omega Hospital Lifts", "Omega Hydraulic Home Lifts", "Omega Goods Lifts"),
+            brand("Atlantis Elevators and Escalators"),
+            brand("Zion Lifts"),
+            brand("Asco Elevator India"),
+            brand("Havish Enterprises"),
+            brand("Hybon Elevators"),
+            brand("Express Elevators"),
+            brand("Escon Elevators"),
+            brand("Sigma Elevators"),
+            brand("Ky Industries"),
+            brand("Pramani Sales & Services"),
+            brand("R K Engineering Works"));
     private final BuildingRepository buildings;
     private final LiftRepository lifts;
     private final AmcContractRepository contracts;
@@ -33,6 +66,11 @@ public class AssetService {
         this.contracts = contracts;
         this.identities = identities;
         this.clock = clock;this.customerProfiles=customerProfiles;this.audit=audit;this.emails=emails;
+    }
+
+    @Transactional(readOnly = true)
+    public LiftCatalog liftCatalog() {
+        return new LiftCatalog(LIFT_TYPES, LIFT_BRANDS);
     }
 
     @Transactional(readOnly = true)
@@ -326,6 +364,7 @@ public class AssetService {
         }
         entity.setName(input.name());
         entity.setLiftNumber(input.liftNumber());
+        entity.setLiftType(input.liftType());
         entity.setModel(input.model());
         entity.setManufacturer(input.manufacturer());
         entity.setCapacity(input.capacity());
@@ -357,6 +396,9 @@ public class AssetService {
     private String liftSummary(Lift entity) {
         return "name=" + entity.getName()
                 + ",liftNumber=" + entity.getLiftNumber()
+                + ",liftType=" + entity.getLiftType()
+                + ",model=" + entity.getModel()
+                + ",manufacturer=" + entity.getManufacturer()
                 + ",doorType=" + entity.getDoorType()
                 + ",floorCount=" + entity.getFloorCount()
                 + ",currentStatus=" + entity.getCurrentStatus()
@@ -400,6 +442,7 @@ public class AssetService {
                 entity.getBuilding().getId(),
                 entity.getName(),
                 entity.getLiftNumber(),
+                entity.getLiftType(),
                 entity.getModel(),
                 entity.getManufacturer(),
                 entity.getCapacity(),
@@ -423,6 +466,10 @@ public class AssetService {
                 asOf,
                 entity.getCreatedAt(),
                 entity.getUpdatedAt());
+    }
+
+    private static LiftBrandModels brand(String brand, String... models) {
+        return new LiftBrandModels(brand, List.of(models));
     }
 
     private AmcView amcView(AmcContract entity, LocalDate asOf) {
