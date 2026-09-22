@@ -65,6 +65,19 @@ class TrackingService {
         return view(row, request);
     }
 
+    @Transactional(readOnly = true)
+    LocationView technicianLocation(Long requestId) {
+        User actor = identities.actor();
+        if (actor.getRole() != Role.TECHNICIAN) throw denied();
+        TechnicianProfile technician = profiles.technician(actor);
+        ServiceRequest request = requests.findById(requestId).orElseThrow(() -> missing("Service request"));
+        TechnicianAssignment assignment = assignments.active(requestId).orElseThrow(() -> denied());
+        if (!assignment.getTechnician().getId().equals(technician.getId())) throw denied();
+        if (!TRACKABLE.contains(request.getStatus())) throw new TrackingException(409, "Tracking is not active for this job");
+        TechnicianLatestLocation row = locations.findByServiceRequestId(requestId).orElseThrow(() -> missing("Technician location"));
+        return view(row, request);
+    }
+
     private void saveHistory(ServiceRequest request, TechnicianProfile technician, TechnicianLatestLocation latest) {
         TechnicianLocationHistory row = new TechnicianLocationHistory();
         row.serviceRequest = request; row.technician = technician; row.latitude = latest.getLatitude();

@@ -66,6 +66,11 @@ class ArrivalOtpService {
         return otps.findTopByRequestIdOrderByCreatedAtDesc(requestId).map(o -> state(o, o.verifiedAt != null, canSeeCode)).orElse(null);
     }
 
+    void requireVerified(Long requestId) {
+        ArrivalOtp otp = otps.findTopByRequestIdOrderByCreatedAtDesc(requestId).orElseThrow(() -> new WorkflowException(409, "Arrival OTP verification is required"));
+        if (otp.verifiedAt == null) throw new WorkflowException(409, "Arrival OTP verification is required");
+    }
+
     private ServiceRequest assigned(Long requestId, TechnicianProfile technician) {
         ServiceRequest request = requests.findById(requestId).orElseThrow(ArrivalOtpService::invalid);
         if (!assignments.existsByRequestIdAndTechnicianId(requestId, technician.getId())) throw denied();

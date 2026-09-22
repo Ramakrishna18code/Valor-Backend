@@ -50,6 +50,8 @@ class CommerceController {
     ApiResponse<InvoiceView> createInvoice(@Valid @RequestBody InvoiceCreate input) { return ok(service.createInvoice(input)); }
     @GetMapping("/invoices/{id}")
     ApiResponse<InvoiceView> invoice(@PathVariable Long id) { return ok(service.invoice(id)); }
+    @GetMapping("/technician/me/jobs/{id}/payment")
+    ApiResponse<TechnicianServicePaymentView> technicianServicePayment(@PathVariable Long id) { return ok(service.technicianServicePayment(id)); }
     @PostMapping("/admin/service-requests/{id}/invoice")
     ApiResponse<InvoiceView> serviceInvoice(@PathVariable Long id, @Valid @RequestBody(required = false) ServiceInvoiceCreate input) { return ok(service.createServiceInvoice(id, input)); }
     @PutMapping("/invoices/{id}/status")

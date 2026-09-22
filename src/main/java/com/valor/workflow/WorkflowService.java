@@ -24,14 +24,15 @@ public class WorkflowService {
     private final AuditService audit;
     private final ChecklistService checklists;
     private final CompletionOtpService completionOtps;
+    private final ArrivalOtpService arrivalOtps;
     private final EmailEventService emails;
 
     public WorkflowService(RequestRepository requests, AssignmentRepository assignments, HistoryRepository history,
             ReportRepository reports, WorkflowLiftRepository lifts, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
-            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps, EmailEventService emails) {
+            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps, ArrivalOtpService arrivalOtps, EmailEventService emails) {
         this.requests = requests; this.assignments = assignments; this.history = history;
         this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles; this.visits = visits; this.audit = audit;
-        this.checklists = checklists; this.completionOtps = completionOtps; this.emails = emails;
+        this.checklists = checklists; this.completionOtps = completionOtps; this.arrivalOtps = arrivalOtps; this.emails = emails;
     }
 
     @Transactional(readOnly=true)
@@ -197,6 +198,7 @@ public class WorkflowService {
             completionOtps.requireVerified(id);
             request.setCompletedAt(LocalDateTime.now()); assignment.setStatus(AssignmentStatus.COMPLETED);
         }
+        if (to == RequestStatus.DIAGNOSIS && actor.getRole() == Role.TECHNICIAN) arrivalOtps.requireVerified(id);
         if (to == RequestStatus.CANCELLED && assignment != null) {
             assignment.setStatus(AssignmentStatus.RELEASED); assignment.setReleasedAt(LocalDateTime.now());
         }

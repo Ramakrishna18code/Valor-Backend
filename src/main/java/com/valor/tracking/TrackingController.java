@@ -20,4 +20,9 @@ class TrackingController {
     ApiResponse<LocationView> customerLocation(@PathVariable Long id) {
         return ApiResponse.success("Technician location", service.customerLocation(id), 200);
     }
+
+    @GetMapping("/technician/me/jobs/{id}/location")
+    ApiResponse<LocationView> technicianLocation(@PathVariable Long id) {
+        return ApiResponse.success("Job location", service.technicianLocation(id), 200);
+    }
 }

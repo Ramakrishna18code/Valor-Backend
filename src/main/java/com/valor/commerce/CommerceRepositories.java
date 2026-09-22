@@ -13,6 +13,7 @@ interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Long> {
     Page<PaymentRecord> findByCustomerId(Long customerId, Pageable pageable);
     Optional<PaymentRecord> findByInvoiceIdAndStatusIn(Long invoiceId, Collection<PaymentStatus> statuses);
     List<PaymentRecord> findByInvoiceIdOrderByCreatedAtDescIdDesc(Long invoiceId);
+    Optional<PaymentRecord> findFirstByServiceRequestIdOrderByCreatedAtDesc(Long serviceRequestId);
     Optional<PaymentRecord> findByRazorpayOrderId(String razorpayOrderId);
     Optional<PaymentRecord> findByRazorpayPaymentId(String razorpayPaymentId);
     @Lock(LockModeType.PESSIMISTIC_WRITE)

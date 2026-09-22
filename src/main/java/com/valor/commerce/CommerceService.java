@@ -246,6 +246,16 @@ class CommerceService {
         return page(rows.map(this::view));
     }
     InvoiceView invoice(Long id) { return view(authorized(invoices.findById(id).orElseThrow(() -> missing("Invoice")))); }
+
+    TechnicianServicePaymentView technicianServicePayment(Long requestId) {
+        User actor = identities.actor();
+        if (actor.getRole() != com.valor.auth.Role.TECHNICIAN || !assignments.existsByRequestIdAndTechnicianUserId(requestId, actor.getId())) throw denied();
+        Invoice invoice = invoices.findFirstByServiceRequestIdOrderByCreatedAtDesc(requestId).orElse(null);
+        if (invoice == null) return new TechnicianServicePaymentView(requestId, null, null, null);
+        PaymentRecord payment = payments.findFirstByServiceRequestIdOrderByCreatedAtDesc(requestId).orElse(null);
+        CashPaymentOtpView cash = payment == null ? null : cashOtps.findTopByPaymentIdOrderByCreatedAtDesc(payment.getId()).map(o -> cashOtpView(o, o.verifiedAt != null, false)).orElse(null);
+        return new TechnicianServicePaymentView(requestId, view(invoice), payment == null ? null : view(payment), cash);
+    }
     InvoiceView createServiceInvoice(Long serviceRequestId, ServiceInvoiceCreate input) {
         requireAdmin();
         ServiceRequest serviceRequest = requests.withOwner(serviceRequestId).orElseThrow(() -> missing("Service request"));

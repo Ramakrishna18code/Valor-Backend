@@ -27,6 +27,7 @@ final class CommerceDtos {
         @NotBlank @Size(min=4,max=16) String otp) implements StrictInput {}
     record CashPaymentOtpView(Long id, Long paymentId, Long invoiceId, Long serviceRequestId, String status,
         LocalDateTime expiresAt, short attemptsRemaining, LocalDateTime lockedUntil, LocalDateTime verifiedAt, String code) {}
+    record TechnicianServicePaymentView(Long serviceRequestId, InvoiceView invoice, PaymentView payment, CashPaymentOtpView cashOtp) {}
     record RefundCreate(@NotNull @DecimalMin("0.01") BigDecimal amount, @Size(max=500) String reason) implements StrictInput {}
     record RefundView(Long id, Long paymentId, BigDecimal amount, String currency, RefundStatus status,
         String razorpayRefundId, String gatewayStatus, String reason, LocalDateTime createdAt, LocalDateTime updatedAt) {}

@@ -158,6 +158,11 @@ client-facing endpoints use the `/api/v1` prefix and the standard
   `/api/v1/webhooks/razorpay`, `/api/v1/payments/{id}/refunds`
 - Live technician tracking: `/api/v1/technician/me/jobs/{id}/location`,
   `/api/v1/customers/me/service-requests/{id}/technician-location`
+- Technician arrival verification: `/api/v1/technician/me/jobs/{id}/arrival-otp/request`,
+  `/api/v1/technician/me/jobs/{id}/arrival-otp/verify`,
+  `/api/v1/service-requests/{id}/arrival-otp`
+- Technician payment state: `/api/v1/technician/me/jobs/{id}/payment`,
+  `/api/v1/payments/cash/otp/request`, `/api/v1/payments/cash/otp/verify`
 - Support tickets: `/api/v1/support-tickets`
 - AMC renewal requests: `/api/v1/amc-renewal-requests`
 - AMC promo cards: customer read at `/api/v1/customers/me/amc-promotions`,
@@ -352,6 +357,16 @@ tracking around it:
   ETA values.
 - External routing credentials, provider activation, and real background/device
   validation remain later operational work.
+
+## Technician lifecycle, arrival OTP, and cash payment
+
+Technician status updates are shared with the customer after each successful transition. A technician may move an assigned job through `ASSIGNED`, `ACCEPTED`, `ON_THE_WAY`, `REACHED_SITE`, `DIAGNOSIS`, `REPAIR_IN_PROGRESS` or `WAITING_FOR_PARTS`, `TESTING`, and `COMPLETED`; `CANCELLED` is terminal.
+
+After `REACHED_SITE`, the customer-facing arrival OTP becomes available. The technician must verify that OTP before moving the job into `DIAGNOSIS`. Completion still requires the structured report, required checklist responses, and completion OTP.
+
+Quotes and invoices remain admin-owned. A customer can request cash payment only for an existing invoice; the five-minute cash OTP is then verified by the assigned technician or Admin. Successful verification marks the payment succeeded and the invoice paid. UPI/Razorpay remains gateway/webhook-authoritative and never uses the cash OTP flow.
+
+The technician read endpoints return assignment-scoped route/location and invoice/payment state. They do not fabricate coordinates, ETAs, invoice totals, payment success, or OTP values.
 
 ## Phase 17 communication platform foundation
 
