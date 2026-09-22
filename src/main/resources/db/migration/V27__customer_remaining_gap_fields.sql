@@ -8,9 +8,12 @@ set lift_number = null
 where l.lift_number is not null
   and exists (
     select 1
-    from lifts older
-    where older.lift_number = l.lift_number
-      and older.id < l.id
+    from (
+      select older.lift_number, older.id
+      from lifts older
+    ) older_lifts
+    where older_lifts.lift_number = l.lift_number
+      and older_lifts.id < l.id
   );
 
 create unique index uk_customer_profiles_referral_code on customer_profiles(referral_code);
