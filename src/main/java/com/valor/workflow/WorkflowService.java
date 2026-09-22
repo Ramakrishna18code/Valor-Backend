@@ -299,16 +299,21 @@ public class WorkflowService {
 
     private RequestView view(ServiceRequest r, User actor) {
         boolean admin = actor.getRole() == Role.ADMIN || actor.getRole() == Role.SUPER_ADMIN;
+        var lift = r.getLift();
+        var building = lift == null ? null : lift.getBuilding();
+        String technicianName = assignments.active(r.getId()).map(a -> technicianName(a.getTechnician())).orElse(null);
         return new RequestView(r.getId(), r.getServiceId(), r.getCustomer().getId(), r.getLift() == null ? null : r.getLift().getId(), r.getTitle(),
                 r.getDescription(), r.getIssueCategory(), r.getPriority(), r.getStatus(), r.getServiceType(), r.getCustomerRemarks(),
                 actor.getRole() == Role.CUSTOMER ? null : r.getTechnicianRemarks(), r.getServiceRequestedAt(), r.getPreferredVisitDate(),
                 r.getPreferredTimeSlot(), admin ? r.getInternalAdminNotes() : null, r.getCompletedAt(), r.getEstimatedCompletionMinutes(),
-                r.getCreatedAt(), r.getUpdatedAt());
+                r.getCreatedAt(), r.getUpdatedAt(), r.getCustomer().getFullName(), building == null ? null : building.getBuildingName(),
+                building == null ? null : building.getAddress(), lift == null ? null : lift.getName(), lift == null ? null : lift.getLiftNumber(),
+                technicianName);
     }
     private Detail detail(ServiceRequest request, User actor) {
         var assignment = assignments.active(request.getId()).map(a -> new AssignmentView(a.getId(), request.getId(),
                 a.getTechnician().getId(), a.getStatus(), a.getAssignedBy().getId(), a.getAssignedAt(), a.getAcceptedAt(), a.getReleasedAt(),
-                actor.getRole() == Role.CUSTOMER ? null : a.getNotes())).orElse(null);
+                actor.getRole() == Role.CUSTOMER ? null : a.getNotes(), technicianName(a.getTechnician()))).orElse(null);
         var events = history.findByRequestIdOrderByChangedAtAscIdAsc(request.getId()).stream()
                 .map(e -> new HistoryView(e.getId(), e.getFromStatus(), e.getToStatus(), e.getChangedBy().getId(),
                         e.getNotes(), e.getChangedAt())).toList();
@@ -318,5 +323,11 @@ public class WorkflowService {
     private ReportView reportView(ServiceReport r) {
         return new ReportView(r.getId(), r.getRequest().getId(), r.getAssignment().getId(), r.getDiagnosis(), r.getWorkPerformed(),
                 r.getTestingResult(), r.getCompletionNotes(), r.getReportedBy().getId(), r.getCreatedAt(), r.getUpdatedAt());
+    }
+    private String technicianName(TechnicianProfile technician) {
+        if (technician == null) return null;
+        if (technician.getEmployeeId() != null && !technician.getEmployeeId().isBlank()) return technician.getEmployeeId();
+        User user = technician.getUser();
+        return user.getEmail() == null || user.getEmail().isBlank() ? user.getPhone() : user.getEmail();
     }
 }

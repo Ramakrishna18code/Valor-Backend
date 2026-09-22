@@ -9,13 +9,17 @@ import com.valor.workflow.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.*;
 import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.*;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.*;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -36,6 +40,7 @@ class CommerceService {
     private final CommerceReportRepository reports;
     private final PaymentRecordRepository payments;
     private final InvoiceRepository invoices;
+    private final CashPaymentOtpRepository cashOtps;
     private final SupportTicketRepository tickets;
     private final AmcRenewalRequestRepository renewals;
     private final AssetDocumentRepository documents;
@@ -46,18 +51,22 @@ class CommerceService {
     private final AuditService audit;
     private final EmailEventService emails;
     private final PricingService pricing;
+    private final PasswordEncoder encoder;
+    private final Clock clock;
+    private final SecureRandom random = new SecureRandom();
 
     CommerceService(AssetIdentityAccess identities, CommerceCustomerRepository customers, CommerceBuildingRepository buildings,
             CommerceLiftRepository lifts, CommerceAmcRepository amcs, CommerceRequestRepository requests,
             CommerceAssignmentRepository assignments, CommerceReportRepository reports, PaymentRecordRepository payments,
-            InvoiceRepository invoices, SupportTicketRepository tickets, AmcRenewalRequestRepository renewals,
+            InvoiceRepository invoices, CashPaymentOtpRepository cashOtps, SupportTicketRepository tickets, AmcRenewalRequestRepository renewals,
             AssetDocumentRepository documents, PaymentRefundRepository refunds, RazorpayWebhookEventRepository webhookEvents,
             AssetDocumentStorage storage, PaymentGateway paymentGateway, AuditService audit, EmailEventService emails,
-            PricingService pricing) {
+            PricingService pricing, PasswordEncoder encoder, Clock clock) {
         this.identities = identities; this.customers = customers; this.buildings = buildings; this.lifts = lifts;
         this.amcs = amcs; this.requests = requests; this.assignments = assignments; this.reports = reports;
-        this.payments = payments; this.invoices = invoices; this.tickets = tickets; this.renewals = renewals;
+        this.payments = payments; this.invoices = invoices; this.cashOtps = cashOtps; this.tickets = tickets; this.renewals = renewals;
         this.documents = documents; this.refunds = refunds; this.webhookEvents = webhookEvents; this.storage = storage; this.paymentGateway = paymentGateway; this.audit = audit; this.emails = emails; this.pricing = pricing;
+        this.encoder = encoder; this.clock = clock;
     }
 
     PageView<PaymentView> payments(Pageable page) {
@@ -117,6 +126,56 @@ class CommerceService {
         JsonNode order = paymentGateway.createOrder(row.getAmount(), row.getCurrency(), "valor-payment-" + row.getId());
         row.setRazorpayOrderId(text(order, "id")); row.setGatewayStatus(text(order, "status")); row.setGatewaySyncedAt(java.time.LocalDateTime.now());
         return new RazorpayCheckoutView(row.getId(), invoice.getId(), paymentGateway.keyId(), row.getRazorpayOrderId(), row.getAmount(), row.getCurrency(), row.getStatus().name());
+    }
+
+    CashPaymentOtpView requestCashPaymentOtp(CashPaymentOtpRequest input) {
+        User actor = identities.actor();
+        if (!isCustomer(actor)) throw denied();
+        Invoice invoice = authorized(invoices.findById(input.invoiceId()).orElseThrow(() -> missing("Invoice")));
+        if (invoice.getStatus() == InvoiceStatus.PAID || invoice.getStatus() == InvoiceStatus.VOID || invoice.getStatus() == InvoiceStatus.CANCELLED) {
+            throw new CommerceException(409, "Invoice is not eligible for cash payment");
+        }
+        payments.findByInvoiceIdAndStatusIn(invoice.getId(), List.of(PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED))
+                .ifPresent(p -> { throw new CommerceException(409, "Invoice already has an active payment"); });
+        PaymentRecord payment = new PaymentRecord();
+        payment.setCustomer(invoice.getCustomer()); payment.setCreatedBy(actor); payment.setInvoice(invoice);
+        payment.setServiceRequest(invoice.getServiceRequest()); payment.setAmcContract(invoice.getAmcContract());
+        payment.setAmount(invoice.getTotalAmount()); payment.setCurrency(invoice.getCurrency()); payment.setPurpose(PaymentPurpose.INVOICE);
+        payment.setStatus(PaymentStatus.PROCESSING); payment.setProviderReference("CASH");
+        payments.saveAndFlush(payment);
+        CashPaymentOtp otp = new CashPaymentOtp(); otp.payment = payment; otp.invoice = invoice; otp.serviceRequest = invoice.getServiceRequest(); otp.customer = invoice.getCustomer();
+        String code = String.valueOf(100000 + random.nextInt(900000));
+        otp.otpHash = encoder.encode(code); otp.expiresAt = LocalDateTime.now(clock).plusMinutes(5);
+        otp.customerVisibleCode = code; otp.customerVisibleUntil = otp.expiresAt;
+        cashOtps.saveAndFlush(otp);
+        return cashOtpView(otp, false, true);
+    }
+
+    CashPaymentOtpView verifyCashPaymentOtp(CashPaymentOtpVerify input) {
+        User actor = identities.actor();
+        PaymentRecord payment = payments.lockById(input.paymentId()).orElseThrow(() -> missing("Payment"));
+        if (!canVerifyCash(payment, actor)) throw denied();
+        CashPaymentOtp otp = cashOtps.lockById(input.otpId()).orElseThrow(CommerceService::invalidCashOtp);
+        LocalDateTime now = LocalDateTime.now(clock);
+        if (!otp.payment.getId().equals(payment.getId()) || otp.verifiedAt != null || payment.getStatus() != PaymentStatus.PROCESSING
+                || !otp.expiresAt.isAfter(now) || otp.attemptsRemaining <= 0 || otp.lockedUntil != null && otp.lockedUntil.isAfter(now)) throw invalidCashOtp();
+        if (input.otp() == null || !encoder.matches(input.otp(), otp.otpHash)) {
+            otp.attemptsRemaining--;
+            if (otp.attemptsRemaining <= 0) otp.lockedUntil = now.plusMinutes(15);
+            throw invalidCashOtp();
+        }
+        otp.verifiedAt = now; otp.verifiedBy = actor; otp.customerVisibleCode = null; otp.customerVisibleUntil = null;
+        payment.setStatus(PaymentStatus.SUCCEEDED); payment.setGatewayStatus("cash_verified"); payment.setGatewaySyncedAt(now);
+        payment.setProviderReference("CASH-" + otp.id);
+        if (payment.getInvoice() != null) payment.getInvoice().setStatus(InvoiceStatus.PAID);
+        emails.paymentResult(payment.getCustomer().getUser().getId(), payment.getCustomer().getFullName(), payment.getId(), payment.getStatus().name());
+        return cashOtpView(otp, true, false);
+    }
+
+    CashPaymentOtpView latestCashPaymentOtp(Long paymentId) {
+        PaymentRecord payment = authorized(payments.findById(paymentId).orElseThrow(() -> missing("Payment")));
+        boolean exposeCode = identities.actor().getRole() == Role.CUSTOMER;
+        return cashOtps.findTopByPaymentIdOrderByCreatedAtDesc(payment.getId()).map(o -> cashOtpView(o, o.verifiedAt != null, exposeCode)).orElse(null);
     }
 
     PaymentView requestRefund(Long paymentId, RefundCreate input) {
@@ -187,6 +246,24 @@ class CommerceService {
         return page(rows.map(this::view));
     }
     InvoiceView invoice(Long id) { return view(authorized(invoices.findById(id).orElseThrow(() -> missing("Invoice")))); }
+    InvoiceView createServiceInvoice(Long serviceRequestId, ServiceInvoiceCreate input) {
+        requireAdmin();
+        ServiceRequest serviceRequest = requests.withOwner(serviceRequestId).orElseThrow(() -> missing("Service request"));
+        if (serviceRequest.getStatus() != RequestStatus.COMPLETED) throw new CommerceException(409, "Service must be completed before invoice");
+        Optional<Invoice> existing = invoices.findFirstByServiceRequestIdOrderByCreatedAtDesc(serviceRequestId)
+                .filter(i -> i.getStatus() != InvoiceStatus.VOID && i.getStatus() != InvoiceStatus.CANCELLED);
+        if (existing.isPresent()) return view(existing.get());
+        Invoice row = new Invoice();
+        row.setCustomer(serviceRequest.getCustomer()); row.setCreatedBy(identities.actor()); row.setServiceRequest(serviceRequest);
+        row.setDescription("Service quote for " + serviceRequest.getServiceId());
+        row.setSubtotal(calculatedAmount(serviceRequest, null)); row.setTaxAmount(BigDecimal.ZERO); row.setCurrency("INR");
+        row.setTotalAmount(row.getSubtotal()); row.setDueDate(input == null ? null : input.dueDate());
+        invoices.saveAndFlush(row);
+        row.setInvoiceNumber("INV-%06d".formatted(row.getId()));
+        emails.invoiceCreated(serviceRequest.getCustomer().getUser().getId(), serviceRequest.getCustomer().getFullName(), row.getId(), row.getInvoiceNumber(),
+                String.valueOf(row.getTotalAmount()), row.getCurrency());
+        return view(row);
+    }
     InvoiceView createInvoice(InvoiceCreate input) {
         requireAdmin();
         CustomerProfile customer = customer(input.customerProfileId());
@@ -439,6 +516,19 @@ class CommerceService {
         User actor = identities.actor();
         return isAdmin(actor) || isCustomer(actor) && customer.getUser().getId().equals(actor.getId());
     }
+    private boolean canVerifyCash(PaymentRecord payment, User actor) {
+        if (isAdmin(actor)) return true;
+        return actor.getRole() == Role.TECHNICIAN && payment.getServiceRequest() != null
+                && assignments.existsByRequestIdAndTechnicianUserId(payment.getServiceRequest().getId(), actor.getId());
+    }
+    private CashPaymentOtpView cashOtpView(CashPaymentOtp otp, boolean verified, boolean exposeCode) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        String status = verified || otp.verifiedAt != null ? "VERIFIED" : otp.lockedUntil != null && otp.lockedUntil.isAfter(now) ? "LOCKED" : otp.expiresAt.isAfter(now) ? "PENDING" : "EXPIRED";
+        String code = exposeCode && "PENDING".equals(status) && otp.customerVisibleCode != null && otp.customerVisibleUntil != null && otp.customerVisibleUntil.isAfter(now) ? otp.customerVisibleCode : null;
+        if (!"PENDING".equals(status) && otp.customerVisibleCode != null) { otp.customerVisibleCode = null; otp.customerVisibleUntil = null; }
+        return new CashPaymentOtpView(otp.id, otp.payment.getId(), otp.invoice.getId(), id(otp.serviceRequest), status,
+                otp.expiresAt, otp.attemptsRemaining, otp.lockedUntil, otp.verifiedAt, code);
+    }
     private void requireAdmin() { identities.requireAdmin(); }
     private boolean isAdmin(User u) { return u.getRole() == Role.ADMIN || u.getRole() == Role.SUPER_ADMIN; }
     private boolean isCustomer(User u) { return u.getRole() == Role.CUSTOMER; }
@@ -485,6 +575,7 @@ class CommerceService {
                 + ",payment=" + id(r.getPayment());
     }
     private static CommerceException missing(String name) { return new CommerceException(404, name + " not found"); }
+    private static CommerceException invalidCashOtp() { return new CommerceException(400, "Invalid cash payment OTP"); }
     private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
     record Download(String filename, String contentType, Long size, Resource resource) {}
 }

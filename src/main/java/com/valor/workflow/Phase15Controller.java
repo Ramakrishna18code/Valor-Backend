@@ -14,11 +14,11 @@ import static com.valor.workflow.TechnicianDtos.*;
 @RestController
 @RequestMapping("/api/v1")
 class Phase15Controller {
-    private final ChecklistService checklists; private final CompletionOtpService otps;
+    private final ChecklistService checklists; private final CompletionOtpService otps; private final ArrivalOtpService arrivalOtps;
     private final TechnicianPrivateAttachmentService privateFiles; private final WorkflowIdentityAccess profiles; private final AssetIdentityAccess identities;
-    Phase15Controller(ChecklistService checklists, CompletionOtpService otps,
+    Phase15Controller(ChecklistService checklists, CompletionOtpService otps, ArrivalOtpService arrivalOtps,
             TechnicianPrivateAttachmentService privateFiles, WorkflowIdentityAccess profiles, AssetIdentityAccess identities) {
-        this.checklists = checklists; this.otps = otps; this.privateFiles = privateFiles; this.profiles = profiles; this.identities = identities;
+        this.checklists = checklists; this.otps = otps; this.arrivalOtps = arrivalOtps; this.privateFiles = privateFiles; this.profiles = profiles; this.identities = identities;
     }
 
     @GetMapping("/admin/checklist-templates") ApiResponse<List<TemplateView>> templates() { return ok(checklists.templates()); }
@@ -34,6 +34,9 @@ class Phase15Controller {
     @PostMapping("/technician/me/jobs/{id}/completion-otp/request") ApiResponse<CompletionOtpService.CompletionOtpView> requestOtp(@PathVariable Long id) { return ok(otps.request(id)); }
     @PostMapping("/technician/me/jobs/{id}/completion-otp/verify") ApiResponse<CompletionOtpService.CompletionOtpView> verifyOtp(@PathVariable Long id, @Valid @RequestBody CompletionOtpVerifyInput input) { return ok(otps.verify(id, input.otpId(), input.otp())); }
     @GetMapping("/service-requests/{id}/completion-otp") ApiResponse<CompletionOtpService.CompletionOtpView> otpState(@PathVariable Long id) { return ok(otps.latest(id)); }
+    @PostMapping("/technician/me/jobs/{id}/arrival-otp/request") ApiResponse<ArrivalOtpService.ArrivalOtpView> requestArrivalOtp(@PathVariable Long id) { return ok(arrivalOtps.request(id)); }
+    @PostMapping("/technician/me/jobs/{id}/arrival-otp/verify") ApiResponse<ArrivalOtpService.ArrivalOtpView> verifyArrivalOtp(@PathVariable Long id, @Valid @RequestBody CompletionOtpVerifyInput input) { return ok(arrivalOtps.verify(id, input.otpId(), input.otp())); }
+    @GetMapping("/service-requests/{id}/arrival-otp") ApiResponse<ArrivalOtpService.ArrivalOtpView> arrivalOtpState(@PathVariable Long id) { return ok(arrivalOtps.latest(id)); }
 
     @GetMapping("/technician/me/private-attachments") ApiResponse<List<TechnicianPrivateAttachmentService.View>> myPrivateFiles() { return ok(privateFiles.mine()); }
     @PostMapping(value="/technician/me/private-attachments", consumes=MediaType.MULTIPART_FORM_DATA_VALUE) ApiResponse<TechnicianPrivateAttachmentService.View> uploadMine(@RequestPart("file") MultipartFile file) { return ok(privateFiles.uploadMine(file)); }

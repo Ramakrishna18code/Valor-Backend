@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Long> {
     Page<PaymentRecord> findByCustomerId(Long customerId, Pageable pageable);
     Optional<PaymentRecord> findByInvoiceIdAndStatusIn(Long invoiceId, Collection<PaymentStatus> statuses);
+    List<PaymentRecord> findByInvoiceIdOrderByCreatedAtDescIdDesc(Long invoiceId);
     Optional<PaymentRecord> findByRazorpayOrderId(String razorpayOrderId);
     Optional<PaymentRecord> findByRazorpayPaymentId(String razorpayPaymentId);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
@@ -20,6 +21,7 @@ interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Long> {
 }
 interface InvoiceRepository extends JpaRepository<Invoice, Long> {
     Page<Invoice> findByCustomerId(Long customerId, Pageable pageable);
+    Optional<Invoice> findFirstByServiceRequestIdOrderByCreatedAtDesc(Long serviceRequestId);
 }
 interface SupportTicketRepository extends JpaRepository<SupportTicket, Long> {
     Page<SupportTicket> findByCreatedById(Long userId, Pageable pageable);

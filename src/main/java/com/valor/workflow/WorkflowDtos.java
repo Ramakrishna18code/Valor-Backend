@@ -31,9 +31,11 @@ public final class WorkflowDtos {
             WorkflowServiceType serviceType, String customerRemarks, String technicianRemarks,
             LocalDateTime serviceRequestedAt, LocalDate preferredVisitDate, String preferredTimeSlot,
             String internalAdminNotes, LocalDateTime completedAt, Integer estimatedCompletionMinutes,
-            LocalDateTime createdAt, LocalDateTime updatedAt) {}
+            LocalDateTime createdAt, LocalDateTime updatedAt, String customerName, String buildingName,
+            String buildingAddress, String liftName, String liftNumber, String technicianName) {}
     public record AssignmentView(Long id, Long serviceRequestId, Long technicianProfileId, AssignmentStatus status,
-            Long assignedByUserId, LocalDateTime assignedAt, LocalDateTime acceptedAt, LocalDateTime releasedAt, String notes) {}
+            Long assignedByUserId, LocalDateTime assignedAt, LocalDateTime acceptedAt, LocalDateTime releasedAt,
+            String notes, String technicianName) {}
     public record HistoryView(Long id, RequestStatus fromStatus, RequestStatus toStatus,
             Long changedByUserId, String notes, LocalDateTime changedAt) {}
     public record ReportView(Long id, Long serviceRequestId, Long assignmentId, String diagnosis,

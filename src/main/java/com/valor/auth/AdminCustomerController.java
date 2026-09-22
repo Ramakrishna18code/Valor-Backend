@@ -149,11 +149,14 @@ class AdminCustomerService {
             buildingCount, liftCount, serviceCount, buildings, lifts, requests);
     }
     private WorkflowDtos.RequestView requestView(com.valor.workflow.ServiceRequest r) {
+        var lift = r.getLift();
+        var building = lift == null ? null : lift.getBuilding();
         return new WorkflowDtos.RequestView(r.getId(), r.getServiceId(), r.getCustomer().getId(), r.getLift() == null ? null : r.getLift().getId(),
             r.getTitle(), r.getDescription(), r.getIssueCategory(), r.getPriority(), r.getStatus(), r.getServiceType(),
             r.getCustomerRemarks(), r.getTechnicianRemarks(), r.getServiceRequestedAt(), r.getPreferredVisitDate(),
             r.getPreferredTimeSlot(), r.getInternalAdminNotes(), r.getCompletedAt(), r.getEstimatedCompletionMinutes(),
-            r.getCreatedAt(), r.getUpdatedAt());
+            r.getCreatedAt(), r.getUpdatedAt(), r.getCustomer().getFullName(), building == null ? null : building.getBuildingName(),
+            building == null ? null : building.getAddress(), lift == null ? null : lift.getName(), lift == null ? null : lift.getLiftNumber(), null);
     }
     private String clean(String value) { var result=value==null?null:value.trim(); return result==null||result.isEmpty()?null:result; }
     private String setPasswordUrl(String token) { return setPasswordBaseUrl + (setPasswordBaseUrl.contains("?") ? "&" : "?") + "token=" + token; }

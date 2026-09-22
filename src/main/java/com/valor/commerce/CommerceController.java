@@ -27,6 +27,12 @@ class CommerceController {
     ApiResponse<PaymentView> paymentStatus(@PathVariable Long id, @Valid @RequestBody PaymentStatusUpdate input) { return ok(service.updatePaymentStatus(id, input)); }
     @PostMapping("/payments/razorpay/checkout")
     ApiResponse<RazorpayCheckoutView> razorpayCheckout(@Valid @RequestBody RazorpayCheckoutCreate input) { return ok(service.createRazorpayCheckout(input)); }
+    @PostMapping("/payments/cash/otp/request")
+    ApiResponse<CashPaymentOtpView> cashOtp(@Valid @RequestBody CashPaymentOtpRequest input) { return ok(service.requestCashPaymentOtp(input)); }
+    @PostMapping("/payments/cash/otp/verify")
+    ApiResponse<CashPaymentOtpView> verifyCashOtp(@Valid @RequestBody CashPaymentOtpVerify input) { return ok(service.verifyCashPaymentOtp(input)); }
+    @GetMapping("/payments/{id}/cash-otp")
+    ApiResponse<CashPaymentOtpView> cashOtpState(@PathVariable Long id) { return ok(service.latestCashPaymentOtp(id)); }
     @PostMapping("/payments/{id}/refunds")
     ApiResponse<PaymentView> refund(@PathVariable Long id, @Valid @RequestBody RefundCreate input) { return ok(service.requestRefund(id, input)); }
     @GetMapping("/payments/{id}/refunds")
@@ -44,6 +50,8 @@ class CommerceController {
     ApiResponse<InvoiceView> createInvoice(@Valid @RequestBody InvoiceCreate input) { return ok(service.createInvoice(input)); }
     @GetMapping("/invoices/{id}")
     ApiResponse<InvoiceView> invoice(@PathVariable Long id) { return ok(service.invoice(id)); }
+    @PostMapping("/admin/service-requests/{id}/invoice")
+    ApiResponse<InvoiceView> serviceInvoice(@PathVariable Long id, @Valid @RequestBody(required = false) ServiceInvoiceCreate input) { return ok(service.createServiceInvoice(id, input)); }
     @PutMapping("/invoices/{id}/status")
     ApiResponse<InvoiceView> invoiceStatus(@PathVariable Long id, @Valid @RequestBody InvoiceStatusUpdate input) { return ok(service.updateInvoiceStatus(id, input)); }
 
