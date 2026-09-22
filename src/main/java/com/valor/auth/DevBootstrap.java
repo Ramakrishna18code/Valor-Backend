@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.Locale;
 
 @Component
@@ -66,6 +67,7 @@ class DevBootstrap implements ApplicationRunner {
         customer("neha.iyer@example.com","+919810000005","Neha Iyer","Iyer Enclave","Malleshwaram, Bengaluru",password)
     };
     for (int i=0;i<customers.length;i++) seedCustomerAssetsAndRequest(admin, customers[i], technicians[i], i+1);
+    seedGopiDemoCustomer(admin, technicians, password);
   }
 
   private CustomerProfile customer(String email,String phone,String name,String company,String address,String password) {
@@ -76,6 +78,72 @@ class DevBootstrap implements ApplicationRunner {
           CustomerProfile profile=new CustomerProfile();profile.user=user;profile.fullName=name;profile.companyName=company;profile.address=address;profile.status="ACTIVE";profile.active=true;em.persist(profile);
           return profile;
         });
+  }
+
+  private void seedGopiDemoCustomer(User admin, TechnicianProfile[] technicians, String password) {
+    CustomerProfile customer = customer("mgopichakradhar@gmail.com", "+919810009999", "Gopi Chakradhar", "Gopi Chakradhar", "Hyderabad, Telangana", password);
+    customer.hasLift = true;
+    if (customer.referralCode == null || customer.referralCode.isBlank()) customer.referralCode = "VAL-GOPI-2026";
+    if (exists("select count(r) from ServiceRequest r where r.serviceId=:value", "GOPI-SR-2026-001")) return;
+    String[] names = {"Gopi Heights", "Chakradhar Residency", "MG Orchid", "Valor Gopi Plaza"};
+    String[] districts = {"Hyderabad", "Rangareddy", "Medchal", "Warangal"};
+    RequestStatus[] statuses = {RequestStatus.PENDING, RequestStatus.ASSIGNED, RequestStatus.ON_THE_WAY, RequestStatus.REACHED_SITE, RequestStatus.COMPLETED, RequestStatus.CANCELLED};
+    WorkflowServiceType[] serviceTypes = {WorkflowServiceType.ROUTINE_MAINTENANCE, WorkflowServiceType.BREAKDOWN, WorkflowServiceType.EMERGENCY, WorkflowServiceType.INSPECTION, WorkflowServiceType.MODERNIZATION, WorkflowServiceType.INSTALLATION};
+    int sequence = 1;
+    for (int b = 0; b < names.length; b++) {
+      Building building = new Building(); building.setCustomer(customer); building.setBuildingName(names[b]); building.setBuildingType(b == 3 ? "Commercial" : "Residential");
+      building.setAddress("%s, %s, Telangana".formatted(names[b], districts[b])); building.setCity(districts[b]); building.setState("Telangana"); building.setPincode("5000%02d".formatted(b + 10));
+      building.setEmergencyContactName(customer.fullName); building.setEmergencyContactPhone(customer.getUser().getPhone()); em.persist(building);
+      for (int l = 1; l <= 3; l++) {
+        Lift lift = new Lift(); lift.setBuilding(building); lift.setName("%s Lift %d".formatted(names[b], l)); lift.setLiftNumber("GC-%s-%02d".formatted(names[b].substring(0, 1).toUpperCase(Locale.ROOT), l + (b * 3)));
+        lift.setManufacturer(l % 2 == 0 ? "KONE" : "Otis"); lift.setModel("Valor-%d%d".formatted(b + 1, l)); lift.setCapacity(8 + l); lift.setFloorCount(4 + b + l);
+        lift.setSerialNumber("GOPI-LIFT-%02d".formatted(sequence)); lift.setInstallationDate(LocalDate.now().minusYears(1 + b).minusMonths(l));
+        lift.setLocation(l == 1 ? "Main lobby" : "Block %d lobby".formatted(l)); lift.setCurrentStatus(l == 3 && b == 1 ? LiftStatus.MAINTENANCE : LiftStatus.ACTIVE);
+        lift.setWarrantyStatus(l == 1 ? "ACTIVE" : "NO_WARRANTY"); lift.setWarrantyStartDate(LocalDate.now().minusYears(2)); lift.setWarrantyEndDate(LocalDate.now().plusMonths(10));
+        lift.setLastMaintenanceDate(LocalDate.now().minusDays(20 + sequence)); lift.setNextMaintenanceDate(LocalDate.now().plusDays(10 + sequence)); lift.setHealthScore((byte) (94 - sequence)); lift.setMachineRoom(l % 2 == 0 ? "NO" : "YES"); em.persist(lift);
+        AmcContract amc = new AmcContract(); amc.setLift(lift); amc.setAmcNumber("AMC-GOPI-2026-%03d".formatted(sequence)); amc.setPlan(l % 2 == 0 ? "Premium AMC" : "Standard AMC");
+        amc.setCoverageDetails("Seeded full customer journey AMC coverage."); amc.setStartDate(LocalDate.now().minusMonths(8)); amc.setEndDate(LocalDate.now().plusMonths(4 + l));
+        amc.setStatus(sequence % 5 == 0 ? AmcStatus.EXPIRED : AmcStatus.ACTIVE); amc.setRenewalDate(amc.getEndDate().minusDays(30)); amc.setRenewalCount(sequence % 3); em.persist(amc);
+        if (sequence <= 6) seedGopiRequestBundle(admin, customer, lift, amc, technicians[(sequence - 1) % technicians.length], sequence, statuses[sequence - 1], serviceTypes[sequence - 1]);
+        sequence++;
+      }
+    }
+    seedGopiNotification(customer.getUser().getId(), "Welcome to Valor", "Your demo account has buildings, lifts, AMC, billing, visits and service history ready.");
+    seedGopiNotification(customer.getUser().getId(), "AMC renewal due", "One of your seeded AMC contracts is ready for renewal review.");
+  }
+
+  private void seedGopiRequestBundle(User admin, CustomerProfile customer, Lift lift, AmcContract amc, TechnicianProfile technician, int sequence, RequestStatus status, WorkflowServiceType type) {
+    ServiceRequest request = new ServiceRequest(); request.setCustomer(customer); request.setLift(lift); request.setServiceId("GOPI-SR-2026-%03d".formatted(sequence));
+    request.setTitle(type == WorkflowServiceType.EMERGENCY ? "Emergency breakdown response" : type.name().replace('_', ' ')); request.setDescription("Seeded Gopi demo service request for full customer app validation.");
+    request.setIssueCategory(type == WorkflowServiceType.INSTALLATION ? "Installation" : "Lift service"); request.setPriority(type == WorkflowServiceType.EMERGENCY ? RequestPriority.EMERGENCY : sequence % 2 == 0 ? RequestPriority.HIGH : RequestPriority.MEDIUM);
+    request.setStatus(status); request.setServiceType(type); request.setCustomerRemarks("Customer demo data"); request.setTechnicianRemarks(status == RequestStatus.REACHED_SITE ? "Technician arrived at site." : null);
+    request.setServiceRequestedAt(LocalDateTime.now().minusDays(8L - sequence)); request.setPreferredVisitDate(LocalDate.now().plusDays(sequence % 3)); request.setPreferredTimeSlot("10:00 AM - 12:00 PM"); request.setEstimatedCompletionMinutes(90);
+    if (status == RequestStatus.COMPLETED) request.setCompletedAt(LocalDateTime.now().minusDays(1)); em.persist(request); em.flush();
+    if (status != RequestStatus.PENDING && status != RequestStatus.CANCELLED) {
+      TechnicianAssignment assignment = new TechnicianAssignment(); assignment.setRequest(request); assignment.setTechnician(technician); assignment.setAssignedBy(admin);
+      assignment.setStatus(status == RequestStatus.COMPLETED ? AssignmentStatus.COMPLETED : AssignmentStatus.ACCEPTED); assignment.setAssignedAt(LocalDateTime.now().minusDays(2)); assignment.setAcceptedAt(LocalDateTime.now().minusDays(1)); assignment.setNotes("Gopi demo assignment."); em.persist(assignment);
+      em.createNativeQuery("insert into service_visits(service_request_id,technician_profile_id,scheduled_date,start_time,end_time,status,notes) values (?,?,?,?,?,?,?)")
+          .setParameter(1, request.getId()).setParameter(2, technician.getId()).setParameter(3, LocalDate.now().plusDays(sequence % 3)).setParameter(4, LocalTime.of(10, 0))
+          .setParameter(5, LocalTime.of(12, 0)).setParameter(6, status == RequestStatus.COMPLETED ? "COMPLETED" : status == RequestStatus.REACHED_SITE ? "IN_PROGRESS" : "SCHEDULED").setParameter(7, "Gopi seeded visit").executeUpdate();
+    }
+    em.createNativeQuery("insert into invoices(invoice_number,customer_id,service_request_id,amc_contract_id,created_by_user_id,description,subtotal,tax_amount,total_amount,currency,status,issued_date,due_date) values (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .setParameter(1, "INV-GOPI-2026-%03d".formatted(sequence)).setParameter(2, customer.getId()).setParameter(3, request.getId()).setParameter(4, amc.getId()).setParameter(5, admin.getId())
+        .setParameter(6, "Gopi demo invoice %03d".formatted(sequence)).setParameter(7, 10000 + sequence * 500).setParameter(8, 1800 + sequence * 90).setParameter(9, 11800 + sequence * 590)
+        .setParameter(10, "INR").setParameter(11, sequence % 2 == 0 ? "PAID" : "ISSUED").setParameter(12, LocalDate.now().minusDays(sequence)).setParameter(13, LocalDate.now().plusDays(15 + sequence)).executeUpdate();
+    Number invoiceId = (Number) em.createNativeQuery("select id from invoices where invoice_number=?").setParameter(1, "INV-GOPI-2026-%03d".formatted(sequence)).getSingleResult();
+    em.createNativeQuery("insert into payment_records(customer_id,service_request_id,amc_contract_id,invoice_id,created_by_user_id,amount,currency,purpose,status,provider_reference) values (?,?,?,?,?,?,?,?,?,?)")
+        .setParameter(1, customer.getId()).setParameter(2, request.getId()).setParameter(3, amc.getId()).setParameter(4, invoiceId.longValue()).setParameter(5, admin.getId())
+        .setParameter(6, 11800 + sequence * 590).setParameter(7, "INR").setParameter(8, sequence % 2 == 0 ? "INVOICE" : "AMC_RENEWAL").setParameter(9, sequence % 2 == 0 ? "SUCCEEDED" : "PENDING").setParameter(10, "GOPI-DEMO-%03d".formatted(sequence)).executeUpdate();
+    em.createNativeQuery("insert into amc_renewal_requests(amc_contract_id,customer_id,requested_by_user_id,status,requested_start_date,requested_end_date,quoted_amount,currency,customer_notes) values (?,?,?,?,?,?,?,?,?)")
+        .setParameter(1, amc.getId()).setParameter(2, customer.getId()).setParameter(3, customer.getUser().getId()).setParameter(4, sequence % 2 == 0 ? "QUOTED" : "REQUESTED")
+        .setParameter(5, amc.getEndDate().plusDays(1)).setParameter(6, amc.getEndDate().plusYears(1)).setParameter(7, 15000 + sequence * 750).setParameter(8, "INR").setParameter(9, "Please renew this seeded AMC.").executeUpdate();
+    if (status == RequestStatus.COMPLETED) em.createNativeQuery("insert into service_request_feedback(service_request_id,customer_id,rating,comment) values (?,?,?,?)").setParameter(1, request.getId()).setParameter(2, customer.getId()).setParameter(3, 5).setParameter(4, "Service completed neatly in the demo flow.").executeUpdate();
+    seedGopiNotification(customer.getUser().getId(), request.getTitle(), "Status: " + status.name().replace('_', ' '));
+  }
+
+  private void seedGopiNotification(Long userId, String title, String message) {
+    em.createNativeQuery("insert into notifications(recipient_user_id,title,message,channel,status,sent_at) values (?,?,?,?,?,?)")
+        .setParameter(1, userId).setParameter(2, title).setParameter(3, message).setParameter(4, "IN_APP").setParameter(5, "SENT").setParameter(6, LocalDateTime.now()).executeUpdate();
   }
 
   private TechnicianProfile technician(String email,String employeeId,String area,String specialization,String availability,String password) {

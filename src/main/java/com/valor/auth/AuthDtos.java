@@ -13,7 +13,7 @@ final class AuthDtos {
     record Registration(String email, String phone,
         @Schema(accessMode=Schema.AccessMode.WRITE_ONLY,format="password") @Size(max=72) String password,
         @NotBlank @Size(max=160) String fullName, @Size(max=20) String alternatePhone,
-        @Size(max=200) String companyName,@Size(max=500) String address,@Size(max=32) String referralCode) implements StrictInput {}
+        @Size(max=200) String companyName,@Size(max=500) String address, Boolean hasLift, @Size(max=32) String referralCode) implements StrictInput {}
     record CustomerLogin(@NotBlank String identity,
         @Schema(accessMode=Schema.AccessMode.WRITE_ONLY,format="password") @NotBlank String password) implements StrictInput {}
     record EmailLogin(@NotBlank String email,

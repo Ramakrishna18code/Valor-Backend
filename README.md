@@ -80,12 +80,22 @@ customers, five sample technicians, buildings, lifts, AMCs, and service
 requests if they do not already exist. This is local-only development data; do
 not use it for production or shared environments.
 
+The dev seed also creates a fuller customer demo account for end-to-end
+customer-app review:
+
+- Customer: `mgopichakradhar@gmail.com`
+- Password: the local value configured in `DEV_SEED_SAMPLE_PASSWORD`
+- Seeded data: 4 buildings, 12 lifts, AMC contracts, invoices, payments,
+  renewal requests, service requests across lifecycle statuses, visits,
+  technician assignments, completed-service feedback, and notifications.
+
 Useful local sign-ins after seeding:
 
 - Admin: `admin@valor.local` with `DEV_BOOTSTRAP_SUPER_ADMIN_PASSWORD`.
 - Sample customers: `ananya.rao@example.com`, `vikram.menon@example.com`,
   `priya.shah@example.com`, `farhan.khan@example.com`,
-  `neha.iyer@example.com` with `DEV_SEED_SAMPLE_PASSWORD`.
+  `neha.iyer@example.com`, and `mgopichakradhar@gmail.com` with
+  `DEV_SEED_SAMPLE_PASSWORD`.
 - Sample technicians: `tech.arjun@valor.local`, `tech.meera@valor.local`,
   `tech.kabir@valor.local`, `tech.nisha@valor.local`,
   `tech.rohan@valor.local` with `DEV_SEED_SAMPLE_PASSWORD`.
@@ -150,6 +160,8 @@ client-facing endpoints use the `/api/v1` prefix and the standard
   `/api/v1/customers/me/service-requests/{id}/technician-location`
 - Support tickets: `/api/v1/support-tickets`
 - AMC renewal requests: `/api/v1/amc-renewal-requests`
+- AMC promo cards: customer read at `/api/v1/customers/me/amc-promotions`,
+  admin edit at `/api/v1/admin/amc-promotions`
 - Building/Lift documents: `/api/v1/buildings/{id}/documents`, `/api/v1/lifts/{id}/documents`,
   `/api/v1/customers/me/buildings/{id}/documents`, `/api/v1/customers/me/lifts/{id}/documents`
 

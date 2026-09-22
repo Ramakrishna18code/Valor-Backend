@@ -15,7 +15,7 @@ interface OnboardingTokenRepo extends JpaRepository<OnboardingToken,Long>{@Lock(
   User user=register(r.email(),r.phone(),r.password(),r.fullName());
   CustomerProfile profile=customers.findByUserId(user.getId()).orElseThrow();
   if(r.referralCode()!=null&&!r.referralCode().isBlank())profile.referralCode=claimReferralCode(r.referralCode(),r.fullName());
-  profile.alternatePhone=r.alternatePhone();profile.companyName=r.companyName();profile.address=r.address();return user;
+  profile.alternatePhone=r.alternatePhone();profile.companyName=r.companyName();profile.address=r.address();profile.hasLift=r.hasLift();return user;
  }
  @Transactional(noRollbackFor=IllegalArgumentException.class) User login(String identity,String password,Set<Role> allowed) {
   String key=normEmail(identity);
