@@ -368,6 +368,12 @@ Quotes and invoices remain admin-owned. A customer can request cash payment only
 
 The technician read endpoints return assignment-scoped route/location and invoice/payment state. They do not fabricate coordinates, ETAs, invoice totals, payment success, or OTP values.
 
+## Technician registration temporary OTP and documents
+
+Technician self-registration currently uses the temporary four-digit OTP `1111` because SMS provider keys are not configured. This is intentionally documented development behavior and must be replaced with the provider-backed delivery implementation before production use.
+
+Aadhaar and driving licence are stored as optional identity-number fields on the application, not as uploaded files. Registration document uploads are optional for now; Admin review may verify any supplied files later, and submission does not block when the optional upload list is empty.
+
 ## Phase 17 communication platform foundation
 
 Phase 17 centralizes provider-independent communication records without

@@ -23,7 +23,7 @@ class TechnicianApplicationController {
     @GetMapping("/{id}") ApiResponse<TechnicianApplicationService.ApplicationView> read(@PathVariable Long id, @RequestHeader("X-Application-Token") String token) { return ApiResponse.success("Application", service.read(id, token), 200); }
     @PostMapping("/{id}/submit") ApiResponse<TechnicianApplicationService.ApplicationView> submit(@PathVariable Long id, @RequestHeader("X-Application-Token") String token) { return ApiResponse.success("Application submitted", service.submit(id, token), 200); }
     record Create(@NotBlank @Size(max=160) String fullName,@NotBlank @Email String email,@NotBlank @Size(max=20) String phone,@NotBlank @Size(max=72) String password) implements StrictInput {}
-    record Otp(@NotBlank @Size(min=6,max=6) String otp) implements StrictInput {}
-    record Update(String experience,String specialization,String liftBrands,String certifications,String highestQualification,String handsOnExperience,String preferredLocations,Boolean willingToWorkAtHeights,String travelAvailability,String additionalNotes) implements StrictInput {}
+    record Otp(@NotBlank @Size(min=4,max=4) String otp) implements StrictInput {}
+    record Update(String experience,String specialization,String liftBrands,String certifications,String highestQualification,String handsOnExperience,String preferredLocations,Boolean willingToWorkAtHeights,String travelAvailability,String additionalNotes,String aadhaarNumber,String drivingLicenseNumber) implements StrictInput {}
     interface StrictInput { @JsonAnySetter default void rejectUnknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); } }
 }

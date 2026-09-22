@@ -22,6 +22,8 @@ class TechnicianApplication {
     @Column(name = "willing_to_work_at_heights") Boolean willingToWorkAtHeights;
     @Column(name = "travel_availability", length = 80) String travelAvailability;
     @Column(name = "additional_notes", length = 1000) String additionalNotes;
+    @Column(name = "aadhaar_number", length = 20) String aadhaarNumber;
+    @Column(name = "driving_license_number", length = 40) String drivingLicenseNumber;
     @Column(nullable = false, length = 30) String status = "DRAFT";
     @Column(name = "otp_hash", length = 255) String otpHash;
     @Column(name = "otp_expires_at") LocalDateTime otpExpiresAt;
