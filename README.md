@@ -100,6 +100,12 @@ Useful local sign-ins after seeding:
   `tech.kabir@valor.local`, `tech.nisha@valor.local`,
   `tech.rohan@valor.local` with `DEV_SEED_SAMPLE_PASSWORD`.
 
+The `tech.arjun@valor.local` technician seed includes a fuller Technician app
+test set: mixed assigned/on-the-way/reached/in-progress/testing/completed/
+cancelled jobs, emergency and non-emergency service types, visits,
+attachments, latest location rows, invoices/payments, cash OTP rows, and
+notifications. Use it for local Technician screen and flow verification only.
+
 To wipe local data and reseed from scratch, stop the backend and drop only the
 local development database configured by `DB_URL`, then run `mvn spring-boot:run`.
 Flyway will recreate the schema before the dev seed runs.
@@ -169,6 +175,48 @@ client-facing endpoints use the `/api/v1` prefix and the standard
   admin edit at `/api/v1/admin/amc-promotions`
 - Building/Lift documents: `/api/v1/buildings/{id}/documents`, `/api/v1/lifts/{id}/documents`,
   `/api/v1/customers/me/buildings/{id}/documents`, `/api/v1/customers/me/lifts/{id}/documents`
+
+### Technician app backend quick reference
+
+The dedicated Technician backend reference is `technician-backend.md`; the
+canonical full contract is `BACKEND_API_CONTRACT.md`. The active Technician app
+uses the following backend groups:
+
+- Auth/session: `POST /api/v1/auth/login/technician`,
+  `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/me`.
+- Profile/dashboard: `GET/PUT /api/v1/technician/me/profile`,
+  `GET /api/v1/technician/me/dashboard`.
+- Jobs/status: `GET /api/v1/technician/me/jobs`,
+  `GET /api/v1/technician/me/jobs/{id}`,
+  `POST /api/v1/service-requests/{id}/assignments/{assignmentId}/accept`,
+  `POST /api/v1/service-requests/{id}/status`,
+  `POST /api/v1/technician/me/jobs/{id}/report`.
+- OTP gates: arrival OTP at
+  `/api/v1/technician/me/jobs/{id}/arrival-otp/request`,
+  `/api/v1/technician/me/jobs/{id}/arrival-otp/verify`, and
+  `/api/v1/service-requests/{id}/arrival-otp`; completion OTP at
+  `/api/v1/technician/me/jobs/{id}/completion-otp/request`,
+  `/api/v1/technician/me/jobs/{id}/completion-otp/verify`, and
+  `/api/v1/service-requests/{id}/completion-otp`.
+- Checklist/evidence: `GET/PUT /api/v1/technician/me/jobs/{id}/checklist`,
+  request attachments under `/api/v1/service-requests/{id}/attachments`, and
+  private technician files under `/api/v1/technician/me/private-attachments`.
+- Visits: `GET /api/v1/technician/me/visits`,
+  `GET /api/v1/technician/me/visits/{id}`,
+  `PUT /api/v1/technician/me/visits/{id}/status`,
+  reschedule/additional/cancel visit request endpoints under the same visit.
+- Maps/tracking: `POST /api/v1/technician/me/jobs/{id}/location`,
+  `GET /api/v1/technician/me/jobs/{id}/location`, and customer readback at
+  `GET /api/v1/customers/me/service-requests/{id}/technician-location`.
+- Payment: `GET /api/v1/technician/me/jobs/{id}/payment` and cash OTP
+  verification through `POST /api/v1/payments/cash/otp/verify`.
+- Notifications/support: `GET /api/v1/notifications`,
+  `PUT /api/v1/notifications/{id}/read`, and shared support tickets under
+  `/api/v1/support-tickets`.
+
+Technician clients receive only assignment-scoped customer/building/lift/job
+data. The backend never returns customer credentials, password/token hashes, raw
+OTP hashes, unrelated customer records, or fabricated route/ETA/map data.
 
 ### Local file storage
 

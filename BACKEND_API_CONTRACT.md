@@ -351,7 +351,12 @@ The Technician application is built on canonical Service Requests, technician as
 | GET /technician/me/dashboard | TECHNICIAN | TechnicianDashboardSummary |
 | GET /technician/me/jobs | TECHNICIAN | status?, page=0, size=20 -> PageView<RequestView> |
 | GET /technician/me/jobs/{id} | current TECHNICIAN; historically assigned TECHNICIAN for terminal requests | Detail |
+| POST /service-requests/{id}/assignments/{assignmentId}/accept | assigned TECHNICIAN | Detail |
+| POST /service-requests/{id}/status | assigned TECHNICIAN | toStatus, notes? -> Detail |
 | POST /technician/me/jobs/{id}/report | assigned TECHNICIAN | diagnosis, workPerformed, testingResult; completionNotes? -> ReportView |
+| GET /technician/me/jobs/{id}/location | assigned TECHNICIAN | LocationView with latest, route/ETA/geofence availability |
+| POST /technician/me/jobs/{id}/location | assigned TECHNICIAN | latitude, longitude, timestamp?, accuracy?, speed?, heading?, battery? -> LocationView |
+| GET /technician/me/jobs/{id}/payment | assigned TECHNICIAN | invoice/payment/cash OTP state for the service request |
 | GET /technician/me/visits | TECHNICIAN | fromDate?, toDate?, status?, page=0, size=20 -> PageView<VisitView> |
 | GET /technician/me/visits/{id} | assigned TECHNICIAN | VisitView |
 | PUT /technician/me/visits/{id}/status | assigned TECHNICIAN | IN_PROGRESS or COMPLETED, optional notes -> VisitView |
@@ -364,6 +369,19 @@ The Technician application is built on canonical Service Requests, technician as
 | POST /service-requests/{id}/attachments | assigned TECHNICIAN on active nonterminal request | multipart file -> AttachmentView |
 | GET /service-requests/{id}/attachments/{attachmentId} | assigned/historical TECHNICIAN | file download |
 | DELETE /service-requests/{id}/attachments/{attachmentId} | assigned TECHNICIAN uploader on active nonterminal request | void |
+| POST /technician/me/jobs/{id}/arrival-otp/request | assigned TECHNICIAN | creates arrival OTP state; does not return OTP code to technician |
+| POST /technician/me/jobs/{id}/arrival-otp/verify | assigned TECHNICIAN | otpId, otp -> state |
+| GET /service-requests/{id}/arrival-otp | owner CUSTOMER, assigned TECHNICIAN, ADMIN/SUPER_ADMIN | safe OTP state; code only for owner customer while pending/valid |
+| POST /technician/me/jobs/{id}/completion-otp/request | assigned TECHNICIAN | creates completion OTP state; does not return OTP code to technician |
+| POST /technician/me/jobs/{id}/completion-otp/verify | assigned TECHNICIAN | otpId, otp -> state |
+| GET /service-requests/{id}/completion-otp | owner CUSTOMER, assigned TECHNICIAN, ADMIN/SUPER_ADMIN | safe OTP state; code only for owner customer while pending/valid |
+| GET /technician/me/jobs/{id}/checklist | assigned TECHNICIAN | JobChecklistView or null data when no active applicable template exists |
+| PUT /technician/me/jobs/{id}/checklist/responses | assigned TECHNICIAN | item response batch -> JobChecklistView |
+| GET /technician/me/private-attachments | TECHNICIAN | own private attachment metadata |
+| POST /technician/me/private-attachments | TECHNICIAN | multipart file -> metadata |
+| GET /technician/me/private-attachments/{id} | owner TECHNICIAN | file download |
+| DELETE /technician/me/private-attachments/{id} | owner TECHNICIAN | no content |
+| POST /payments/cash/otp/verify | assigned TECHNICIAN or ADMIN/SUPER_ADMIN | paymentId, otpId, otp -> CashPaymentOtpView |
 
 Technician authentication uses `POST /auth/login/technician`, the shared refresh/logout routes, and role-scoped bearer JWT authorization. TECHNICIAN cannot access Admin customer management, staff provisioning, Admin settings, unrelated jobs, unrelated visits, unrelated attachments, or another technician's private workload.
 
@@ -373,7 +391,7 @@ TechnicianDashboardSummary contains assignedJobs, pendingJobs, inProgressJobs, c
 
 Technician job lists are limited to the signed-in technician. Active work requires a current assignment. Terminal completed/cancelled history may be read by a technician with any historical assignment row for that request. Filters use the canonical Service Request status values. The job detail provides the existing Detail projection, including customer/building/lift/service context already present in `RequestView`, activeAssignment, history and report. Customer contact information is limited to the safe fields already exposed by the authorized request projection; credentials, authentication state, password/token hashes and unrelated customer records are never returned.
 
-Technician progress uses the canonical Service Request lifecycle. There is no technician-only state machine. "Start travel" maps to `ON_THE_WAY`, "mark arrived" maps to `REACHED_SITE`, work execution maps through `DIAGNOSIS`, `REPAIR_IN_PROGRESS`, `WAITING_FOR_PARTS`, and `TESTING`, and completion uses `COMPLETED` after a valid report exists for the active assignment. Cancellation uses the existing `CANCELLED` transition rules and requires notes/reason. Visit progress remains on the Visit resource and must stay consistent with the Service Request/assignment authorization rules.
+Technician progress uses the canonical Service Request lifecycle. There is no technician-only state machine. "Start travel" maps to `ON_THE_WAY`, "mark arrived" maps to `REACHED_SITE`, work execution maps through `DIAGNOSIS`, `REPAIR_IN_PROGRESS`, `WAITING_FOR_PARTS`, and `TESTING`, and completion uses `COMPLETED` after a valid report, required checklist responses, and completion OTP verification exist for the active assignment. Arrival OTP verification is available after `REACHED_SITE` and before work begins. Cancellation uses the existing `CANCELLED` transition rules and requires notes/reason. Visit progress remains on the Visit resource and must stay consistent with the Service Request/assignment authorization rules.
 
 Technician photos/evidence reuse Service Request attachments. A technician may upload JPEG, PNG, WebP or PDF files only to their active assigned nonterminal request. A technician may list/download attachments for an active assigned request and for completed/cancelled requests where they have historical assignment. A technician may delete only files they uploaded, and only while the request is nonterminal and assigned to them. Customer owners and Admin/SUPER_ADMIN can see request-scoped attachments through their existing authorization.
 
@@ -381,9 +399,11 @@ Technician-private attachments are separate from request-scoped attachments. The
 
 Technician notifications reuse the canonical notification inbox. Assignment, reassignment, Visit creation/reschedule/cancellation, change-request approval/rejection, emergency assignment and admin update messages should be represented as normal in-app notifications to the technician user where emitting services create them. No technician-specific notification table exists.
 
+Technician payment reads are service-request scoped. `GET /technician/me/jobs/{id}/payment` exposes the invoice/payment/cash OTP state needed to render the Technician payment screen. Cash OTP verification is allowed for the assigned technician or Admin/SUPER_ADMIN and never returns OTP hashes. UPI/Razorpay payment success remains gateway/webhook-authoritative and is not technician-controlled.
+
 ### Deferred or product decision required
 
-Routing, ETA, geofencing, background location history, websocket/SSE delivery, long-term location retention, and additional tracking intelligence remain deferred product decisions.
+Routing provider activation, real ETA quality, websocket/SSE delivery, long-term customer-visible location history, and additional tracking intelligence remain deferred product decisions. The implemented location endpoints return explicit unavailable states when provider data, building coordinates, or active tracking state are missing.
 
 ### Live tracking scope
 
@@ -452,6 +472,7 @@ Live tracking is latest-location only. Tracking is active for canonical Service 
 | Method/path | Role | Input / data |
 |---|---|---|
 | POST /technician/me/jobs/{id}/location | assigned TECHNICIAN | latitude, longitude, timestamp? -> latitude, longitude, timestamp, stale, trackingState |
+| GET /technician/me/jobs/{id}/location | assigned TECHNICIAN | latest location plus route/ETA/geofence availability |
 | GET /customers/me/service-requests/{id}/technician-location | owner CUSTOMER | latest latitude, longitude, timestamp, stale, trackingState |
 
 Technician identity is always resolved from JWT; technician_id is never accepted from the client. Customers can only view their own request's assigned technician location while tracking is active. Coordinates are validated server-side and stored in `technician_latest_locations` as one latest row per service request.

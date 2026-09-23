@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.EnumSet;
 import java.util.Locale;
 
 @Component
@@ -68,6 +69,7 @@ class DevBootstrap implements ApplicationRunner {
     };
     for (int i=0;i<customers.length;i++) seedCustomerAssetsAndRequest(admin, customers[i], technicians[i], i+1);
     seedGopiDemoCustomer(admin, technicians, password);
+    seedArjunTechnicianDemo(admin, technicians[0], password);
   }
 
   private CustomerProfile customer(String email,String phone,String name,String company,String address,String password) {
@@ -142,6 +144,103 @@ class DevBootstrap implements ApplicationRunner {
   }
 
   private void seedGopiNotification(Long userId, String title, String message) {
+    em.createNativeQuery("insert into notifications(recipient_user_id,title,message,channel,status,sent_at) values (?,?,?,?,?,?)")
+        .setParameter(1, userId).setParameter(2, title).setParameter(3, message).setParameter(4, "IN_APP").setParameter(5, "SENT").setParameter(6, LocalDateTime.now()).executeUpdate();
+  }
+
+  private void seedArjunTechnicianDemo(User admin, TechnicianProfile technician, String password) {
+    if (exists("select count(r) from ServiceRequest r where r.serviceId=:value", "ARJUN-SR-2026-001")) {
+      refreshArjunCashOtps();
+      return;
+    }
+    CustomerProfile customer = customer("arjun.demo.customer@valor.local", "+919810007001", "R. Ajeesh Varma", "Valor Technician Demo", "Hyderabad, Telangana", password);
+    String[] buildings = {"Sun City Apartments", "Green Park Residency", "Lake View Towers", "Maple Residency", "Tech Park Building", "Apollo Heights", "Madhani Tower", "Ore Residency"};
+    String[] areas = {"Banjara Hills", "Gachibowli", "Madhapur", "Kondapur", "HITEC City", "Jubilee Hills", "Hyderabad", "Hyderabad"};
+    RequestStatus[] statuses = {RequestStatus.ASSIGNED, RequestStatus.ON_THE_WAY, RequestStatus.REACHED_SITE, RequestStatus.REPAIR_IN_PROGRESS, RequestStatus.TESTING, RequestStatus.COMPLETED, RequestStatus.CANCELLED, RequestStatus.ASSIGNED};
+    WorkflowServiceType[] types = {WorkflowServiceType.ROUTINE_MAINTENANCE, WorkflowServiceType.INSPECTION, WorkflowServiceType.BREAKDOWN, WorkflowServiceType.ROUTINE_MAINTENANCE, WorkflowServiceType.EMERGENCY, WorkflowServiceType.BREAKDOWN, WorkflowServiceType.INSPECTION, WorkflowServiceType.EMERGENCY};
+    for (int i = 0; i < statuses.length; i++) {
+      Building building = new Building(); building.setCustomer(customer); building.setBuildingName(buildings[i]); building.setBuildingType(i == 4 ? "Commercial" : "Residential");
+      building.setAddress("%s, %s, Hyderabad - 5000%02d".formatted(buildings[i], areas[i], 30 + i)); building.setCity(areas[i]); building.setState("Telangana"); building.setPincode("5000%02d".formatted(30 + i));
+      building.setEmergencyContactName(customer.fullName); building.setEmergencyContactPhone(customer.getUser().getPhone()); em.persist(building);
+      Lift lift = new Lift(); lift.setBuilding(building); lift.setName("Lift - %d (Passenger Lift)".formatted((i % 4) + 1)); lift.setLiftNumber("ARJUN-L-%03d".formatted(i + 1));
+      lift.setManufacturer(i % 2 == 0 ? "Schindler" : "KONE"); lift.setModel("VX-Arjun-%02d".formatted(i + 1)); lift.setCapacity(10 + i); lift.setFloorCount(5 + i);
+      lift.setSerialNumber("ARJUN-LIFT-%03d".formatted(i + 1)); lift.setInstallationDate(LocalDate.now().minusYears(2).minusMonths(i)); lift.setLocation(i % 2 == 0 ? "Tower 1" : "Block A");
+      lift.setCurrentStatus(i == 2 || i == 4 ? LiftStatus.MAINTENANCE : LiftStatus.ACTIVE); lift.setWarrantyStatus("ACTIVE"); lift.setWarrantyStartDate(LocalDate.now().minusYears(2)); lift.setWarrantyEndDate(LocalDate.now().plusMonths(8));
+      lift.setLastMaintenanceDate(LocalDate.now().minusDays(15 + i)); lift.setNextMaintenanceDate(LocalDate.now().plusDays(20 + i)); lift.setHealthScore((byte) (92 - i)); lift.setMachineRoom("YES"); em.persist(lift);
+      AmcContract amc = new AmcContract(); amc.setLift(lift); amc.setAmcNumber("AMC-ARJUN-2026-%03d".formatted(i + 1)); amc.setPlan(i % 2 == 0 ? "General Service" : "Premium AMC");
+      amc.setCoverageDetails("Arjun technician demo AMC coverage."); amc.setStartDate(LocalDate.now().minusMonths(5)); amc.setEndDate(LocalDate.now().plusMonths(8)); amc.setStatus(AmcStatus.ACTIVE); amc.setRenewalDate(amc.getEndDate().minusDays(30)); amc.setRenewalCount(0); em.persist(amc);
+      seedArjunRequest(admin, customer, lift, amc, technician, i + 1, statuses[i], types[i]);
+    }
+    seedTechnicianNotification(technician.getUser().getId(), "Emergency Request", "New emergency request received at Skyline Towers (Lift - 2).");
+    seedTechnicianNotification(technician.getUser().getId(), "New Job Assigned", "You have been assigned a general service at Sun City Apartments.");
+    seedTechnicianNotification(technician.getUser().getId(), "Job Status Updated", "Your job at Green Park Residency is now marked as On The Way.");
+    seedTechnicianNotification(technician.getUser().getId(), "New Message", "You have a new message from your supervisor.");
+    seedTechnicianNotification(technician.getUser().getId(), "Parts Update", "Requested part for Tech Park Building has been approved.");
+  }
+
+  private void seedArjunRequest(User admin, CustomerProfile customer, Lift lift, AmcContract amc, TechnicianProfile technician, int sequence, RequestStatus status, WorkflowServiceType type) {
+    ServiceRequest request = new ServiceRequest(); request.setCustomer(customer); request.setLift(lift); request.setServiceId("ARJUN-SR-2026-%03d".formatted(sequence));
+    request.setTitle(type == WorkflowServiceType.EMERGENCY ? "Emergency lift not responding" : sequence % 2 == 0 ? "Elevator not working" : "Routine maintenance visit");
+    request.setDescription(sequence % 2 == 0 ? "Lift is making unusual noise during operation. Please check and service." : "Carry standard service kit. Check door sensors and lubrication.");
+    request.setIssueCategory(type == WorkflowServiceType.INSPECTION ? "Inspection" : type == WorkflowServiceType.EMERGENCY ? "Emergency" : "Lift service");
+    request.setPriority(type == WorkflowServiceType.EMERGENCY ? RequestPriority.EMERGENCY : sequence == 3 ? RequestPriority.HIGH : RequestPriority.MEDIUM);
+    request.setStatus(status); request.setServiceType(type); request.setCustomerRemarks("Customer requested careful inspection and clean work area.");
+    request.setTechnicianRemarks(status == RequestStatus.REACHED_SITE ? "Reached site and waiting for arrival OTP." : null);
+    request.setServiceRequestedAt(LocalDateTime.now().minusDays(sequence)); request.setPreferredVisitDate(LocalDate.now().plusDays(sequence % 3));
+    request.setPreferredTimeSlot(sequence % 2 == 0 ? "01:00 PM - 02:00 PM" : "10:00 AM - 11:00 AM"); request.setEstimatedCompletionMinutes(90);
+    if (status == RequestStatus.COMPLETED) request.setCompletedAt(LocalDateTime.now().minusHours(6)); em.persist(request); em.flush();
+    TechnicianAssignment assignment = new TechnicianAssignment(); assignment.setRequest(request); assignment.setTechnician(technician); assignment.setAssignedBy(admin);
+    assignment.setStatus(status == RequestStatus.COMPLETED ? AssignmentStatus.COMPLETED : status == RequestStatus.CANCELLED ? AssignmentStatus.RELEASED : status == RequestStatus.ASSIGNED ? AssignmentStatus.ASSIGNED : AssignmentStatus.ACCEPTED);
+    assignment.setAssignedAt(LocalDateTime.now().minusDays(2)); if (assignment.getStatus() == AssignmentStatus.ACCEPTED || assignment.getStatus() == AssignmentStatus.COMPLETED) assignment.setAcceptedAt(LocalDateTime.now().minusDays(1));
+    assignment.setReleasedAt(status == RequestStatus.CANCELLED ? LocalDateTime.now().minusHours(3) : null); assignment.setNotes("Arjun technician demo assignment."); em.persist(assignment); em.flush();
+    em.createNativeQuery("insert into service_visits(service_request_id,technician_profile_id,scheduled_date,start_time,end_time,status,notes) values (?,?,?,?,?,?,?)")
+        .setParameter(1, request.getId()).setParameter(2, technician.getId()).setParameter(3, request.getPreferredVisitDate()).setParameter(4, LocalTime.of(10 + (sequence % 5), 0))
+        .setParameter(5, LocalTime.of(11 + (sequence % 5), 0)).setParameter(6, status == RequestStatus.COMPLETED ? "COMPLETED" : EnumSet.of(RequestStatus.REACHED_SITE, RequestStatus.REPAIR_IN_PROGRESS, RequestStatus.TESTING).contains(status) ? "IN_PROGRESS" : "SCHEDULED")
+        .setParameter(7, "Arjun seeded visit").executeUpdate();
+    if (EnumSet.of(RequestStatus.REPAIR_IN_PROGRESS, RequestStatus.TESTING, RequestStatus.COMPLETED).contains(status)) {
+      em.createNativeQuery("insert into service_reports(service_request_id,assignment_id,reported_by_user_id,diagnosis,work_performed,testing_result,completion_notes) values (?,?,?,?,?,?,?)")
+          .setParameter(1, request.getId()).setParameter(2, assignment.getId()).setParameter(3, technician.getUser().getId()).setParameter(4, "Door sensor and controller checks completed.")
+          .setParameter(5, "Cleaned sensor track, checked alignment, verified cabin movement.").setParameter(6, "Lift passed operational test.").setParameter(7, status == RequestStatus.COMPLETED ? "Issue resolved. Elevator is working fine now." : "Work in progress.").executeUpdate();
+    }
+    em.createNativeQuery("insert into service_request_attachments(service_request_id,uploaded_by_user_id,original_filename,content_type,file_size,storage_key) values (?,?,?,?,?,?)")
+        .setParameter(1, request.getId()).setParameter(2, customer.getUser().getId()).setParameter(3, "customer-site-photo-%03d.jpg".formatted(sequence)).setParameter(4, "image/jpeg").setParameter(5, 125000L)
+        .setParameter(6, "seed/arjun/request-%03d/customer-site-photo.jpg".formatted(sequence)).executeUpdate();
+    if (status == RequestStatus.ON_THE_WAY || status == RequestStatus.REACHED_SITE || status == RequestStatus.REPAIR_IN_PROGRESS || status == RequestStatus.TESTING) {
+      em.createNativeQuery("insert into technician_latest_locations(technician_id,service_request_id,latitude,longitude,recorded_at) values (?,?,?,?,?)")
+          .setParameter(1, technician.getId()).setParameter(2, request.getId()).setParameter(3, 17.4380 + sequence * 0.002).setParameter(4, 78.3820 + sequence * 0.002).setParameter(5, LocalDateTime.now()).executeUpdate();
+    }
+    em.createNativeQuery("insert into invoices(invoice_number,customer_id,service_request_id,amc_contract_id,created_by_user_id,description,subtotal,tax_amount,total_amount,currency,status,issued_date,due_date) values (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .setParameter(1, "INV-ARJUN-2026-%03d".formatted(sequence)).setParameter(2, customer.getId()).setParameter(3, request.getId()).setParameter(4, amc.getId()).setParameter(5, admin.getId())
+        .setParameter(6, "Arjun technician demo invoice").setParameter(7, 4000 + sequence * 350).setParameter(8, 720 + sequence * 63).setParameter(9, 4720 + sequence * 413)
+        .setParameter(10, "INR").setParameter(11, status == RequestStatus.COMPLETED ? "PAID" : "ISSUED").setParameter(12, LocalDate.now()).setParameter(13, LocalDate.now().plusDays(15)).executeUpdate();
+    Number invoiceId = (Number) em.createNativeQuery("select id from invoices where invoice_number=?").setParameter(1, "INV-ARJUN-2026-%03d".formatted(sequence)).getSingleResult();
+    em.createNativeQuery("insert into payment_records(customer_id,service_request_id,amc_contract_id,invoice_id,created_by_user_id,amount,currency,purpose,status,provider_reference) values (?,?,?,?,?,?,?,?,?,?)")
+        .setParameter(1, customer.getId()).setParameter(2, request.getId()).setParameter(3, amc.getId()).setParameter(4, invoiceId.longValue()).setParameter(5, admin.getId())
+        .setParameter(6, 4720 + sequence * 413).setParameter(7, "INR").setParameter(8, "SERVICE_REQUEST").setParameter(9, status == RequestStatus.COMPLETED ? "SUCCEEDED" : "PENDING").setParameter(10, sequence % 2 == 0 ? "CASH" : "UPI-DEMO").executeUpdate();
+    if (sequence % 2 == 0) {
+      Number paymentId = (Number) em.createNativeQuery("select id from payment_records where invoice_id=?").setParameter(1, invoiceId.longValue()).getSingleResult();
+      em.createNativeQuery("insert into cash_payment_otps(payment_id,invoice_id,service_request_id,customer_profile_id,otp_hash,expires_at,customer_visible_code,customer_visible_until,created_at) values (?,?,?,?,?,?,?,?,?)")
+          .setParameter(1, paymentId.longValue()).setParameter(2, invoiceId.longValue()).setParameter(3, request.getId()).setParameter(4, customer.getId()).setParameter(5, encoder.encode("1111"))
+          .setParameter(6, LocalDateTime.now().plusMinutes(30)).setParameter(7, "1111").setParameter(8, LocalDateTime.now().plusMinutes(30)).setParameter(9, LocalDateTime.now()).executeUpdate();
+    }
+    seedTechnicianNotification(technician.getUser().getId(), request.getTitle(), "Status: " + status.name().replace('_', ' '));
+  }
+
+  private void refreshArjunCashOtps() {
+    em.createNativeQuery("""
+        update cash_payment_otps otp
+        join service_requests request on request.id = otp.service_request_id
+        set otp.otp_hash = ?, otp.expires_at = ?, otp.customer_visible_code = ?, otp.customer_visible_until = ?
+        where request.service_id like 'ARJUN-SR-2026-%'
+        """)
+        .setParameter(1, encoder.encode("1111"))
+        .setParameter(2, LocalDateTime.now().plusMinutes(30))
+        .setParameter(3, "1111")
+        .setParameter(4, LocalDateTime.now().plusMinutes(30))
+        .executeUpdate();
+  }
+
+  private void seedTechnicianNotification(Long userId, String title, String message) {
     em.createNativeQuery("insert into notifications(recipient_user_id,title,message,channel,status,sent_at) values (?,?,?,?,?,?)")
         .setParameter(1, userId).setParameter(2, title).setParameter(3, message).setParameter(4, "IN_APP").setParameter(5, "SENT").setParameter(6, LocalDateTime.now()).executeUpdate();
   }
