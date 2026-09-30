@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -67,6 +68,7 @@ class DevBootstrap implements ApplicationRunner {
         customer("farhan.khan@example.com","+919810000004","Farhan Khan","Khan Towers","Jayanagar, Bengaluru",password),
         customer("neha.iyer@example.com","+919810000005","Neha Iyer","Iyer Enclave","Malleshwaram, Bengaluru",password)
     };
+    seedAnanyaCustomerDemo(admin, customers[0], technicians, password);
     for (int i=0;i<customers.length;i++) seedCustomerAssetsAndRequest(admin, customers[i], technicians[i], i+1);
     seedGopiDemoCustomer(admin, technicians, password);
     seedArjunTechnicianDemo(admin, technicians[0], password);
@@ -144,6 +146,121 @@ class DevBootstrap implements ApplicationRunner {
   }
 
   private void seedGopiNotification(Long userId, String title, String message) {
+    em.createNativeQuery("insert into notifications(recipient_user_id,title,message,channel,status,sent_at) values (?,?,?,?,?,?)")
+        .setParameter(1, userId).setParameter(2, title).setParameter(3, message).setParameter(4, "IN_APP").setParameter(5, "SENT").setParameter(6, LocalDateTime.now()).executeUpdate();
+  }
+
+  private void seedAnanyaCustomerDemo(User admin, CustomerProfile customer, TechnicianProfile[] technicians, String password) {
+    if (exists("select count(r) from ServiceRequest r where r.serviceId=:value", "ANANYA-SR-2026-001")) return;
+    customer.status = "ACTIVE"; customer.active = true; customer.hasLift = true;
+    if (customer.referralCode == null || customer.referralCode.isBlank()) customer.referralCode = "VAL-ANANYA-2026";
+    customer.getUser().setActive(true); customer.getUser().setLocked(false); customer.getUser().setLockedUntil(null);
+    if (password != null && !password.isBlank()) customer.getUser().setPasswordHash(encoder.encode(password));
+
+    String[][] buildingRows = {
+        {"Rao Residency", "Residential", "Indiranagar, Bengaluru", "Bengaluru", "Karnataka", "560038", "MAIN"},
+        {"Rao Heights", "Residential", "Whitefield, Bengaluru", "Bengaluru", "Karnataka", "560066", "SECONDARY"},
+        {"Rao Business Centre", "Commercial", "Madhapur, Hyderabad", "Hyderabad", "Telangana", "500081", "OTHER"},
+        {"Rao Orchid Annex", "Residential", "Vijayawada Road, Guntur", "Guntur", "Andhra Pradesh", "522001", "OTHER"}
+    };
+    Lift[][] liftsByBuilding = new Lift[buildingRows.length][];
+    for (int b = 0; b < buildingRows.length; b++) {
+      Building building = new Building(); building.setCustomer(customer); building.setBuildingName(buildingRows[b][0]); building.setBuildingType(buildingRows[b][1]);
+      building.setAddress(buildingRows[b][2]); building.setCity(buildingRows[b][3]); building.setState(buildingRows[b][4]); building.setPincode(buildingRows[b][5]);
+      building.setBuildingPreference(buildingRows[b][6]); building.setLatitude(BigDecimal.valueOf(12.9716 + b * 0.012)); building.setLongitude(BigDecimal.valueOf(77.5946 + b * 0.009));
+      building.setEmergencyContactName(customer.fullName); building.setEmergencyContactPhone(customer.getUser().getPhone()); em.persist(building);
+      liftsByBuilding[b] = new Lift[b == 0 ? 3 : 2];
+      for (int l = 0; l < liftsByBuilding[b].length; l++) {
+        int seq = b * 3 + l + 1;
+        Lift lift = new Lift(); lift.setBuilding(building); lift.setName("%s %s Lift".formatted(buildingRows[b][0], l == 0 ? "Main" : l == 1 ? "Service" : "East Wing"));
+        lift.setLiftNumber("ANANYA-L-%03d".formatted(seq)); lift.setLiftType(l == 1 ? "Service Lift" : "Passenger Lift"); lift.setManufacturer(seq % 2 == 0 ? "KONE" : "Otis");
+        lift.setModel("Valor-A%d%d".formatted(b + 1, l + 1)); lift.setCapacity(8 + seq); lift.setFloorCount(5 + b + l); lift.setSerialNumber("ANANYA-LIFT-%03d".formatted(seq));
+        lift.setInstallationDate(LocalDate.now().minusYears(1 + b).minusMonths(l * 3L)); lift.setLocation(l == 0 ? "Main lobby" : "Block " + (char)('A' + l));
+        lift.setCurrentStatus(seq == 4 ? LiftStatus.MAINTENANCE : seq == 7 ? LiftStatus.DOWN : LiftStatus.ACTIVE); lift.setWarrantyStatus(seq <= 4 ? "ACTIVE" : "EXPIRED");
+        lift.setWarrantyStartDate(LocalDate.now().minusYears(2)); lift.setWarrantyEndDate(seq <= 4 ? LocalDate.now().plusMonths(9) : LocalDate.now().minusMonths(2));
+        lift.setLastMaintenanceDate(LocalDate.now().minusDays(12L + seq * 4L)); lift.setNextMaintenanceDate(seq % 3 == 0 ? LocalDate.now() : LocalDate.now().plusDays(seq));
+        lift.setHealthScore((byte) Math.max(55, 96 - seq * 5)); lift.setMachineRoom(seq % 2 == 0 ? "MRL" : "Dedicated machine room"); em.persist(lift);
+        liftsByBuilding[b][l] = lift;
+      }
+    }
+
+    RequestStatus[] statuses = {RequestStatus.PENDING, RequestStatus.ASSIGNED, RequestStatus.ACCEPTED, RequestStatus.ON_THE_WAY, RequestStatus.REACHED_SITE, RequestStatus.REPAIR_IN_PROGRESS, RequestStatus.WAITING_FOR_PARTS, RequestStatus.TESTING, RequestStatus.COMPLETED, RequestStatus.CANCELLED, RequestStatus.COMPLETED, RequestStatus.COMPLETED};
+    WorkflowServiceType[] types = {WorkflowServiceType.INSTALLATION, WorkflowServiceType.ROUTINE_MAINTENANCE, WorkflowServiceType.INSPECTION, WorkflowServiceType.EMERGENCY, WorkflowServiceType.BREAKDOWN, WorkflowServiceType.ROUTINE_MAINTENANCE, WorkflowServiceType.BREAKDOWN, WorkflowServiceType.MODERNIZATION, WorkflowServiceType.ROUTINE_MAINTENANCE, WorkflowServiceType.INSPECTION, WorkflowServiceType.EMERGENCY, WorkflowServiceType.BREAKDOWN};
+    LocalDate[] visitDates = {LocalDate.now().plusDays(7), LocalDate.now().plusDays(2), LocalDate.now().plusDays(1), LocalDate.now(), LocalDate.now(), LocalDate.now().minusDays(1), LocalDate.now().plusDays(5), LocalDate.now().plusDays(14), LocalDate.now().minusDays(20), LocalDate.now().minusDays(45), LocalDate.now().minusMonths(8), LocalDate.now().minusYears(1).minusMonths(3)};
+    for (int i = 0; i < statuses.length; i++) {
+      Lift lift = liftsByBuilding[i % liftsByBuilding.length][i % liftsByBuilding[i % liftsByBuilding.length].length];
+      AmcContract amc = seedAnanyaAmc(lift, i + 1);
+      seedAnanyaRequestBundle(admin, customer, lift, amc, technicians[i % technicians.length], i + 1, statuses[i], types[i], visitDates[i]);
+    }
+    seedAnanyaNotification(customer.getUser().getId(), "Welcome back, Ananya", "Your demo account has buildings, lifts, service history, visits, invoices, dues, failed payments and AMC renewals ready.");
+    seedAnanyaNotification(customer.getUser().getId(), "Today visit scheduled", "A technician visit is scheduled today for one of your active service requests.");
+    seedAnanyaNotification(customer.getUser().getId(), "Payment failed", "One invoice payment failed and is available for retry in the payments screen.");
+    seedAnanyaNotification(customer.getUser().getId(), "AMC renewal upcoming", "A seeded AMC contract is approaching renewal.");
+  }
+
+  private AmcContract seedAnanyaAmc(Lift lift, int sequence) {
+    AmcContract amc = new AmcContract(); amc.setLift(lift); amc.setAmcNumber("AMC-ANANYA-2026-%03d".formatted(sequence));
+    amc.setPlan(sequence % 3 == 0 ? "Premium AMC" : sequence % 3 == 1 ? "Comprehensive AMC" : "Standard AMC");
+    amc.setCoverageDetails("Ananya demo coverage for app validation."); amc.setStartDate(LocalDate.now().minusMonths(10 + sequence));
+    amc.setEndDate(sequence % 4 == 0 ? LocalDate.now().minusDays(sequence) : LocalDate.now().plusMonths(2 + sequence % 6));
+    amc.setStatus(sequence % 4 == 0 ? AmcStatus.EXPIRED : AmcStatus.ACTIVE); amc.setRenewalDate(amc.getEndDate().minusDays(30)); amc.setRenewalCount(sequence % 3); em.persist(amc);
+    return amc;
+  }
+
+  private void seedAnanyaRequestBundle(User admin, CustomerProfile customer, Lift lift, AmcContract amc, TechnicianProfile technician, int sequence, RequestStatus status, WorkflowServiceType type, LocalDate visitDate) {
+    ServiceRequest request = new ServiceRequest(); request.setCustomer(customer); request.setLift(type == WorkflowServiceType.INSTALLATION ? null : lift); request.setServiceId("ANANYA-SR-2026-%03d".formatted(sequence));
+    request.setTitle(switch (type) {
+      case INSTALLATION -> "New lift installation consultation";
+      case EMERGENCY -> "Emergency lift stoppage";
+      case BREAKDOWN -> sequence % 2 == 0 ? "Door sensor breakdown" : "Lift vibration and noise";
+      case INSPECTION -> "Safety inspection visit";
+      case MODERNIZATION -> "Controller modernization review";
+      default -> "Routine maintenance service";
+    });
+    request.setDescription("Ananya seeded customer journey request covering app UI states."); request.setIssueCategory(type.name().replace('_', ' '));
+    request.setPriority(type == WorkflowServiceType.EMERGENCY ? RequestPriority.EMERGENCY : sequence % 4 == 0 ? RequestPriority.HIGH : RequestPriority.MEDIUM);
+    request.setStatus(status); request.setServiceType(type); request.setCustomerRemarks("Seeded Ananya customer note for mobile testing.");
+    request.setTechnicianRemarks(EnumSet.of(RequestStatus.REACHED_SITE, RequestStatus.REPAIR_IN_PROGRESS, RequestStatus.TESTING).contains(status) ? "Technician update is visible for this request." : null);
+    request.setServiceRequestedAt(visitDate.atTime(9, 15).minusDays(sequence <= 2 ? 1 : 3)); request.setPreferredVisitDate(visitDate); request.setPreferredTimeSlot(sequence % 2 == 0 ? "01:00 PM - 03:00 PM" : "10:00 AM - 12:00 PM"); request.setEstimatedCompletionMinutes(60 + sequence * 10);
+    if (status == RequestStatus.COMPLETED) request.setCompletedAt(visitDate.atTime(16, 30)); em.persist(request); em.flush();
+    if (status != RequestStatus.PENDING) {
+      TechnicianAssignment assignment = new TechnicianAssignment(); assignment.setRequest(request); assignment.setTechnician(technician); assignment.setAssignedBy(admin);
+      assignment.setStatus(status == RequestStatus.COMPLETED ? AssignmentStatus.COMPLETED : status == RequestStatus.CANCELLED ? AssignmentStatus.RELEASED : status == RequestStatus.ASSIGNED ? AssignmentStatus.ASSIGNED : AssignmentStatus.ACCEPTED);
+      assignment.setAssignedAt(request.getServiceRequestedAt().plusHours(3)); if (assignment.getStatus() == AssignmentStatus.ACCEPTED || assignment.getStatus() == AssignmentStatus.COMPLETED) assignment.setAcceptedAt(assignment.getAssignedAt().plusHours(2));
+      assignment.setReleasedAt(status == RequestStatus.CANCELLED ? visitDate.atTime(15, 0) : null); assignment.setNotes("Ananya seeded assignment."); em.persist(assignment); em.flush();
+      em.createNativeQuery("insert into service_visits(service_request_id,technician_profile_id,scheduled_date,start_time,end_time,status,notes) values (?,?,?,?,?,?,?)")
+          .setParameter(1, request.getId()).setParameter(2, technician.getId()).setParameter(3, visitDate).setParameter(4, sequence % 2 == 0 ? LocalTime.of(13, 0) : LocalTime.of(10, 0))
+          .setParameter(5, sequence % 2 == 0 ? LocalTime.of(15, 0) : LocalTime.of(12, 0)).setParameter(6, status == RequestStatus.COMPLETED ? "COMPLETED" : status == RequestStatus.CANCELLED ? "CANCELLED" : EnumSet.of(RequestStatus.REACHED_SITE, RequestStatus.REPAIR_IN_PROGRESS, RequestStatus.TESTING).contains(status) ? "IN_PROGRESS" : "SCHEDULED")
+          .setParameter(7, "Ananya seeded visit for " + status.name()).executeUpdate();
+      if (EnumSet.of(RequestStatus.REPAIR_IN_PROGRESS, RequestStatus.TESTING, RequestStatus.COMPLETED).contains(status)) {
+        em.createNativeQuery("insert into service_reports(service_request_id,assignment_id,reported_by_user_id,diagnosis,work_performed,testing_result,completion_notes) values (?,?,?,?,?,?,?)")
+            .setParameter(1, request.getId()).setParameter(2, assignment.getId()).setParameter(3, technician.getUser().getId()).setParameter(4, "Seeded diagnosis for customer history.")
+            .setParameter(5, "Checked controller, doors, safety circuit and ride quality.").setParameter(6, status == RequestStatus.COMPLETED ? "Passed final testing." : "Testing in progress.")
+            .setParameter(7, status == RequestStatus.COMPLETED ? "Completed and handed over to customer." : "Pending final closure.").executeUpdate();
+      }
+    }
+    String invoiceStatus = sequence == 3 ? "ISSUED" : sequence == 6 ? "ISSUED" : sequence == 10 ? "CANCELLED" : status == RequestStatus.COMPLETED ? "PAID" : "ISSUED";
+    LocalDate dueDate = sequence == 3 ? LocalDate.now().minusDays(5) : sequence == 6 ? LocalDate.now() : sequence == 7 ? LocalDate.now().plusDays(1) : visitDate.plusDays(12);
+    em.createNativeQuery("insert into invoices(invoice_number,customer_id,service_request_id,amc_contract_id,created_by_user_id,description,subtotal,tax_amount,total_amount,currency,status,issued_date,due_date) values (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .setParameter(1, "INV-ANANYA-2026-%03d".formatted(sequence)).setParameter(2, customer.getId()).setParameter(3, request.getId()).setParameter(4, amc.getId()).setParameter(5, admin.getId())
+        .setParameter(6, "Ananya demo invoice %03d".formatted(sequence)).setParameter(7, 5500 + sequence * 600).setParameter(8, 990 + sequence * 108).setParameter(9, 6490 + sequence * 708)
+        .setParameter(10, "INR").setParameter(11, invoiceStatus).setParameter(12, visitDate.minusDays(1)).setParameter(13, dueDate).executeUpdate();
+    Number invoiceId = (Number) em.createNativeQuery("select id from invoices where invoice_number=?").setParameter(1, "INV-ANANYA-2026-%03d".formatted(sequence)).getSingleResult();
+    String paymentStatus = sequence == 3 ? "FAILED" : sequence == 6 || sequence == 7 ? "PENDING" : invoiceStatus.equals("PAID") ? "SUCCEEDED" : "PROCESSING";
+    em.createNativeQuery("insert into payment_records(customer_id,service_request_id,amc_contract_id,invoice_id,created_by_user_id,amount,currency,purpose,status,provider_reference,failure_reason) values (?,?,?,?,?,?,?,?,?,?,?)")
+        .setParameter(1, customer.getId()).setParameter(2, request.getId()).setParameter(3, amc.getId()).setParameter(4, invoiceId.longValue()).setParameter(5, admin.getId())
+        .setParameter(6, 6490 + sequence * 708).setParameter(7, "INR").setParameter(8, sequence % 3 == 0 ? "AMC_RENEWAL" : "SERVICE_REQUEST").setParameter(9, paymentStatus)
+        .setParameter(10, "ANANYA-DEMO-%03d".formatted(sequence)).setParameter(11, paymentStatus.equals("FAILED") ? "Seeded failed payment for retry testing." : null).executeUpdate();
+    em.createNativeQuery("insert into amc_renewal_requests(amc_contract_id,customer_id,requested_by_user_id,status,requested_start_date,requested_end_date,quoted_amount,currency,invoice_id,customer_notes) values (?,?,?,?,?,?,?,?,?,?)")
+        .setParameter(1, amc.getId()).setParameter(2, customer.getId()).setParameter(3, customer.getUser().getId()).setParameter(4, sequence % 4 == 0 ? "PAYMENT_PENDING" : sequence % 3 == 0 ? "QUOTED" : "REQUESTED")
+        .setParameter(5, amc.getEndDate().plusDays(1)).setParameter(6, amc.getEndDate().plusYears(1)).setParameter(7, 18000 + sequence * 900).setParameter(8, "INR").setParameter(9, invoiceId.longValue())
+        .setParameter(10, "Seeded AMC renewal request for Ananya.").executeUpdate();
+    if (status == RequestStatus.COMPLETED) em.createNativeQuery("insert into service_request_feedback(service_request_id,customer_id,rating,comment) values (?,?,?,?)")
+        .setParameter(1, request.getId()).setParameter(2, customer.getId()).setParameter(3, sequence % 2 == 0 ? 4 : 5).setParameter(4, "Seeded feedback for completed Ananya history.").executeUpdate();
+    seedAnanyaNotification(customer.getUser().getId(), request.getTitle(), "Status: " + status.name().replace('_', ' '));
+  }
+
+  private void seedAnanyaNotification(Long userId, String title, String message) {
     em.createNativeQuery("insert into notifications(recipient_user_id,title,message,channel,status,sent_at) values (?,?,?,?,?,?)")
         .setParameter(1, userId).setParameter(2, title).setParameter(3, message).setParameter(4, "IN_APP").setParameter(5, "SENT").setParameter(6, LocalDateTime.now()).executeUpdate();
   }
