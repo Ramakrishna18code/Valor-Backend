@@ -123,6 +123,43 @@ class Phase1CommerceTest {
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "ON_THE_WAY"), 200);
     }
 
+    @Test void wrongCashOtpAttemptsPersistAndLockWithoutPayingInvoice() throws Exception {
+        Fixture f = fixture();
+        long invoiceId = call(post("/api/v1/invoices"), f.admin(), Map.of("customerProfileId", f.customerId(), "serviceRequestId", f.requestId(), "description", "Cash attempt regression", "subtotal", 1000), 200).get("id").asLong();
+        JsonNode otp = call(post("/api/v1/payments/cash/otp/request"), f.customer(), Map.of("invoiceId", invoiceId), 200);
+        long paymentId = otp.get("paymentId").asLong();
+        String code = otp.get("code").asText();
+        Map<String, Object> verification = Map.of("paymentId", paymentId, "otpId", otp.get("id").asLong(), "otp", code);
+        call(post("/api/v1/payments/cash/otp/verify"), f.customer(), verification, 403);
+        call(post("/api/v1/payments/cash/otp/verify"), technician().getUser(), verification, 403);
+        call(get("/api/v1/payments/" + paymentId + "/cash-otp"), f.technician(), null, 403);
+        assertTrue(call(get("/api/v1/technician/me/jobs/" + f.requestId() + "/payment"), f.technician(), null, 200).get("cashOtp").get("code").isNull());
+        int attempts = otp.get("attemptsRemaining").asInt();
+        for (int remaining = attempts - 1; remaining >= 0; remaining--) {
+            call(post("/api/v1/payments/cash/otp/verify"), f.technician(), Map.of("paymentId", paymentId, "otpId", otp.get("id").asLong(), "otp", "000000"), 400);
+            assertEquals(remaining, call(get("/api/v1/payments/" + paymentId + "/cash-otp"), f.customer(), null, 200).get("attemptsRemaining").asInt());
+        }
+        assertEquals("LOCKED", call(get("/api/v1/payments/" + paymentId + "/cash-otp"), f.customer(), null, 200).get("status").asText());
+        call(post("/api/v1/payments/cash/otp/verify"), f.technician(), Map.of("paymentId", paymentId, "otpId", otp.get("id").asLong(), "otp", code), 400);
+        assertEquals("PROCESSING", call(get("/api/v1/payments/" + paymentId), f.customer(), null, 200).get("status").asText());
+        assertNotEquals("PAID", call(get("/api/v1/invoices/" + invoiceId), f.customer(), null, 200).get("status").asText());
+    }
+
+    @Test void installationWithoutRegisteredLiftSupportsLocationAndSupportTickets() throws Exception {
+        User admin = user(Role.ADMIN);
+        CustomerProfile owner = customer();
+        TechnicianProfile tech = technician();
+        long requestId = call(post("/api/v1/service-requests"), owner.getUser(), Map.of("title", "New installation", "description", "No registered lift", "serviceType", "INSTALLATION"), 200).at("/request/id").asLong();
+        call(post("/api/v1/service-requests/" + requestId + "/assignments"), admin, Map.of("technicianProfileId", tech.getId()), 200);
+        for (String status : List.of("ACCEPTED", "ON_THE_WAY")) call(post("/api/v1/service-requests/" + requestId + "/status"), tech.getUser(), Map.of("toStatus", status), 200);
+        call(post("/api/v1/technician/me/jobs/" + requestId + "/location"), tech.getUser(), Map.of("latitude", 28.6, "longitude", 77.2), 200);
+        JsonNode location = call(get("/api/v1/customers/me/service-requests/" + requestId + "/technician-location"), owner.getUser(), null, 200);
+        assertEquals("SITE_LOCATION_UNAVAILABLE", location.at("/route/status").asText());
+        call(get("/api/v1/customers/me/service-requests/" + requestId + "/technician-location"), customer().getUser(), null, 403);
+        call(post("/api/v1/support-tickets"), owner.getUser(), Map.of("subject", "Installation help", "description", "QA support", "serviceRequestId", requestId), 200);
+        call(post("/api/v1/invoices"), admin, Map.of("customerProfileId", owner.getId(), "serviceRequestId", requestId, "description", "Unsupported pricing", "subtotal", 1000), 400);
+    }
+
     @Test void paymentsAndInvoicesAreCanonicalScopedAndLifecycleControlled() throws Exception {
         Fixture f = fixture();
         User other = customer().getUser();

@@ -58,7 +58,7 @@ interface CommerceAmcRepository extends JpaRepository<AmcContract, Long> {
     Optional<AmcContract> withOwner(@Param("id") Long id);
 }
 interface CommerceRequestRepository extends JpaRepository<ServiceRequest, Long> {
-    @Query("select r from ServiceRequest r join fetch r.customer c join fetch r.lift l join fetch l.building b join fetch b.customer bc join fetch bc.user where r.id=:id")
+    @Query("select r from ServiceRequest r join fetch r.customer c left join fetch r.lift l left join fetch l.building b left join fetch b.customer bc left join fetch bc.user where r.id=:id")
     Optional<ServiceRequest> withOwner(@Param("id") Long id);
 }
 interface CommerceAssignmentRepository extends JpaRepository<TechnicianAssignment, Long> {

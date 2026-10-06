@@ -1,6 +1,7 @@
 package com.valor.workflow;
 
 import com.valor.auth.*;
+import com.valor.notifications.NotificationService;
 import java.security.SecureRandom;
 import java.time.*;
 import java.util.EnumSet;
@@ -17,32 +18,38 @@ class ArrivalOtpService {
             RequestStatus.TESTING, RequestStatus.COMPLETED);
     private final ArrivalOtpRepository otps; private final RequestRepository requests; private final AssignmentRepository assignments;
     private final AssetIdentityAccess identities; private final WorkflowIdentityAccess profiles; private final PasswordEncoder encoder;
+    private final NotificationService notifications;
     private final Clock clock; private final SecureRandom random = new SecureRandom();
 
     ArrivalOtpService(ArrivalOtpRepository otps, RequestRepository requests, AssignmentRepository assignments,
-            AssetIdentityAccess identities, WorkflowIdentityAccess profiles, PasswordEncoder encoder, Clock clock) {
+            AssetIdentityAccess identities, WorkflowIdentityAccess profiles, PasswordEncoder encoder, Clock clock, NotificationService notifications) {
         this.otps = otps; this.requests = requests; this.assignments = assignments; this.identities = identities;
-        this.profiles = profiles; this.encoder = encoder; this.clock = clock;
+        this.profiles = profiles; this.encoder = encoder; this.clock = clock; this.notifications = notifications;
     }
 
     ArrivalOtpView request(Long requestId) {
         TechnicianProfile technician = profiles.technician(identities.actor());
-        ServiceRequest request = assigned(requestId, technician);
-        if (!ARRIVED_OR_LATER.contains(request.getStatus())) throw new WorkflowException(409, "Arrival OTP is available after technician arrival");
+        ServiceRequest request = assigned(requestId, technician, true);
+        if (request.getStatus() != RequestStatus.REACHED_SITE) throw new WorkflowException(409, "Start-work OTP is available after technician arrival");
         ArrivalOtp otp = new ArrivalOtp(); otp.request = request; otp.customer = request.getCustomer(); otp.technician = technician;
         String code = String.valueOf(100000 + random.nextInt(900000));
         otp.otpHash = encoder.encode(code); otp.expiresAt = LocalDateTime.now(clock).plusMinutes(10);
         otp.customerVisibleCode = code; otp.customerVisibleUntil = otp.expiresAt;
         otps.saveAndFlush(otp);
+        notifications.createSystem(request.getCustomer().getUser().getId(), "Start-work code ready",
+            "Your technician has arrived. Open service " + request.getServiceId() + " to view your start-work code. Share it only after the technician reaches your site.");
         return state(otp, false);
     }
 
+    @Transactional(noRollbackFor = WorkflowException.class)
     ArrivalOtpView verify(Long requestId, Long otpId, String code) {
         TechnicianProfile technician = profiles.technician(identities.actor());
-        assigned(requestId, technician);
+        ServiceRequest request = assigned(requestId, technician, true);
+        if (request.getStatus() != RequestStatus.REACHED_SITE) throw invalid();
         ArrivalOtp otp = otps.lockById(otpId).orElseThrow(ArrivalOtpService::invalid);
         LocalDateTime now = LocalDateTime.now(clock);
-        if (!otp.request.getId().equals(requestId) || !otp.technician.getId().equals(technician.getId()) || otp.verifiedAt != null
+        if (!otps.findTopByRequestIdOrderByCreatedAtDescIdDesc(requestId).map(latest -> latest.id.equals(otp.id)).orElse(false)) throw invalid();
+        if (!belongsToCurrentAssignment(requestId, otp) || !otp.request.getId().equals(requestId) || !otp.technician.getId().equals(technician.getId()) || otp.verifiedAt != null
                 || !otp.expiresAt.isAfter(now) || otp.attemptsRemaining <= 0 || otp.lockedUntil != null && otp.lockedUntil.isAfter(now)) throw invalid();
         if (code == null || !encoder.matches(code, otp.otpHash)) {
             otp.attemptsRemaining--;
@@ -60,21 +67,32 @@ class ArrivalOtpService {
         if (actor.getRole() == Role.CUSTOMER) {
             CustomerProfile customer = profiles.customer(actor); if (!request.getCustomer().getId().equals(customer.getId())) throw denied();
             exposeCode = ARRIVED_OR_LATER.contains(request.getStatus());
-        } else if (actor.getRole() == Role.TECHNICIAN) assigned(requestId, profiles.technician(actor));
+        } else if (actor.getRole() == Role.TECHNICIAN) assigned(requestId, profiles.technician(actor), false);
         else if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied();
         final boolean canSeeCode = exposeCode;
-        return otps.findTopByRequestIdOrderByCreatedAtDesc(requestId).map(o -> state(o, o.verifiedAt != null, canSeeCode)).orElse(null);
+        return otps.findTopByRequestIdOrderByCreatedAtDescIdDesc(requestId).filter(o -> request.getStatus() == RequestStatus.COMPLETED || belongsToCurrentAssignment(requestId, o)).map(o -> state(o, o.verifiedAt != null, canSeeCode && request.getStatus() == RequestStatus.REACHED_SITE)).orElse(null);
     }
 
     void requireVerified(Long requestId) {
-        ArrivalOtp otp = otps.findTopByRequestIdOrderByCreatedAtDesc(requestId).orElseThrow(() -> new WorkflowException(409, "Arrival OTP verification is required"));
-        if (otp.verifiedAt == null) throw new WorkflowException(409, "Arrival OTP verification is required");
+        ArrivalOtp otp = otps.findTopByRequestIdOrderByCreatedAtDescIdDesc(requestId).orElseThrow(() -> new WorkflowException(409, "Arrival OTP verification is required"));
+        if (otp.verifiedAt == null || !belongsToCurrentAssignment(requestId, otp)) throw new WorkflowException(409, "Arrival OTP verification is required");
     }
 
-    private ServiceRequest assigned(Long requestId, TechnicianProfile technician) {
-        ServiceRequest request = requests.findById(requestId).orElseThrow(ArrivalOtpService::invalid);
-        if (!assignments.existsByRequestIdAndTechnicianId(requestId, technician.getId())) throw denied();
+    private ServiceRequest assigned(Long requestId, TechnicianProfile technician, boolean write) {
+        ServiceRequest request = (write ? requests.lockById(requestId) : requests.findById(requestId)).orElseThrow(ArrivalOtpService::invalid);
+        var assignment = assignments.active(requestId).orElse(null);
+        if (assignment == null) {
+            if (!write && (request.getStatus() == RequestStatus.COMPLETED || request.getStatus() == RequestStatus.CANCELLED)
+                    && assignments.existsByRequestIdAndTechnicianId(requestId, technician.getId())) return request;
+            throw denied();
+        }
+        if (!assignment.getTechnician().getId().equals(technician.getId())) throw denied();
+        if (write && assignment.getStatus() != AssignmentStatus.ACCEPTED) throw new WorkflowException(409, "Accept your assignment before requesting or verifying a code");
         return request;
+    }
+    private boolean belongsToCurrentAssignment(Long requestId, ArrivalOtp otp) {
+        return assignments.active(requestId).map(a -> a.getTechnician().getId().equals(otp.technician.getId())
+            && !otp.createdAt.isBefore(a.getAssignedAt())).orElse(false);
     }
     private ArrivalOtpView state(ArrivalOtp otp, boolean verified) { return state(otp, verified, false); }
     private ArrivalOtpView state(ArrivalOtp otp, boolean verified, boolean exposeCode) {

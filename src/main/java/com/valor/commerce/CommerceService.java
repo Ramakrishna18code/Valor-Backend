@@ -151,6 +151,7 @@ class CommerceService {
         return cashOtpView(otp, false, true);
     }
 
+    @Transactional(noRollbackFor = CommerceException.class)
     CashPaymentOtpView verifyCashPaymentOtp(CashPaymentOtpVerify input) {
         User actor = identities.actor();
         PaymentRecord payment = payments.lockById(input.paymentId()).orElseThrow(() -> missing("Payment"));

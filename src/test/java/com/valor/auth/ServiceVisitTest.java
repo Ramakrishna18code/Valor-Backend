@@ -48,12 +48,17 @@ class ServiceVisitTest {
         return response.get("data");
     }
     private Fixture fixture() throws Exception {
+        return fixture(true);
+    }
+    private Fixture fixture(boolean registeredLift) throws Exception {
         User admin = user(Role.ADMIN), customer = user(Role.CUSTOMER), techUser = user(Role.TECHNICIAN), otherUser = user(Role.TECHNICIAN);
         CustomerProfile customerProfile = new CustomerProfile(); customerProfile.setUser(customer); customerProfile.setFullName("Visit customer"); customers.saveAndFlush(customerProfile);
         TechnicianProfile tech = technician(techUser); technician(otherUser);
         long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", customerProfile.getId(), "buildingName", "Tower"), 200).get("id").asLong();
         long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Lift"), 200).get("id").asLong();
-        long request = call(post("/api/v1/service-requests"), customer, Map.of("liftId", lift, "title", "Repair", "description", "Issue", "serviceType", "BREAKDOWN"), 200)
+        Map<String, Object> requestInput = new HashMap<>(Map.of("title", "Repair", "description", "Issue", "serviceType", registeredLift ? "BREAKDOWN" : "INSTALLATION"));
+        if (registeredLift) requestInput.put("liftId", lift);
+        long request = call(post("/api/v1/service-requests"), customer, requestInput, 200)
                 .get("request").get("id").asLong();
         call(post("/api/v1/service-requests/" + request + "/assignments"), admin, Map.of("technicianProfileId", tech.getId()), 200);
         return new Fixture(admin, customer, techUser, otherUser, request, tech.getId());
@@ -63,6 +68,24 @@ class ServiceVisitTest {
                 "scheduledDate", date, "startTime", start, "endTime", end, "notes", "Inspection");
     }
     private String visitPath(Fixture fixture) { return "/api/v1/admin/service-visits"; }
+
+    @Test void installationVisitsWithoutLiftRemainVisibleAndCanBeRescheduled() throws Exception {
+        Fixture fixture = fixture(false);
+        long id = call(post(visitPath(fixture)), fixture.admin(), visit(fixture, "2031-01-10", "10:00:00", "11:00:00"), 200).get("id").asLong();
+        for (String path : List.of("/api/v1/admin/service-visits?serviceRequestId=" + fixture.requestId(),
+                "/api/v1/technician/me/visits?fromDate=2031-01-10&toDate=2031-01-10", "/api/v1/customers/me/visits?serviceRequestId=" + fixture.requestId())) {
+            User actor = path.contains("/admin/") ? fixture.admin() : path.contains("/technician/") ? fixture.technician() : fixture.customer();
+            JsonNode items = call(get(path), actor, null, 200).get("items");
+            assertTrue(java.util.stream.StreamSupport.stream(items.spliterator(), false).anyMatch(row -> row.get("id").asLong() == id));
+        }
+        assertTrue(call(get(visitPath(fixture) + "/" + id), fixture.admin(), null, 200).get("liftId").isNull());
+        call(get("/api/v1/technician/me/visits/" + id), fixture.technician(), null, 200);
+        long changeId = call(post("/api/v1/technician/me/visits/" + id + "/reschedule-requests"), fixture.technician(),
+                Map.of("reason", "Change installation date", "requestedDate", "2031-01-11", "requestedStartTime", "10:00:00", "requestedEndTime", "11:00:00"), 200).get("id").asLong();
+        JsonNode changes = call(get("/api/v1/admin/visit-change-requests"), fixture.admin(), null, 200).get("items");
+        assertTrue(java.util.stream.StreamSupport.stream(changes.spliterator(), false).anyMatch(row -> row.get("id").asLong() == changeId));
+        assertEquals("2031-01-11", call(post("/api/v1/admin/visit-change-requests/" + changeId + "/approve"), fixture.admin(), Map.of(), 200).get("scheduledDate").asText());
+    }
 
     @Test void adminCreatesTypedVisitAndCustomerSeesSafeProjection() throws Exception {
         Fixture fixture = fixture();

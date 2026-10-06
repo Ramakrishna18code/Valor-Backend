@@ -53,7 +53,7 @@ flowchart LR
    user has permission.
 4. Start the backend:
    ```powershell
-   cd D:\RKKKK\Valor-Backend
+   cd Valor-Backend
    mvn spring-boot:run
    ```
 5. Open Swagger UI:
@@ -514,3 +514,23 @@ Phase 22 wires real backend domain events into the existing communication stack 
 Automated events currently include customer onboarding, service-request creation, admin critical service alerts, technician assignment/reassignment, service-request status changes, visit scheduling/rescheduling/cancellation, AMC creation/renewal, invoice creation, payment result, service completion/feedback, and report-ready admin broadcasts where those backend flows already exist.
 
 Automation uses the same idempotency keys, retry counters, failure reasons, provider references, and statuses from Phase 17-21. Non-mandatory messages respect channel/category preferences. Mandatory onboarding/security flows keep using the safe set-password/authentication rules and never email raw passwords. Email, SMS, MSG91 OTP, and WhatsApp providers remain mock or dormant unless explicitly activated in a later external-provider phase.
+
+## Profile photos
+
+Customers and technicians can read, upload and remove their own photo with `GET`, `POST` (multipart `file`) and `DELETE /api/v1/profile/photo`. Uploads accept JPEG/PNG up to 5 MB and 25 megapixels, then store a centered 256px JPEG. Responses contain `{ dataUri: string | null }` so protected photos render without exposing a public file URL. Other accounts cannot select or retrieve the owner's photo.
+
+Storage defaults to `./data/profile-photos`. Configure `APP_PROFILE_PHOTOS_LOCAL_ROOT` to a persistent directory in deployments; restart the updated backend before using these endpoints. No database migration is required.
+
+## Customer service verification
+
+Arrival and handover use separate six-digit codes. An accepted technician requests the arrival code at REACHED_SITE; the customer sees it in their service screen and receives an in-app notification. Diagnosis requires verified arrival. At TESTING, the technician requests the completion code; the customer receives another notification and shares it after testing. Completion requires the saved service report, checklist and verified completion code. SERVICE_COMPLETION_OTP_REQUIRED defaults to true.
+
+Codes expire after ten minutes, allow three incorrect attempts and cannot be reused after verification or resend. Reassignment invalidates verification for the former assignment. Codes are visible only to the owning customer, and are never included in notification text or technician/admin responses. SMS delivery still requires activation of an external provider; service codes are delivered in the customer app.
+
+After backend source changes, restart the running Spring Boot process to load new controllers. A server started before the profile-photo controller was built returns 404 for /api/v1/profile/photo even when the source exists.
+
+### Site location lookup
+
+Authenticated clients can call `GET /api/v1/locations/search?q=...` (3 to 200 characters) and `GET /api/v1/locations/reverse?latitude=...&longitude=...`. Responses contain a display address, coordinates, city, state and postcode. The default Nominatim provider uses explicit user searches, a 10-minute cache, a maximum of one uncached request per 1.1 seconds per server instance, bounded cache storage and provider timeouts. Requests inside the limit return a useful 429 response. `MAP_GEOCODER_URL` and `MAP_GEOCODER_USER_AGENT` configure the provider and application identification. For a deployment with multiple instances or heavier traffic, use a contracted/self-hosted provider or shared rate limiter; see https://operations.osmfoundation.org/policies/nominatim/.
+
+Building coordinates are returned on job request DTOs. Existing customer building updates validate ownership and persist the service entrance selected in the app. OTP verification never bypasses required report or checklist checks; after verification, the technician app opens guided handover and then the existing completion transition.

@@ -60,9 +60,8 @@ class TrackingService {
         if (actor.getRole() != Role.CUSTOMER) throw denied();
         ServiceRequest request = requests.withCustomer(requestId).orElseThrow(() -> missing("Service request"));
         if (!request.getCustomer().getUser().getId().equals(actor.getId())) throw denied();
-        if (!TRACKABLE.contains(request.getStatus())) throw new TrackingException(409, "Tracking is not active for this request");
-        TechnicianLatestLocation row = locations.findByServiceRequestId(requestId).orElseThrow(() -> missing("Technician location"));
-        return view(row, request);
+        if (!TRACKABLE.contains(request.getStatus())) return null;
+        return locations.findByServiceRequestId(requestId).map(row -> view(row, request)).orElse(null);
     }
 
     @Transactional(readOnly = true)
@@ -73,9 +72,8 @@ class TrackingService {
         ServiceRequest request = requests.findById(requestId).orElseThrow(() -> missing("Service request"));
         TechnicianAssignment assignment = assignments.active(requestId).orElseThrow(() -> denied());
         if (!assignment.getTechnician().getId().equals(technician.getId())) throw denied();
-        if (!TRACKABLE.contains(request.getStatus())) throw new TrackingException(409, "Tracking is not active for this job");
-        TechnicianLatestLocation row = locations.findByServiceRequestId(requestId).orElseThrow(() -> missing("Technician location"));
-        return view(row, request);
+        if (!TRACKABLE.contains(request.getStatus())) return null;
+        return locations.findByServiceRequestId(requestId).map(row -> view(row, request)).orElse(null);
     }
 
     private void saveHistory(ServiceRequest request, TechnicianProfile technician, TechnicianLatestLocation latest) {
@@ -86,6 +84,7 @@ class TrackingService {
     }
 
     private void updateGeofence(ServiceRequest request, TechnicianProfile technician, TechnicianLatestLocation latest) {
+        if (request.getLift() == null || request.getLift().getBuilding() == null) return;
         var building = request.getLift().getBuilding();
         if (building.getLatitude() == null || building.getLongitude() == null) return;
         BigDecimal distance = BigDecimal.valueOf(distanceMeters(latest.getLatitude(), latest.getLongitude(), building.getLatitude(), building.getLongitude()))
@@ -119,6 +118,8 @@ class TrackingService {
     }
 
     private RouteView route(TechnicianLatestLocation row, ServiceRequest request, boolean stale) {
+        if (request.getLift() == null || request.getLift().getBuilding() == null)
+            return new RouteView(false, null, null, "SITE_LOCATION_UNAVAILABLE", java.util.List.of());
         var building = request.getLift().getBuilding();
         if (stale) return new RouteView(false, null, null, "STALE_LOCATION", java.util.List.of());
         if (building.getLatitude() == null || building.getLongitude() == null) return new RouteView(false, null, null, "SITE_LOCATION_UNAVAILABLE", java.util.List.of());

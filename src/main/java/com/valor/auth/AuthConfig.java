@@ -33,7 +33,7 @@ class AuthConfig {
         CorsConfiguration cors = new CorsConfiguration();
         cors.setAllowedOrigins(origins);
         cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        cors.setAllowedHeaders(List.of("Content-Type", "Authorization", "Accept"));
+        cors.setAllowedHeaders(List.of("Content-Type", "Authorization", "Accept", "X-Application-Token"));
         // The API uses bearer headers, not cross-origin cookies.
         cors.setAllowCredentials(false);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -85,6 +85,8 @@ class AuthConfig {
                                 "/api/v1/support-tickets/*/status", "/api/v1/amc-renewal-requests/*/quote", "/api/v1/amc-renewal-requests/*/status")
                                 .hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/invoices").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/payments/cash/otp/verify")
+                                .hasAnyRole("TECHNICIAN", "ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/payments", "/api/v1/payments/**", "/api/v1/invoices", "/api/v1/invoices/**",
                                 "/api/v1/amc-renewal-requests", "/api/v1/amc-renewal-requests/**")
                                 .hasAnyRole("CUSTOMER", "ADMIN", "SUPER_ADMIN")

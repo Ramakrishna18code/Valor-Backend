@@ -42,5 +42,5 @@ interface ArrivalOtpRepository extends JpaRepository<ArrivalOtp, Long> {
     @Query("select o from ArrivalOtp o where o.id=:id")
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<ArrivalOtp> lockById(@Param("id") Long id);
-    Optional<ArrivalOtp> findTopByRequestIdOrderByCreatedAtDesc(Long requestId);
+    Optional<ArrivalOtp> findTopByRequestIdOrderByCreatedAtDescIdDesc(Long requestId);
 }

@@ -93,22 +93,27 @@ class Stage3WorkflowTest {
         return call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/report"), tech,
                 Map.of("diagnosis", "Diagnosed", "workPerformed", "Repaired", "testingResult", "Passed"), status);
     }
+
+    private void verifyCustomerOtp(Fixture f, String kind, User technician) throws Exception {
+        String base="/api/v1/technician/me/jobs/"+f.requestId()+"/"+kind+"-otp";
+        call(post(base+"/request"),technician,Map.of(),200);
+        JsonNode otp=call(get(path(f)+"/"+kind+"-otp"),f.customer(),null,200);
+        call(post(base+"/verify"),technician,Map.of("otpId",otp.get("id").asLong(),"otp",otp.get("code").asText()),200);
+    }
     private void reach(Fixture f, String target) throws Exception {
         if (target.equals("PENDING")) return;
-        long a = assign(f);
-        if (target.equals("ASSIGNED")) return;
-        accept(f, a, f.technician());
-        if (target.equals("ACCEPTED")) return;
-        for (String next : List.of("ON_THE_WAY", "REACHED_SITE", "DIAGNOSIS")) {
-            transition(f, f.technician(), next, "Progress", 200); if (target.equals(next)) return;
-        }
-        if (target.equals("WAITING_FOR_PARTS")) { transition(f, f.technician(), target, "Waiting", 200); return; }
-        transition(f, f.technician(), "REPAIR_IN_PROGRESS", "Repair", 200);
-        if (target.equals("REPAIR_IN_PROGRESS")) return;
-        transition(f, f.technician(), "TESTING", "Test", 200);
-        if (target.equals("TESTING")) return;
-        if (target.equals("COMPLETED")) report(f, f.technician(), 200);
-        transition(f, f.admin(), target, "Terminal reason", 200);
+        long a=assign(f); if(target.equals("ASSIGNED"))return;
+        accept(f,a,f.technician()); if(target.equals("ACCEPTED"))return;
+        transition(f,f.technician(),"ON_THE_WAY","Progress",200); if(target.equals("ON_THE_WAY"))return;
+        transition(f,f.technician(),"REACHED_SITE","Progress",200);
+        verifyCustomerOtp(f,"arrival",f.technician()); if(target.equals("REACHED_SITE"))return;
+        transition(f,f.technician(),"DIAGNOSIS","Progress",200); if(target.equals("DIAGNOSIS"))return;
+        if(target.equals("WAITING_FOR_PARTS")){transition(f,f.technician(),target,"Waiting",200);return;}
+        transition(f,f.technician(),"REPAIR_IN_PROGRESS","Repair",200); if(target.equals("REPAIR_IN_PROGRESS"))return;
+        transition(f,f.technician(),"TESTING","Test",200);
+        verifyCustomerOtp(f,"completion",f.technician()); if(target.equals("TESTING"))return;
+        if(target.equals("COMPLETED"))report(f,f.technician(),200);
+        transition(f,f.admin(),target,"Terminal reason",200);
     }
 
     @Test void v3AndHibernateValidateUseSignedCanonicalMappingsAndExactMysqlSql() throws Exception {
@@ -156,10 +161,50 @@ class Stage3WorkflowTest {
                 "title", "Breakdown", "description", "No lift should be rejected", "serviceType", "BREAKDOWN"), 400);
     }
 
-    @Test void completionOtpCodeIsCustomerVisibleOnlyWhilePendingAndClearedAfterVerify() throws Exception {
+    @Test void arrivalOtpFailuresPersistAndLockTheCodeWithoutStartingDiagnosis() throws Exception {
         Fixture f = fixture();
         long assignment = assign(f);
         accept(f, assignment, f.technician());
+        transition(f, f.technician(), "ON_THE_WAY", "Travel", 200);
+        transition(f, f.technician(), "REACHED_SITE", "Arrived", 200);
+        String base = "/api/v1/technician/me/jobs/" + f.requestId() + "/arrival-otp";
+        JsonNode requested = call(post(base + "/request"), f.technician(), Map.of(), 200);
+        assertTrue(requested.get("code").isNull());
+        String customerPath = path(f) + "/arrival-otp";
+        JsonNode customer = call(get(customerPath), f.customer(), null, 200);
+        String code = customer.get("code").asText();
+        long otpId = customer.get("id").asLong();
+        transition(f, f.technician(), "DIAGNOSIS", "Blocked", 409);
+        int attempts = customer.get("attemptsRemaining").asInt();
+        for (int remaining = attempts - 1; remaining >= 0; remaining--) {
+            call(post(base + "/verify"), f.technician(), Map.of("otpId", otpId, "otp", "000000"), 400);
+            JsonNode current = call(get(customerPath), f.customer(), null, 200);
+            assertEquals(remaining, current.get("attemptsRemaining").asInt());
+            if (remaining == 0) { assertEquals("LOCKED", current.get("status").asText()); assertTrue(current.get("code").isNull()); }
+        }
+        call(post(base + "/verify"), f.technician(), Map.of("otpId", otpId, "otp", code), 400);
+        assertEquals("REACHED_SITE", state(f));
+    }
+
+    @Test void completionOtpFailuresPersistAndLockTheCode() throws Exception {
+        Fixture f = fixture();
+        reach(f, "TESTING");
+        String base = "/api/v1/technician/me/jobs/" + f.requestId() + "/completion-otp";
+        call(post(base + "/request"), f.technician(), Map.of(), 200);
+        String customerPath = path(f) + "/completion-otp";
+        JsonNode customer = call(get(customerPath), f.customer(), null, 200);
+        int attempts = customer.get("attemptsRemaining").asInt();
+        for (int remaining = attempts - 1; remaining >= 0; remaining--) {
+            call(post(base + "/verify"), f.technician(), Map.of("otpId", customer.get("id").asLong(), "otp", "000000"), 400);
+            JsonNode current = call(get(customerPath), f.customer(), null, 200);
+            assertEquals(remaining, current.get("attemptsRemaining").asInt());
+            if (remaining == 0) assertEquals("LOCKED", current.get("status").asText());
+        }
+    }
+
+    @Test void completionOtpCodeIsCustomerVisibleOnlyWhilePendingAndClearedAfterVerify() throws Exception {
+        Fixture f = fixture();
+        reach(f, "TESTING");
         JsonNode technicianState = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/completion-otp/request"), f.technician(), Map.of(), 200);
         assertTrue(technicianState.get("code").isNull());
         JsonNode customerState = call(get("/api/v1/service-requests/" + f.requestId() + "/completion-otp"), f.customer(), null, 200);
@@ -276,7 +321,11 @@ class Stage3WorkflowTest {
         accept(f, assignment, f.technician());
         transition(f, f.technician(), "ON_THE_WAY", "Travel", 200);
         assertEquals(1, call(get("/api/v1/technician/me/dashboard"), f.technician(), null, 200).get("inProgressJobs").asLong());
-        for (String next : List.of("REACHED_SITE", "DIAGNOSIS", "REPAIR_IN_PROGRESS", "TESTING")) transition(f, f.technician(), next, "Progress", 200);
+        for (String next : List.of("REACHED_SITE", "DIAGNOSIS", "REPAIR_IN_PROGRESS", "TESTING")) {
+            transition(f, f.technician(), next, "Progress", 200);
+            if (next.equals("REACHED_SITE")) verifyCustomerOtp(f, "arrival", f.technician());
+        }
+        verifyCustomerOtp(f, "completion", f.technician());
         report(f, f.technician(), 200);
         transition(f, f.technician(), "COMPLETED", "Done", 200);
         JsonNode completed = call(get("/api/v1/technician/me/dashboard"), f.technician(), null, 200);
@@ -329,6 +378,7 @@ class Stage3WorkflowTest {
         report(f, f.technician(), 403);
         JsonNode updated = report(f, replacement.getUser(), 200);
         assertEquals(old.get("id"), updated.get("id")); assertEquals(next, updated.get("assignmentId").asLong());
+        verifyCustomerOtp(f, "completion", replacement.getUser());
         transition(f, f.admin(), "COMPLETED", "", 200);
     }
 

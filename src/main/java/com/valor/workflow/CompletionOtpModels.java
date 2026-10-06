@@ -31,7 +31,7 @@ interface CompletionOtpRepository extends JpaRepository<CompletionOtp, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<CompletionOtp> lockById(@Param("id") Long id);
     Optional<CompletionOtp> findTopByRequestIdAndVerifiedAtIsNotNullOrderByVerifiedAtDesc(Long requestId);
-    Optional<CompletionOtp> findTopByRequestIdOrderByCreatedAtDesc(Long requestId);
+    Optional<CompletionOtp> findTopByRequestIdOrderByCreatedAtDescIdDesc(Long requestId);
 }
 
 interface CompletionOtpSender {

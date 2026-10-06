@@ -309,8 +309,8 @@ public class WorkflowService {
                 actor.getRole() == Role.CUSTOMER ? null : r.getTechnicianRemarks(), r.getServiceRequestedAt(), r.getPreferredVisitDate(),
                 r.getPreferredTimeSlot(), admin ? r.getInternalAdminNotes() : null, r.getCompletedAt(), r.getEstimatedCompletionMinutes(),
                 r.getCreatedAt(), r.getUpdatedAt(), r.getCustomer().getFullName(), building == null ? null : building.getBuildingName(),
-                building == null ? null : building.getAddress(), lift == null ? null : lift.getName(), lift == null ? null : lift.getLiftNumber(),
-                technicianName);
+                building == null ? r.getCustomer().getAddress() : java.util.stream.Stream.of(building.getAddress(), building.getCity(), building.getState(), building.getPincode()).filter(v -> v != null && !v.isBlank()).distinct().collect(java.util.stream.Collectors.joining(", ")), lift == null ? null : lift.getName(), lift == null ? null : lift.getLiftNumber(),
+                technicianName, building == null ? null : building.getLatitude(), building == null ? null : building.getLongitude());
     }
     private Detail detail(ServiceRequest request, User actor) {
         var assignment = assignments.active(request.getId()).map(a -> new AssignmentView(a.getId(), request.getId(),

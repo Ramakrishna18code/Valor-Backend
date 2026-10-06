@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
-@SpringBootApplication(scanBasePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication", "com.valor.pricing"})
+@SpringBootApplication(scanBasePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication", "com.valor.pricing", "com.valor.locations"})
 @EntityScan(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication"})
 @EnableJpaRepositories(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication"})
 @EnableScheduling
