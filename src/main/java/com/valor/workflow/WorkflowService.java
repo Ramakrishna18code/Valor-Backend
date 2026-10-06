@@ -2,6 +2,7 @@ package com.valor.workflow;
 
 import com.valor.auth.*;
 import com.valor.communication.EmailEventService;
+import com.valor.notifications.NotificationService;
 import java.time.LocalDateTime;
 import java.util.*;
 import org.springframework.data.domain.*;
@@ -15,6 +16,7 @@ import static com.valor.workflow.WorkflowDtos.*;
 public class WorkflowService {
     private final RequestRepository requests;
     private final AssignmentRepository assignments;
+    private final AutoAssignTechnicianRepository autoAssignTechnicians;
     private final HistoryRepository history;
     private final ReportRepository reports;
     private final WorkflowLiftRepository lifts;
@@ -26,13 +28,14 @@ public class WorkflowService {
     private final CompletionOtpService completionOtps;
     private final ArrivalOtpService arrivalOtps;
     private final EmailEventService emails;
+    private final NotificationService notifications;
 
-    public WorkflowService(RequestRepository requests, AssignmentRepository assignments, HistoryRepository history,
+    public WorkflowService(RequestRepository requests, AssignmentRepository assignments, AutoAssignTechnicianRepository autoAssignTechnicians, HistoryRepository history,
             ReportRepository reports, WorkflowLiftRepository lifts, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
-            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps, ArrivalOtpService arrivalOtps, EmailEventService emails) {
-        this.requests = requests; this.assignments = assignments; this.history = history;
+            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps, ArrivalOtpService arrivalOtps, EmailEventService emails, NotificationService notifications) {
+        this.requests = requests; this.assignments = assignments; this.autoAssignTechnicians = autoAssignTechnicians; this.history = history;
         this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles; this.visits = visits; this.audit = audit;
-        this.checklists = checklists; this.completionOtps = completionOtps; this.arrivalOtps = arrivalOtps; this.emails = emails;
+        this.checklists = checklists; this.completionOtps = completionOtps; this.arrivalOtps = arrivalOtps; this.emails = emails; this.notifications = notifications;
     }
 
     @Transactional(readOnly=true)
@@ -137,8 +140,62 @@ public class WorkflowService {
                 "status=" + from + ",technician=" + previousTechnicianId,
                 "status=" + request.getStatus() + ",technician=" + technician.getId(), "SUCCESS");
         emails.technicianAssignment(technician.getUser().getId(), technician.getEmployeeId(), request.getId(), request.getServiceId(), request.getTitle());
+        notifications.createSystem(technician.getUser().getId(), "New job assigned",
+                "Request #" + request.getId() + " (" + request.getServiceId() + ") was assigned to you. Open Jobs to review and accept it.");
         return detail(request, actor);
     }
+
+    public AutoAssignSummary autoAssignPending() {
+        User actor = identities.actor(); admin(actor);
+        List<TechnicianProfile> available = autoAssignTechnicians.availableTechnicians();
+        List<ServiceRequest> pending = requests.findByStatusOrderByIdAsc(RequestStatus.PENDING).stream()
+                .sorted(Comparator.comparing((ServiceRequest request) -> request.getPriority() != RequestPriority.EMERGENCY)
+                        .thenComparing(ServiceRequest::getId)).toList();
+        int assigned = 0;
+        for (ServiceRequest request : pending) {
+            if (assignments.active(request.getId()).isPresent()) continue;
+            TechnicianProfile technician = available.stream()
+                    .filter(candidate -> eligibleForAutoAssignment(request, candidate))
+                    .min(Comparator.comparingInt((TechnicianProfile candidate) -> matchingScore(request, candidate))
+                            .thenComparingLong(candidate -> assignments.activeCount(candidate.getId()))
+                            .thenComparing(TechnicianProfile::getId)).orElse(null);
+            if (technician == null) continue;
+            assign(request.getId(), new AssignRequest(technician.getId(), "Auto-assigned by availability, service match, and active workload."));
+            assigned++;
+        }
+        return new AutoAssignSummary(assigned, pending.size() - assigned);
+    }
+
+    private int matchingScore(ServiceRequest request, TechnicianProfile technician) {
+        String specialization = normalize(technician.getSpecialization());
+        String service = normalize(request.getServiceType() == null ? null : request.getServiceType().name());
+        String category = normalize(request.getIssueCategory());
+        int score = 0;
+        if (!specialization.isEmpty() && ((!service.isEmpty() && specialization.contains(service))
+                || (!category.isEmpty() && specialization.contains(category)))) score -= 2;
+        String city = request.getLift() == null ? "" : normalize(request.getLift().getBuilding().getCity());
+        String area = normalize(technician.getAssignedArea());
+        if (!city.isEmpty() && !area.isEmpty() && (area.contains(city) || city.contains(area))) score--;
+        return score;
+    }
+
+    private boolean eligibleForAutoAssignment(ServiceRequest request, TechnicianProfile technician) {
+        String specialization = normalize(technician.getSpecialization());
+        String service = normalize(request.getServiceType() == null ? null : request.getServiceType().name());
+        String category = normalize(request.getIssueCategory());
+        boolean matchesService = !service.isEmpty() && (specialization.contains(service) || service.contains(specialization));
+        boolean matchesCategory = !category.isEmpty() && (specialization.contains(category) || category.contains(specialization));
+        if (!specialization.isEmpty() && !matchesService && !matchesCategory) return false;
+        String city = request.getLift() == null ? "" : normalize(request.getLift().getBuilding().getCity());
+        String area = normalize(technician.getAssignedArea());
+        return city.isEmpty() || area.isEmpty() || area.contains(city) || city.contains(area);
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
+    }
+
+    public record AutoAssignSummary(int assigned, int skipped) {}
 
     public Detail accept(Long id, Long assignmentId) {
         User actor = identities.actor();

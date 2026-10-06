@@ -29,6 +29,9 @@ class WorkflowController {
     @Operation(operationId="serviceRequestAssign")
     @PostMapping("/service-requests/{id}/assignments")
     ApiResponse<Detail> assign(@PathVariable Long id, @Valid @RequestBody AssignRequest input) { return ok(service.assign(id, input)); }
+    @Operation(operationId="autoAssignPendingServiceRequests")
+    @PostMapping("/admin/service-requests/auto-assign")
+    ApiResponse<WorkflowService.AutoAssignSummary> autoAssign() { return ok(service.autoAssignPending()); }
     @Operation(operationId="serviceRequestAccept")
     @PostMapping("/service-requests/{id}/assignments/{assignmentId}/accept")
     ApiResponse<Detail> accept(@PathVariable Long id, @PathVariable Long assignmentId) { return ok(service.accept(id, assignmentId)); }
