@@ -14,11 +14,12 @@ import static com.valor.workflow.TechnicianDtos.*;
 @RestController
 @RequestMapping("/api/v1")
 class Phase15Controller {
-    private final ChecklistService checklists; private final CompletionOtpService otps; private final ArrivalOtpService arrivalOtps;
+    private final ChecklistService checklists; private final CompletionOtpService otps; private final ArrivalOtpService arrivalOtps; private final ServiceCodeService serviceCodes;
     private final TechnicianPrivateAttachmentService privateFiles; private final WorkflowIdentityAccess profiles; private final AssetIdentityAccess identities;
     Phase15Controller(ChecklistService checklists, CompletionOtpService otps, ArrivalOtpService arrivalOtps,
-            TechnicianPrivateAttachmentService privateFiles, WorkflowIdentityAccess profiles, AssetIdentityAccess identities) {
+            TechnicianPrivateAttachmentService privateFiles, WorkflowIdentityAccess profiles, AssetIdentityAccess identities, ServiceCodeService serviceCodes) {
         this.checklists = checklists; this.otps = otps; this.arrivalOtps = arrivalOtps; this.privateFiles = privateFiles; this.profiles = profiles; this.identities = identities;
+        this.serviceCodes = serviceCodes;
     }
 
     @GetMapping("/admin/checklist-templates") ApiResponse<List<TemplateView>> templates() { return ok(checklists.templates()); }
@@ -31,12 +32,12 @@ class Phase15Controller {
     @GetMapping("/technician/me/jobs/{id}/checklist") ApiResponse<JobChecklistView> jobChecklist(@PathVariable Long id) { return ok(checklists.technicianChecklist(id)); }
     @PutMapping("/technician/me/jobs/{id}/checklist/responses") ApiResponse<JobChecklistView> saveChecklist(@PathVariable Long id, @Valid @RequestBody ResponseBatch input) { return ok(checklists.saveResponses(id, input)); }
 
-    @PostMapping("/technician/me/jobs/{id}/completion-otp/request") ApiResponse<CompletionOtpService.CompletionOtpView> requestOtp(@PathVariable Long id) { return ok(otps.request(id)); }
-    @PostMapping("/technician/me/jobs/{id}/completion-otp/verify") ApiResponse<CompletionOtpService.CompletionOtpView> verifyOtp(@PathVariable Long id, @Valid @RequestBody CompletionOtpVerifyInput input) { return ok(otps.verify(id, input.otpId(), input.otp())); }
-    @GetMapping("/service-requests/{id}/completion-otp") ApiResponse<CompletionOtpService.CompletionOtpView> otpState(@PathVariable Long id) { return ok(otps.latest(id)); }
-    @PostMapping("/technician/me/jobs/{id}/arrival-otp/request") ApiResponse<ArrivalOtpService.ArrivalOtpView> requestArrivalOtp(@PathVariable Long id) { return ok(arrivalOtps.request(id)); }
-    @PostMapping("/technician/me/jobs/{id}/arrival-otp/verify") ApiResponse<ArrivalOtpService.ArrivalOtpView> verifyArrivalOtp(@PathVariable Long id, @Valid @RequestBody CompletionOtpVerifyInput input) { return ok(arrivalOtps.verify(id, input.otpId(), input.otp())); }
-    @GetMapping("/service-requests/{id}/arrival-otp") ApiResponse<ArrivalOtpService.ArrivalOtpView> arrivalOtpState(@PathVariable Long id) { return ok(arrivalOtps.latest(id)); }
+    @PostMapping("/technician/me/jobs/{id}/completion-otp/request") ApiResponse<ServiceCodeService.CodeView> requestOtp(@PathVariable Long id) { return ok(serviceCodes.stateForRequest(id, ServiceCodeAction.COMPLETE, false)); }
+    @PostMapping("/technician/me/jobs/{id}/completion-otp/verify") ApiResponse<ServiceCodeService.CodeView> verifyOtp(@PathVariable Long id, @Valid @RequestBody CompletionOtpVerifyInput input) { return ok(serviceCodes.verify(id, ServiceCodeAction.COMPLETE, input.otp())); }
+    @GetMapping("/service-requests/{id}/completion-otp") ApiResponse<ServiceCodeService.CodeView> otpState(@PathVariable Long id) { return ok(serviceCodes.stateForRequest(id, ServiceCodeAction.COMPLETE, true)); }
+    @PostMapping("/technician/me/jobs/{id}/arrival-otp/request") ApiResponse<ServiceCodeService.CodeView> requestArrivalOtp(@PathVariable Long id) { return ok(serviceCodes.stateForRequest(id, ServiceCodeAction.START, false)); }
+    @PostMapping("/technician/me/jobs/{id}/arrival-otp/verify") ApiResponse<ServiceCodeService.CodeView> verifyArrivalOtp(@PathVariable Long id, @Valid @RequestBody CompletionOtpVerifyInput input) { return ok(serviceCodes.verify(id, ServiceCodeAction.START, input.otp())); }
+    @GetMapping("/service-requests/{id}/arrival-otp") ApiResponse<ServiceCodeService.CodeView> arrivalOtpState(@PathVariable Long id) { return ok(serviceCodes.stateForRequest(id, ServiceCodeAction.START, true)); }
 
     @GetMapping("/technician/me/private-attachments") ApiResponse<List<TechnicianPrivateAttachmentService.View>> myPrivateFiles() { return ok(privateFiles.mine()); }
     @PostMapping(value="/technician/me/private-attachments", consumes=MediaType.MULTIPART_FORM_DATA_VALUE) ApiResponse<TechnicianPrivateAttachmentService.View> uploadMine(@RequestPart("file") MultipartFile file) { return ok(privateFiles.uploadMine(file)); }
@@ -55,7 +56,7 @@ class Phase15Controller {
         if (input.assignedArea() != null) technician.setAssignedArea(input.assignedArea());
         if (input.specialization() != null) technician.setSpecialization(input.specialization());
         TechnicianMeController.applyEditable(technician, new ProfileUpdate(input.availabilityStatus(), input.profilePhotoUrl(), input.dateOfBirth(),
-                input.gender(), input.address(), input.emergencyContactName(), input.emergencyContactPhone()));
+                input.gender(), input.address(), input.emergencyContactName(), input.emergencyContactPhone(), input.latitude(), input.longitude()));
         return ok(profile(technician));
     }
 
@@ -64,14 +65,16 @@ class Phase15Controller {
         User user = p.getUser();
         return new Profile(user.getId(), p.getId(), user.getEmail(), user.getPhone(), p.getEmployeeId(),
                 p.getAssignedArea(), p.getSpecialization(), p.getAvailabilityStatus(), p.isActive(), p.getLastActiveAt(),
-                p.getProfilePhotoUrl(), p.getDateOfBirth(), p.getGender(), p.getAddress(), p.getEmergencyContactName(), p.getEmergencyContactPhone());
+                p.getProfilePhotoUrl(), p.getDateOfBirth(), p.getGender(), p.getAddress(), p.getLatitude(), p.getLongitude(), p.getEmergencyContactName(), p.getEmergencyContactPhone());
     }
     private static ResponseEntity<Resource> download(TechnicianPrivateAttachmentService.Download file) {
         return ResponseEntity.ok().contentType(MediaType.parseMediaType(file.contentType())).contentLength(file.size())
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(file.filename()).build().toString()).body(file.resource());
     }
-    record CompletionOtpVerifyInput(@jakarta.validation.constraints.NotNull Long otpId, @jakarta.validation.constraints.NotBlank String otp) {}
+    record CompletionOtpVerifyInput(Long otpId, @jakarta.validation.constraints.NotBlank String otp) {}
     record AdminTechnicianUpdate(String availabilityStatus, String assignedArea, String specialization,
             String profilePhotoUrl, java.time.LocalDate dateOfBirth, String gender, String address,
-            String emergencyContactName, String emergencyContactPhone) {}
+            String emergencyContactName, String emergencyContactPhone,
+            @jakarta.validation.constraints.DecimalMin("-90.0") @jakarta.validation.constraints.DecimalMax("90.0") java.math.BigDecimal latitude,
+            @jakarta.validation.constraints.DecimalMin("-180.0") @jakarta.validation.constraints.DecimalMax("180.0") java.math.BigDecimal longitude) {}
 }

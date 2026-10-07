@@ -72,7 +72,7 @@ class TechnicianMeController {
         User user = p.getUser();
         return new Profile(user.getId(), p.getId(), user.getEmail(), user.getPhone(), p.getEmployeeId(),
                 p.getAssignedArea(), p.getSpecialization(), p.getAvailabilityStatus(), p.isActive(), p.getLastActiveAt(),
-                p.getProfilePhotoUrl(), p.getDateOfBirth(), p.getGender(), p.getAddress(),
+                p.getProfilePhotoUrl(), p.getDateOfBirth(), p.getGender(), p.getAddress(), p.getLatitude(), p.getLongitude(),
                 p.getEmergencyContactName(), p.getEmergencyContactPhone());
     }
     static void applyEditable(TechnicianProfile profile, ProfileUpdate input) {
@@ -82,5 +82,7 @@ class TechnicianMeController {
         profile.setAddress(input.address());
         profile.setEmergencyContactName(input.emergencyContactName());
         profile.setEmergencyContactPhone(input.emergencyContactPhone());
+        profile.setLatitude(input.latitude());
+        profile.setLongitude(input.longitude());
     }
 }

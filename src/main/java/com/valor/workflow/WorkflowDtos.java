@@ -22,7 +22,9 @@ public final class WorkflowDtos {
             @Size(max = 80) String preferredTimeSlot, @Schema(description="Admin-only input. CUSTOMER submissions are rejected.") @Size(max = 2000) String internalAdminNotes,
             @PositiveOrZero Integer estimatedCompletionMinutes) implements StrictWrite {}
     public record AssignRequest(@NotNull @Positive Long technicianProfileId, @Size(max = 2000) String notes) implements StrictWrite {}
-    public record StatusRequest(@NotNull RequestStatus toStatus, @Size(max = 2000) String notes) implements StrictWrite {}
+    public record StatusRequest(@NotNull RequestStatus toStatus, @Size(max = 2000) String notes,
+            @DecimalMin("-90.0") @DecimalMax("90.0") java.math.BigDecimal startLatitude,
+            @DecimalMin("-180.0") @DecimalMax("180.0") java.math.BigDecimal startLongitude) implements StrictWrite {}
     public record ReportRequest(@NotBlank String diagnosis, @NotBlank String workPerformed,
             @NotBlank String testingResult, String completionNotes) implements StrictWrite {}
 
@@ -33,7 +35,9 @@ public final class WorkflowDtos {
             String internalAdminNotes, LocalDateTime completedAt, Integer estimatedCompletionMinutes,
             LocalDateTime createdAt, LocalDateTime updatedAt, String customerName, String buildingName,
             String buildingAddress, String liftName, String liftNumber, String technicianName,
-            java.math.BigDecimal buildingLatitude, java.math.BigDecimal buildingLongitude) {}
+            java.math.BigDecimal buildingLatitude, java.math.BigDecimal buildingLongitude,
+            java.math.BigDecimal startLatitude, java.math.BigDecimal startLongitude, LocalDateTime startedAt,
+            Integer arrivalEstimateMinutes, LocalDateTime arrivalEstimatedAt) {}
     public record AssignmentView(Long id, Long serviceRequestId, Long technicianProfileId, AssignmentStatus status,
             Long assignedByUserId, LocalDateTime assignedAt, LocalDateTime acceptedAt, LocalDateTime releasedAt,
             String notes, String technicianName) {}

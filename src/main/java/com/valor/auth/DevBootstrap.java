@@ -24,8 +24,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.HashSet;
 import java.util.EnumSet;
 import java.util.Locale;
+import java.util.Set;
 
 @Component
 @Profile("dev")
@@ -34,21 +36,62 @@ class DevBootstrap implements ApplicationRunner {
   private final EntityManager em;
   private final boolean enabled; private final String configuredEmail; private final String configuredPassword;
   private final boolean sampleDataEnabled; private final String samplePassword;
+    private final boolean pruneUsers;
   DevBootstrap(UserRepo users, PasswordEncoder encoder, EntityManager em,
       @Value("${dev.bootstrap.enabled:false}") boolean enabled,
       @Value("${dev.bootstrap.super-admin-email:}") String configuredEmail,
       @Value("${dev.bootstrap.super-admin-password:}") String configuredPassword,
       @Value("${dev.seed.sample-data-enabled:false}") boolean sampleDataEnabled,
-      @Value("${dev.seed.sample-password:}") String samplePassword){this.users=users;this.encoder=encoder;this.em=em;this.enabled=enabled;this.configuredEmail=configuredEmail;this.configuredPassword=configuredPassword;this.sampleDataEnabled=sampleDataEnabled;this.samplePassword=samplePassword;}
+      @Value("${dev.seed.sample-password:}") String samplePassword,
+      @Value("${dev.bootstrap.prune-users:false}") boolean pruneUsers){this.users=users;this.encoder=encoder;this.em=em;this.enabled=enabled;this.configuredEmail=configuredEmail;this.configuredPassword=configuredPassword;this.sampleDataEnabled=sampleDataEnabled;this.samplePassword=samplePassword;this.pruneUsers=pruneUsers;}
   @Transactional
   public void run(ApplicationArguments args){
     if (!enabled) return;
     String email=configuredEmail; String password=configuredPassword;
     if(email==null||email.isBlank()||password==null||password.isBlank()) throw new IllegalStateException("Development bootstrap requires configured environment credentials");
     email=email.trim().toLowerCase(Locale.ROOT); final String normalizedEmail=email; final String configuredPassword=password;
+    if (pruneUsers) pruneUnexpectedDevData(normalizedEmail);
     User u=users.findByEmail(normalizedEmail).orElseGet(()->{User n=new User();n.setEmail(normalizedEmail);n.setRole(Role.SUPER_ADMIN);n.setPasswordHash(encoder.encode(configuredPassword));return users.save(n);});
     if(u.getPasswordHash()==null){u.setPasswordHash(encoder.encode(configuredPassword));users.save(u);}
+    ensureSuperAdmin("rk4053727@gmail.com", configuredPassword);
     if (sampleDataEnabled) seedSampleData(u);
+  }
+
+  private void ensureSuperAdmin(String email, String password) {
+    String normalized = email.trim().toLowerCase(Locale.ROOT);
+    User user = users.findByEmail(normalized).orElseGet(() -> {
+      User created = new User(); created.setEmail(normalized); created.setRole(Role.SUPER_ADMIN); created.setPasswordHash(encoder.encode(password));
+      return users.save(created);
+    });
+    if (user.getPasswordHash() == null) { user.setPasswordHash(encoder.encode(password)); users.save(user); }
+  }
+
+  private void pruneUnexpectedDevData(String configuredAdminEmail) {
+    Set<String> allowedEmails = new HashSet<>();
+    allowedEmails.add(configuredAdminEmail);
+    allowedEmails.add("rk4053727@gmail.com");
+    allowedEmails.add("mgopichakradhar@gmail.com");
+    allowedEmails.addAll(Set.of(
+        "tech.arjun@valor.local", "tech.meera@valor.local", "tech.kabir@valor.local", "tech.nisha@valor.local", "tech.rohan@valor.local",
+        "ananya.rao@example.com", "vikram.menon@example.com", "priya.shah@example.com", "farhan.khan@example.com", "neha.iyer@example.com"));
+
+    em.createNativeQuery("SET FOREIGN_KEY_CHECKS=0").executeUpdate();
+    try {
+      @SuppressWarnings("unchecked")
+      var tables = em.createNativeQuery("select table_name from information_schema.tables where table_schema=database()").getResultList();
+      Set<String> preservedTables = Set.of("flyway_schema_history", "users", "customer_profiles", "technician_profiles", "roles", "permissions", "role_permissions");
+      for (Object table : tables) {
+        String tableName = table.toString();
+        if (!preservedTables.contains(tableName)) em.createNativeQuery("delete from `" + tableName + "`").executeUpdate();
+      }
+        em.createNativeQuery("delete from customer_profiles where user_id in (select id from users where email is null or lower(email) not in (:emails))")
+          .setParameter("emails", allowedEmails).executeUpdate();
+        em.createNativeQuery("delete from technician_profiles where user_id in (select id from users where email is null or lower(email) not in (:emails))")
+          .setParameter("emails", allowedEmails).executeUpdate();
+        em.createNativeQuery("delete from users where email is null or lower(email) not in (:emails)").setParameter("emails", allowedEmails).executeUpdate();
+    } finally {
+      em.createNativeQuery("SET FOREIGN_KEY_CHECKS=1").executeUpdate();
+    }
   }
 
   private void seedSampleData(User admin) {
@@ -71,7 +114,74 @@ class DevBootstrap implements ApplicationRunner {
     seedAnanyaCustomerDemo(admin, customers[0], technicians, password);
     for (int i=0;i<customers.length;i++) seedCustomerAssetsAndRequest(admin, customers[i], technicians[i], i+1);
     seedGopiDemoCustomer(admin, technicians, password);
-    seedArjunTechnicianDemo(admin, technicians[0], password);
+    seedParts(technicians, customers);
+  }
+
+  private void seedParts(TechnicianProfile[] technicians, CustomerProfile[] customers) {
+    String[][] categories = {
+        {"Door and Safety", "Door locks, rollers, sensors, buffers and safety components."},
+        {"Electrical and Control", "Controllers, relays, fuses, contactors and wiring."},
+        {"Mechanical and Traction", "Ropes, bearings, sheaves, guides and fasteners."},
+        {"Hydraulic Systems", "Hydraulic oil, seals, valves and power-unit parts."},
+        {"Installation Consumables", "Site consumables used during lift service and installation."}
+    };
+    for (String[] category : categories) em.createNativeQuery("insert into part_categories(name,description,is_active,created_at,updated_at) values (?,?,true,now(6),now(6)) on duplicate key update description=values(description),is_active=true")
+        .setParameter(1, category[0]).setParameter(2, category[1]).executeUpdate();
+
+    String[][] parts = {
+        {"Door and Safety", "Door interlock switch", "SAFE-DIS-001", "piece", "8", "2", "Lift door interlock replacement"},
+        {"Door and Safety", "Door roller set", "SAFE-DRS-002", "set", "5", "2", "Compatible with common center-opening doors"},
+        {"Door and Safety", "Light curtain sensor", "SAFE-LCS-003", "piece", "3", "1", "Infrared door protection sensor"},
+        {"Door and Safety", "Door clutch assembly", "SAFE-DCA-004", "piece", "2", "1", "Automatic door operator clutch"},
+        {"Door and Safety", "Safety brake switch", "SAFE-SBS-005", "piece", "6", "2", "Safety circuit brake contact"},
+        {"Electrical and Control", "Lift controller relay", "ELEC-LCR-001", "piece", "12", "4", "Control panel replacement relay"},
+        {"Electrical and Control", "Contactor 32A", "ELEC-CON-002", "piece", "10", "3", "Motor and brake contactor"},
+        {"Electrical and Control", "Control fuse 2A", "ELEC-FUS-003", "box", "18", "6", "Control circuit fuse pack"},
+        {"Electrical and Control", "Encoder coupling", "ELEC-ENC-004", "piece", "4", "1", "Encoder coupling for traction machines"},
+        {"Electrical and Control", "Emergency battery 12V", "ELEC-BAT-005", "piece", "2", "1", "Emergency lowering battery"},
+        {"Electrical and Control", "Landing push button", "ELEC-LPB-006", "piece", "7", "2", "Universal landing call button"},
+        {"Mechanical and Traction", "Traction rope 10mm", "MECH-ROP-001", "meter", "120", "40", "Lift wire rope for traction systems"},
+        {"Mechanical and Traction", "Guide shoe liner", "MECH-GSL-002", "pair", "8", "2", "Sliding guide shoe liner"},
+        {"Mechanical and Traction", "Pulley bearing", "MECH-PLB-003", "piece", "4", "1", "Traction pulley bearing"},
+        {"Mechanical and Traction", "Machine oil ISO  VG 220", "MECH-OIL-004", "liter", "24", "8", "Gearbox and machine lubrication oil"},
+        {"Mechanical and Traction", "Anti-vibration pad", "MECH-AVP-005", "set", "6", "2", "Machine base vibration isolation"},
+        {"Hydraulic Systems", "Hydraulic oil 46", "HYD-OIL-001", "liter", "40", "12", "Hydraulic lift power unit oil"},
+        {"Hydraulic Systems", "Hydraulic cylinder seal kit", "HYD-SEA-002", "kit", "2", "1", "Cylinder seal replacement kit"},
+        {"Hydraulic Systems", "Hydraulic hose 1/2 inch", "HYD-HOS-003", "meter", "18", "6", "High-pressure hydraulic hose"},
+        {"Hydraulic Systems", "Lowering valve coil", "HYD-VLV-004", "piece", "3", "1", "Emergency lowering valve coil"},
+        {"Installation Consumables", "Cable tie heavy duty", "CONS-CTH-001", "pack", "25", "8", "Electrical and shaft cable management"},
+        {"Installation Consumables", "M10 anchor bolt", "CONS-ANC-002", "box", "30", "10", "Guide rail and bracket anchoring"},
+        {"Installation Consumables", "Electrical insulation tape", "CONS-TAP-003", "roll", "40", "12", "Electrical maintenance consumable"},
+        {"Installation Consumables", "Thread locker medium", "CONS-TLK-004", "bottle", "6", "2", "Mechanical fastener locking compound"},
+        {"Installation Consumables", "Cleaning and contact spray", "CONS-SPR-005", "can", "4", "1", "Panel and contact maintenance spray"}
+    };
+    for (String[] part : parts) {
+      em.createNativeQuery("insert into part_items(category_id,name,sku,description,unit,quantity_on_hand,reorder_threshold,is_active,compatibility_metadata,version,created_at,updated_at) select id,?,?,?,?,?, ?,true,?,0,now(6),now(6) from part_categories where name=? on duplicate key update description=values(description),reorder_threshold=values(reorder_threshold),is_active=true")
+          .setParameter(1, part[1]).setParameter(2, part[2]).setParameter(3, part[6]).setParameter(4, part[3]).setParameter(5, Integer.parseInt(part[4])).setParameter(6, Integer.parseInt(part[5])).setParameter(7, part[6]).setParameter(8, part[0]).executeUpdate();
+        em.createNativeQuery("update part_items p join part_categories c on c.name=? set p.category_id=c.id where p.sku=?").setParameter(1, part[0]).setParameter(2, part[2]).executeUpdate();
+      Number itemId = (Number) em.createNativeQuery("select id from part_items where sku=?").setParameter(1, part[2]).getSingleResult();
+      if (((Number) em.createNativeQuery("select count(*) from part_stock_movements where part_item_id=? and reason=?").setParameter(1, itemId.longValue()).setParameter(2, "DEV-SEED-" + part[2]).getSingleResult()).longValue() == 0) {
+        em.createNativeQuery("insert into part_stock_movements(part_item_id,movement_type,quantity,reason,actor_user_id,created_at) values (?, 'RESTOCK', ?, ?, ?, now(6))")
+            .setParameter(1, itemId.longValue()).setParameter(2, Integer.parseInt(part[4])).setParameter(3, "DEV-SEED-" + part[2]).setParameter(4, users.findByEmail("rk4053727@gmail.com").map(User::getId).orElse(null)).executeUpdate();
+      }
+    }
+    seedPartRequest("ANANYA-SR-2026-001", technicians[0], customers[0], "DEV-SEED-ANANYA-SUBMITTED", "SUBMITTED", new String[][]{{"SAFE-DIS-001", "1"}, {"ELEC-LCR-001", "2"}});
+    seedPartRequest("ANANYA-SR-2026-002", technicians[0], customers[0], "DEV-SEED-ANANYA-REJECTED", "REJECTED", new String[][]{{"MECH-ROP-001", "12"}});
+  }
+
+  private void seedPartRequest(String serviceId, TechnicianProfile technician, CustomerProfile customer, String seedNote, String status, String[][] requestedParts) {
+    Number serviceRequestId = (Number) em.createNativeQuery("select id from service_requests where service_id=? limit 1").setParameter(1, serviceId).getResultStream().findFirst().orElse(null);
+    if (serviceRequestId == null) serviceRequestId = (Number) em.createNativeQuery("select r.id from service_requests r join customer_profiles c on c.id=r.customer_id where c.id=? order by r.id limit 1").setParameter(1, customer.getId()).getResultStream().findFirst().orElse(null);
+    if (serviceRequestId == null) return;
+    if (((Number) em.createNativeQuery("select count(*) from service_request_part_requests where notes=?").setParameter(1, seedNote).getSingleResult()).longValue() > 0) return;
+    em.createNativeQuery("insert into service_request_part_requests(service_request_id,technician_profile_id,status,notes,created_at,submitted_at,rejected_at) values (?,?,?,?,now(6),now(6),?)")
+        .setParameter(1, serviceRequestId.longValue()).setParameter(2, technician.getId()).setParameter(3, status).setParameter(4, seedNote).setParameter(5, "REJECTED".equals(status) ? LocalDateTime.now() : null).executeUpdate();
+    Number requestId = (Number) em.createNativeQuery("select id from service_request_part_requests where notes=?").setParameter(1, seedNote).getSingleResult();
+    for (String[] requestedPart : requestedParts) {
+      Number itemId = (Number) em.createNativeQuery("select id from part_items where sku=?").setParameter(1, requestedPart[0]).getSingleResult();
+      em.createNativeQuery("insert into service_request_part_lines(request_id,part_item_id,requested_quantity) values (?,?,?)").setParameter(1, requestId.longValue()).setParameter(2, itemId.longValue()).setParameter(3, Integer.parseInt(requestedPart[1])).executeUpdate();
+    }
+    em.createNativeQuery("insert into part_request_events(request_id,previous_status,new_status,actor_user_id,reason,created_at) values (?,null,?,?,?,now(6))").setParameter(1, requestId.longValue()).setParameter(2, status).setParameter(3, technician.getUser().getId()).setParameter(4, "Development seed request for " + customer.fullName).executeUpdate();
   }
 
   private CustomerProfile customer(String email,String phone,String name,String company,String address,String password) {

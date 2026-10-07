@@ -57,6 +57,7 @@ interface ReportRepository extends JpaRepository<ServiceReport, Long> {
 }
 
 interface WorkflowLiftRepository extends Repository<Lift, Long> {
+    Optional<Lift> findById(Long id);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select l from Lift l join fetch l.building b join fetch b.customer c where l.id = :id")
     Optional<Lift> forIntake(@Param("id") Long id);

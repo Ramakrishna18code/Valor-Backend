@@ -8,6 +8,7 @@ import java.util.*;
 import org.springframework.data.domain.*;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import static com.valor.workflow.WorkflowDtos.*;
 
@@ -27,15 +28,17 @@ public class WorkflowService {
     private final ChecklistService checklists;
     private final CompletionOtpService completionOtps;
     private final ArrivalOtpService arrivalOtps;
+    private final ServiceCodeService serviceCodes;
     private final EmailEventService emails;
     private final NotificationService notifications;
+    @Value("${app.location.estimate-speed-kmh:25}") private double estimateSpeedKmh;
 
     public WorkflowService(RequestRepository requests, AssignmentRepository assignments, AutoAssignTechnicianRepository autoAssignTechnicians, HistoryRepository history,
             ReportRepository reports, WorkflowLiftRepository lifts, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
-            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps, ArrivalOtpService arrivalOtps, EmailEventService emails, NotificationService notifications) {
+            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps, ArrivalOtpService arrivalOtps, ServiceCodeService serviceCodes, EmailEventService emails, NotificationService notifications) {
         this.requests = requests; this.assignments = assignments; this.autoAssignTechnicians = autoAssignTechnicians; this.history = history;
         this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles; this.visits = visits; this.audit = audit;
-        this.checklists = checklists; this.completionOtps = completionOtps; this.arrivalOtps = arrivalOtps; this.emails = emails; this.notifications = notifications;
+        this.checklists = checklists; this.completionOtps = completionOtps; this.arrivalOtps = arrivalOtps; this.serviceCodes = serviceCodes; this.emails = emails; this.notifications = notifications;
     }
 
     @Transactional(readOnly=true)
@@ -236,12 +239,19 @@ public class WorkflowService {
         if (actor.getRole() == Role.TECHNICIAN) assignment = ownedActive(request, actor);
         else { admin(actor); assignment = assignments.active(id).orElse(null); }
         RequestStatus from = request.getStatus(), to = input.toStatus();
+        if (from == to && to == RequestStatus.ON_THE_WAY) return detail(request, actor);
         if (!next(from).contains(to)) throw new WorkflowException(409, "Invalid status transition");
         if (to == RequestStatus.ASSIGNED) throw new WorkflowException(409, "Use the assignment endpoint");
         if ((to == RequestStatus.CANCELLED || to == RequestStatus.WAITING_FOR_PARTS) && blank(input.notes())) {
             throw new WorkflowException(400, "Transition notes are required");
         }
         if (to != RequestStatus.CANCELLED && assignment == null) throw conflict();
+        if (to == RequestStatus.ON_THE_WAY && request.getStartedAt() == null) {
+            request.setStartLatitude(input.startLatitude());
+            request.setStartLongitude(input.startLongitude());
+            request.setStartedAt(LocalDateTime.now());
+            calculateArrivalEstimate(request);
+        }
         if (to == RequestStatus.ACCEPTED) {
             if (assignment.getStatus() != AssignmentStatus.ASSIGNED) throw conflict();
             assignment.setStatus(AssignmentStatus.ACCEPTED); assignment.setAcceptedAt(LocalDateTime.now());
@@ -252,10 +262,10 @@ public class WorkflowService {
             ServiceReport report = reports.findByRequestId(id).orElseThrow(() -> new WorkflowException(409, "Valid report required"));
             if (!validReport(report, request, assignment)) throw new WorkflowException(409, "Valid report required");
             checklists.requireComplete(id);
-            completionOtps.requireVerified(id);
+            serviceCodes.requireVerified(id, ServiceCodeAction.COMPLETE);
             request.setCompletedAt(LocalDateTime.now()); assignment.setStatus(AssignmentStatus.COMPLETED);
         }
-        if (to == RequestStatus.DIAGNOSIS && actor.getRole() == Role.TECHNICIAN) arrivalOtps.requireVerified(id);
+        if (to == RequestStatus.DIAGNOSIS && actor.getRole() == Role.TECHNICIAN) serviceCodes.requireVerified(id, ServiceCodeAction.START);
         if (to == RequestStatus.CANCELLED && assignment != null) {
             assignment.setStatus(AssignmentStatus.RELEASED); assignment.setReleasedAt(LocalDateTime.now());
         }
@@ -268,6 +278,23 @@ public class WorkflowService {
         if (assignment != null) emails.technicianJobStatusChanged(assignment.getTechnician().getUser().getId(), assignment.getTechnician().getEmployeeId(), request.getId(), request.getServiceId(), from.name(), request.getStatus().name());
         if (to == RequestStatus.COMPLETED) emails.serviceCompleted(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(), request.getId(), request.getServiceId());
         return detail(request, actor);
+    }
+
+    private void calculateArrivalEstimate(ServiceRequest request) {
+        var lift = request.getLift();
+        var building = lift == null ? null : lift.getBuilding();
+        if (request.getStartLatitude() == null || request.getStartLongitude() == null || building == null
+                || building.getLatitude() == null || building.getLongitude() == null) return;
+        double distanceKm = haversine(request.getStartLatitude().doubleValue(), request.getStartLongitude().doubleValue(),
+                building.getLatitude().doubleValue(), building.getLongitude().doubleValue());
+        request.setArrivalEstimateMinutes((int) Math.ceil(distanceKm / estimateSpeedKmh * 60.0));
+        request.setArrivalEstimatedAt(LocalDateTime.now());
+    }
+
+    private static double haversine(double lat1, double lon1, double lat2, double lon2) {
+        double dLat = Math.toRadians(lat2 - lat1), dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return 6371.0 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     public ReportView report(Long id, ReportRequest input) {
@@ -367,7 +394,8 @@ public class WorkflowService {
                 r.getPreferredTimeSlot(), admin ? r.getInternalAdminNotes() : null, r.getCompletedAt(), r.getEstimatedCompletionMinutes(),
                 r.getCreatedAt(), r.getUpdatedAt(), r.getCustomer().getFullName(), building == null ? null : building.getBuildingName(),
                 building == null ? r.getCustomer().getAddress() : java.util.stream.Stream.of(building.getAddress(), building.getCity(), building.getState(), building.getPincode()).filter(v -> v != null && !v.isBlank()).distinct().collect(java.util.stream.Collectors.joining(", ")), lift == null ? null : lift.getName(), lift == null ? null : lift.getLiftNumber(),
-                technicianName, building == null ? null : building.getLatitude(), building == null ? null : building.getLongitude());
+                technicianName, building == null ? null : building.getLatitude(), building == null ? null : building.getLongitude(),
+                r.getStartLatitude(), r.getStartLongitude(), r.getStartedAt(), r.getArrivalEstimateMinutes(), r.getArrivalEstimatedAt());
     }
     private Detail detail(ServiceRequest request, User actor) {
         var assignment = assignments.active(request.getId()).map(a -> new AssignmentView(a.getId(), request.getId(),

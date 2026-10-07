@@ -28,12 +28,14 @@ class StaffController {
                   @Size(max=160) String specialization,
                   @Schema(allowableValues={"AVAILABLE","BUSY","OFF_DUTY","ON_LEAVE"}, example="AVAILABLE",
                           description="Required for TECHNICIAN provisioning; inapplicable for ADMIN (omit). Current runtime defaults omitted values to AVAILABLE.")
-                  String availabilityStatus) {
+                  String availabilityStatus,
+                  @DecimalMin("-90.0") @DecimalMax("90.0") java.math.BigDecimal latitude,
+                  @DecimalMin("-180.0") @DecimalMax("180.0") java.math.BigDecimal longitude) {
         @JsonAnySetter public void unknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); }
     }
     @Schema(name="StaffResponse")
     record View(Long userId, String email, @Schema(implementation=String.class,allowableValues={"ADMIN","TECHNICIAN"},example="TECHNICIAN") Role role, boolean active, Long technicianProfileId,
-                String employeeId, String assignedArea, String specialization, @Schema(allowableValues={"AVAILABLE","BUSY","OFF_DUTY","ON_LEAVE"}) String availabilityStatus) {}
+                String employeeId, String assignedArea, String specialization, @Schema(allowableValues={"AVAILABLE","BUSY","OFF_DUTY","ON_LEAVE"}) String availabilityStatus, java.math.BigDecimal latitude, java.math.BigDecimal longitude) {}
     @Operation(operationId="createStaff")
     @PostMapping ApiResponse<View> create(@Valid @RequestBody Create input) {
         return ApiResponse.success("Staff created", staff.create(input), 200);

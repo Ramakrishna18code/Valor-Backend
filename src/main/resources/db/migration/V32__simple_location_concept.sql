@@ -1,0 +1,12 @@
+alter table technician_profiles add column latitude decimal(9,6) null;
+alter table technician_profiles add column longitude decimal(9,6) null;
+alter table technician_profiles add constraint ck_technician_profile_latitude check (latitude is null or (latitude >= -90 and latitude <= 90));
+alter table technician_profiles add constraint ck_technician_profile_longitude check (longitude is null or (longitude >= -180 and longitude <= 180));
+alter table service_requests add column start_latitude decimal(9,6) null;
+alter table service_requests add column start_longitude decimal(9,6) null;
+alter table service_requests add column started_at datetime null;
+alter table service_requests add column arrival_estimate_minutes int null;
+alter table service_requests add column arrival_estimated_at datetime null;
+alter table service_requests add constraint ck_service_request_start_latitude check (start_latitude is null or (start_latitude >= -90 and start_latitude <= 90));
+alter table service_requests add constraint ck_service_request_start_longitude check (start_longitude is null or (start_longitude >= -180 and start_longitude <= 180));
+alter table service_requests add constraint ck_service_request_arrival_estimate check (arrival_estimate_minutes is null or arrival_estimate_minutes >= 0);

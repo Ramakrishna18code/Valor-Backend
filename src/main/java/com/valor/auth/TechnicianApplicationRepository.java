@@ -8,6 +8,7 @@ interface TechnicianApplicationRepository extends JpaRepository<TechnicianApplic
     Optional<TechnicianApplication> findByTokenHash(String tokenHash);
     Page<TechnicianApplication> findAllByOrderByCreatedAtDesc(Pageable pageable);
     boolean existsByEmailIgnoreCaseAndStatusIn(String email, Collection<String> statuses);
+    Optional<TechnicianApplication> findByEmailIgnoreCase(String email);
 }
 
 interface TechnicianApplicationDocumentRepository extends JpaRepository<TechnicianApplicationDocument, Long> {

@@ -13,6 +13,12 @@ It covers:
 - Swagger/OpenAPI documentation
 - MySQL persistence with JPA
 
+## Service Verification and Locations
+
+Service verification uses one cryptographically generated code per customer-owned lift. The code is stored as a BCrypt hash plus encrypted display ciphertext, is not derived from identity data, and rotates through the customer lift service-code endpoint. START and COMPLETE remain separate workflow authorizations with independent request/technician/action audit rows and three failed-attempt locks. Installation requests without a lift do not require this code. Authentication OTP and cash-payment OTP remain separate systems.
+
+Building create/update DTOs require both latitude and longitude with valid ranges. Existing production NULL coordinates must be audited before applying a future database NOT NULL migration; no synthetic property coordinates are backfilled.
+
 ## Architecture
 The backend follows a layered Spring Boot architecture:
 
@@ -534,3 +540,6 @@ After backend source changes, restart the running Spring Boot process to load ne
 Authenticated clients can call `GET /api/v1/locations/search?q=...` (3 to 200 characters) and `GET /api/v1/locations/reverse?latitude=...&longitude=...`. Responses contain a display address, coordinates, city, state and postcode. The default Nominatim provider uses explicit user searches, a 10-minute cache, a maximum of one uncached request per 1.1 seconds per server instance, bounded cache storage and provider timeouts. Requests inside the limit return a useful 429 response. `MAP_GEOCODER_URL` and `MAP_GEOCODER_USER_AGENT` configure the provider and application identification. For a deployment with multiple instances or heavier traffic, use a contracted/self-hosted provider or shared rate limiter; see https://operations.osmfoundation.org/policies/nominatim/.
 
 Building coordinates are returned on job request DTOs. Existing customer building updates validate ownership and persist the service entrance selected in the app. OTP verification never bypasses required report or checklist checks; after verification, the technician app opens guided handover and then the existing completion transition.
+## Location model
+
+Valor uses permanent building coordinates, private technician default/profile coordinates, and one immutable technician job-start location (`startLatitude`, `startLongitude`, `startedAt`). Arrival estimates are backend-authoritative and static; they use a simple configured estimate speed and the building point, without routing providers. Technician navigation opens external Google Maps. Continuous foreground/background tracking, live customer markers, geofences, polylines, and dynamic route ETA are not part of the active product flow.

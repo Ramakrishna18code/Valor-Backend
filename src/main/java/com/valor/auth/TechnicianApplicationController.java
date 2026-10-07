@@ -25,5 +25,6 @@ class TechnicianApplicationController {
     record Create(@NotBlank @Size(max=160) String fullName,@NotBlank @Email String email,@NotBlank @Size(max=20) String phone,@NotBlank @Size(max=72) String password) implements StrictInput {}
     record Otp(@NotBlank @Size(min=4,max=4) String otp) implements StrictInput {}
     record Update(String experience,String specialization,String liftBrands,String certifications,String highestQualification,String handsOnExperience,String preferredLocations,Boolean willingToWorkAtHeights,String travelAvailability,String additionalNotes,String aadhaarNumber,String drivingLicenseNumber) implements StrictInput {}
+    record Meeting(@NotBlank String mode, java.time.LocalDateTime meetingAt, String meetingUrl, String meetingPhone, String meetingLocation, @jakarta.validation.constraints.DecimalMin("-90") @jakarta.validation.constraints.DecimalMax("90") java.math.BigDecimal meetingLatitude, @jakarta.validation.constraints.DecimalMin("-180") @jakarta.validation.constraints.DecimalMax("180") java.math.BigDecimal meetingLongitude, String meetingMapUrl, String notes) implements StrictInput {}
     interface StrictInput { @JsonAnySetter default void rejectUnknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); } }
 }

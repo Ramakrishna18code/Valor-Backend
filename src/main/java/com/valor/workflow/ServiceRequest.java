@@ -53,4 +53,9 @@ public class ServiceRequest extends AssetRecord {
     private LocalDateTime completedAt;
     @Column(name = "estimated_completion_minutes", nullable = true)
     private Integer estimatedCompletionMinutes;
+    @Column(name = "start_latitude", precision = 9, scale = 6) private java.math.BigDecimal startLatitude;
+    @Column(name = "start_longitude", precision = 9, scale = 6) private java.math.BigDecimal startLongitude;
+    @Column(name = "started_at") private LocalDateTime startedAt;
+    @Column(name = "arrival_estimate_minutes") private Integer arrivalEstimateMinutes;
+    @Column(name = "arrival_estimated_at") private LocalDateTime arrivalEstimatedAt;
 }

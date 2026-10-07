@@ -19,6 +19,8 @@ public class TechnicianProfile {
     @Column(name = "date_of_birth") LocalDate dateOfBirth;
     @Column(length = 40) String gender;
     @Column(length = 500) String address;
+    @Column(precision = 9, scale = 6) java.math.BigDecimal latitude;
+    @Column(precision = 9, scale = 6) java.math.BigDecimal longitude;
     @Column(name = "emergency_contact_name", length = 160) String emergencyContactName;
     @Column(name = "emergency_contact_phone", length = 20) String emergencyContactPhone;
     @Column(name = "is_active", nullable = false) boolean active = true;
@@ -40,6 +42,8 @@ public class TechnicianProfile {
     public LocalDate getDateOfBirth() { return dateOfBirth; }
     public String getGender() { return gender; }
     public String getAddress() { return address; }
+    public java.math.BigDecimal getLatitude() { return latitude; }
+    public java.math.BigDecimal getLongitude() { return longitude; }
     public String getEmergencyContactName() { return emergencyContactName; }
     public String getEmergencyContactPhone() { return emergencyContactPhone; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
@@ -50,6 +54,8 @@ public class TechnicianProfile {
     public void setDateOfBirth(LocalDate value) { dateOfBirth = value; }
     public void setGender(String value) { gender = clean(value, 40); }
     public void setAddress(String value) { address = clean(value, 500); }
+    public void setLatitude(java.math.BigDecimal value) { latitude = value; }
+    public void setLongitude(java.math.BigDecimal value) { longitude = value; }
     public void setEmergencyContactName(String value) { emergencyContactName = clean(value, 160); }
     public void setEmergencyContactPhone(String value) { emergencyContactPhone = clean(value, 20); }
     public void setAssignedArea(String value) { assignedArea = clean(value, 160); }
