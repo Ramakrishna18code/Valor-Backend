@@ -14,6 +14,10 @@ enum JobChecklistStatus { IN_PROGRESS, COMPLETED }
 @Entity
 @Table(name = "checklist_templates")
 class ChecklistTemplate {
+    public Long getId() { return id; }
+    public String getName() { return name; }
+    public int getVersion() { return version; }
+    public void incrementVersion() { version++; }
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY) Long id;
     @Column(nullable = false, length = 160) String name;
     @Column(length = 1000) String description;
@@ -33,6 +37,7 @@ class ChecklistTemplate {
 @Entity
 @Table(name = "checklist_items")
 class ChecklistItem {
+    public Long getId() { return id; }
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY) Long id;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "template_id") ChecklistTemplate template;
     @Column(nullable = false, length = 255) String label;

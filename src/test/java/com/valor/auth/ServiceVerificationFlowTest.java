@@ -76,6 +76,19 @@ class ServiceVerificationFlowTest {
         long request = call(post("/api/v1/service-requests"), customer, creation(lift), 200).at("/request/id").asLong();
         return new Fixture(admin, customer, tech.getUser(), owner.getId(), tech.getId(), lift, request);
     }
+    @Test void checklistSurvivesSeparateReadSaveAndReloadTransactions() throws Exception {
+        Fixture f=fixture();assign(f);
+        long template=call(post("/api/v1/admin/checklist-templates"),f.admin(),Map.of("name","Required safety checks","active",true,"serviceTypes",List.of("BREAKDOWN")),200).get("id").asLong();
+        long item=call(post("/api/v1/admin/checklist-templates/"+template+"/items"),f.admin(),Map.of("label","Safety test","required",true,"inputType","CHECKBOX"),200).get("id").asLong();
+        String checklistPath="/api/v1/technician/me/jobs/"+f.requestId()+"/checklist";
+        JsonNode first=call(get(checklistPath),f.technician(),null,200);
+        assertEquals(template,first.get("templateId").asLong());assertEquals(1,first.get("requiredTotal").asInt());
+        JsonNode again=call(get(checklistPath),f.technician(),null,200);
+        assertEquals("Required safety checks",again.get("templateName").asText());assertEquals(1,again.get("items").size());
+        call(put(checklistPath+"/responses"),f.technician(),Map.of("responses",List.of(Map.of("itemId",item,"checked",true))),200);
+        JsonNode saved=call(get(checklistPath),f.technician(),null,200);
+        assertEquals("COMPLETED",saved.get("status").asText());assertEquals(1,saved.get("requiredCompleted").asInt());assertEquals(item,saved.get("responses").get(0).get("itemId").asLong());
+    }
     @Test void locationEndpointsAreRegisteredAndValidateInput() throws Exception {
         User customer=user(Role.CUSTOMER);
         CustomerProfile owner=new CustomerProfile();owner.setUser(customer);owner.setFullName("Location QA");customers.saveAndFlush(owner);

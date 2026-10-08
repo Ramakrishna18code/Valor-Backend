@@ -41,22 +41,22 @@ class ChecklistService {
         ChecklistItem item = new ChecklistItem(); item.template = t; apply(item, input); t.version++; return itemView(items.saveAndFlush(item));
     }
     ItemView updateItem(Long templateId, Long itemId, ItemWrite input) {
-        admin(); ChecklistItem item = item(templateId, itemId); apply(item, input); item.template.version++; return itemView(item);
+        admin(); ChecklistItem item = item(templateId, itemId); apply(item, input); item.template.incrementVersion(); return itemView(item);
     }
     void deleteItem(Long templateId, Long itemId) {
-        admin(); ChecklistItem item = item(templateId, itemId); item.template.version++; items.delete(item);
+        admin(); ChecklistItem item = item(templateId, itemId); item.template.incrementVersion(); items.delete(item);
     }
     JobChecklistView technicianChecklist(Long requestId) {
         User actor = identities.actor(); TechnicianProfile technician = profiles.technician(actor);
         ServiceRequest request = technicianRequest(requestId, technician);
-        return jobs.findByRequestId(requestId).or(() -> createJobChecklist(request)).map(this::jobView).orElse(null);
+        return jobs.findByRequestId(requestId).or(() -> createJobChecklist(request)).map(job -> { refreshStatus(job); return jobView(job); }).orElse(null);
     }
     JobChecklistView saveResponses(Long requestId, ResponseBatch input) {
         User actor = identities.actor(); TechnicianProfile technician = profiles.technician(actor);
         technicianRequest(requestId, technician);
         JobChecklist job = jobs.findByRequestId(requestId).orElseThrow(ChecklistService::missing);
         Map<Long, ChecklistItem> allowed = new HashMap<>();
-        for (ChecklistItem item : items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.id)) allowed.put(item.id, item);
+        for (ChecklistItem item : items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId())) allowed.put(item.id, item);
         for (ResponseWrite write : Optional.ofNullable(input.responses()).orElse(List.of())) {
             ChecklistItem item = allowed.get(write.itemId());
             if (item == null) throw new WorkflowException(400, "Invalid checklist item");
@@ -78,14 +78,14 @@ class ChecklistService {
     private Optional<JobChecklist> createJobChecklist(ServiceRequest request) {
         List<ChecklistTemplate> matches = templates.activeFor(request.getServiceType(), PageRequest.of(0, 1));
         if (matches.isEmpty()) return Optional.empty();
-        JobChecklist job = new JobChecklist(); job.request = request; job.template = matches.get(0); job.templateVersion = job.template.version;
+        JobChecklist job = new JobChecklist(); job.request = request; job.template = matches.get(0); job.templateVersion = job.template.getVersion();
         visits.activeForRequest(request.getId(), List.of(VisitStatus.SCHEDULED, VisitStatus.IN_PROGRESS)).stream().findFirst().ifPresent(v -> job.visit = v);
         return Optional.of(jobs.saveAndFlush(job));
     }
     private void refreshStatus(JobChecklist job) {
-        List<ChecklistItem> required = items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.id).stream().filter(i -> i.required).toList();
+        List<ChecklistItem> required = items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId()).stream().filter(i -> i.required).toList();
         Map<Long, ChecklistResponse> byItem = new HashMap<>();
-        for (ChecklistResponse r : responses.findByChecklistId(job.id)) byItem.put(r.item.id, r);
+        for (ChecklistResponse r : responses.findByChecklistId(job.id)) byItem.put(r.item.getId(), r);
         boolean complete = required.stream().allMatch(i -> {
             ChecklistResponse r = byItem.get(i.id);
             return r != null && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank());
@@ -109,18 +109,18 @@ class ChecklistService {
     }
     private ChecklistItem item(Long templateId, Long itemId) {
         ChecklistItem item = items.findById(itemId).orElseThrow(ChecklistService::missing);
-        if (!item.template.id.equals(templateId)) throw missing(); return item;
+        if (!item.template.getId().equals(templateId)) throw missing(); return item;
     }
     private TemplateView view(ChecklistTemplate t) { return new TemplateView(t.id, t.name, t.description, t.active, t.serviceTypes, t.version, items.findByTemplateIdOrderBySortOrderAscIdAsc(t.id).stream().map(this::itemView).toList(), t.createdAt, t.updatedAt); }
-    private ItemView itemView(ChecklistItem i) { return new ItemView(i.id, i.template.id, i.label, i.description, i.required, i.sortOrder, i.inputType); }
+    private ItemView itemView(ChecklistItem i) { return new ItemView(i.id, i.template.getId(), i.label, i.description, i.required, i.sortOrder, i.inputType); }
     private JobChecklistView jobView(JobChecklist job) {
-        List<ChecklistItem> itemRows = items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.id);
+        List<ChecklistItem> itemRows = items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId());
         List<ChecklistResponse> responseRows = responses.findByChecklistId(job.id);
         int required = (int)itemRows.stream().filter(i -> i.required).count();
-        int done = (int)itemRows.stream().filter(i -> i.required).filter(i -> responseRows.stream().anyMatch(r -> r.item.id.equals(i.id) && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank()))).count();
-        return new JobChecklistView(job.id, job.request.getId(), job.visit == null ? null : job.visit.getId(), job.template.id, job.template.name,
+        int done = (int)itemRows.stream().filter(i -> i.required).filter(i -> responseRows.stream().anyMatch(r -> r.item.getId().equals(i.id) && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank()))).count();
+        return new JobChecklistView(job.id, job.request.getId(), job.visit == null ? null : job.visit.getId(), job.template.getId(), job.template.getName(),
                 job.templateVersion, job.status, required, done, itemRows.stream().map(this::itemView).toList(),
-                responseRows.stream().map(r -> new ResponseView(r.item.id, r.checked, r.valueText, r.technician.getId(), r.respondedAt)).toList(), job.updatedAt);
+                responseRows.stream().map(r -> new ResponseView(r.item.getId(), r.checked, r.valueText, r.technician.getId(), r.respondedAt)).toList(), job.updatedAt);
     }
     private void admin() { User actor = identities.actor(); if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied(); }
     private static String clean(String value, int max) { if (value == null || value.isBlank()) return null; String v = value.trim(); return v.length() > max ? v.substring(0, max) : v; }
