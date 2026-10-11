@@ -8,6 +8,12 @@ All paths below have prefix `/api/v1`. Success is HTTP 200 with `ApiResponse<T>`
 
 Default port: 8081. Swagger: /swagger-ui.html. OpenAPI: /v3/api-docs. Public health: GET /api/v1/health with data.status=UP. Other routes require authentication except register, login, OTP send/verify and refresh. Runtime configuration is unchanged: Flyway enabled, Hibernate validate, SQL initialization disabled; local development may load optional `.env` values through Spring config import, while production requires external credentials and never enables development bootstrap.
 
+## Persistent Lift Service Code
+
+`GET /customers/me/lifts/{liftId}/service-code` and `POST /customers/me/lifts/{liftId}/service-code/regenerate` are scoped to the authenticated owner. Service-request arrival/completion URLs remain compatible shims, but verification uses the same lift-owned code with separate START and COMPLETE audit records. Codes do not expire or regenerate per assignment. Verification is limited to the assigned technician, matching request lift and workflow state, with three failed attempts per action. Installation requests without a lift bypass this requirement. Attempt counters, hashes, expiry metadata, and raw codes are not exposed to customers or Admin users.
+
+Building create/update payloads require non-null `latitude` and `longitude` within `[-90,90]` and `[-180,180]`. Database NOT NULL enforcement is deferred until existing NULL rows are safely audited.
+
 ## Authentication and identity
 
 | Method/path | Input | Data DTO / behavior |
@@ -629,3 +635,12 @@ Automated event coverage is limited to existing backend flows: customer created/
 Delivery records continue to use `communication_events` and `communication_messages`; there is no second status table. Preference filtering, template rendering, retry/failure handling, provider reference storage, masked logging, and duplicate prevention reuse the Phase 17-21 contracts. External providers are not activated by Phase 22, and API responses never expose provider secrets.
 
 No new client-visible provider configuration API is added. Admin visibility remains the existing `/api/v1/admin/communications/**` surface.
+## Simple location concept
+
+Building views and customer building create/update requests use the canonical nullable `latitude` and `longitude` fields. They are saved only during building create/edit and are reused by lifts and service requests.
+
+Technician profile views and profile update requests expose nullable `latitude` and `longitude` for a saved default/home location. This location is private to operational/admin views and is never returned to customers.
+
+The existing `POST /service-requests/{id}/status` contract accepts optional `startLatitude` and `startLongitude` when moving a technician job to `ON_THE_WAY`. The backend writes `startedAt` authoritatively once, ignores repeat same-state calls, and calculates a static `arrivalEstimateMinutes` from the start point and building point when both are available. No routing provider is called.
+
+The former job live-location endpoints and route/geofence/ETA response are retained only for compatibility during migration and are not used by active clients. Customers receive status, building coordinates, and a static estimate only; technician home coordinates remain private.

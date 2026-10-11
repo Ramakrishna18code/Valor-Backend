@@ -28,9 +28,9 @@ public class Building extends AssetRecord {
     private String state;
     @Column(name = "pincode", nullable = true, length = 20)
     private String pincode;
-    @Column(name = "latitude", nullable = true, precision = 9, scale = 6)
+    @Column(name = "latitude", nullable = false, precision = 9, scale = 6)
     private BigDecimal latitude;
-    @Column(name = "longitude", nullable = true, precision = 9, scale = 6)
+    @Column(name = "longitude", nullable = false, precision = 9, scale = 6)
     private BigDecimal longitude;
     @Column(name = "emergency_contact_name", nullable = true, length = 160)
     private String emergencyContactName;

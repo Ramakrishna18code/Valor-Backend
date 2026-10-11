@@ -344,6 +344,9 @@ public class AssetService {
     }
 
     private void apply(Building entity, BuildingWrite input) {
+        if (input.latitude() == null || input.longitude() == null) {
+            throw new AssetException(400, "Building latitude and longitude are required");
+        }
         entity.setBuildingName(input.buildingName());
         entity.setBuildingType(input.buildingType());
         entity.setAddress(input.address());

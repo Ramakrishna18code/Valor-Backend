@@ -413,7 +413,8 @@ class Stage3WorkflowTest {
             int before = events(f);
             List<Map<String,Object>> assignments = db.queryForList("select id,status,accepted_at,released_at from technician_assignments where service_request_id=? order by id", f.requestId());
             for (RequestStatus next : RequestStatus.values()) if (!entry.getValue().contains(next.name())) {
-                transition(f, f.admin(), next.name(), "Reason", 409);
+                int expectedStatus = entry.getKey().equals("ON_THE_WAY") && next == RequestStatus.ON_THE_WAY ? 200 : 409;
+                transition(f, f.admin(), next.name(), "Reason", expectedStatus);
                 assertEquals(entry.getKey(), state(f)); assertEquals(before, events(f));
                 assertEquals(assignments, db.queryForList("select id,status,accepted_at,released_at from technician_assignments where service_request_id=? order by id", f.requestId()));
             }

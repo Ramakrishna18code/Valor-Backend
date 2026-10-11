@@ -37,7 +37,7 @@ class ArrivalOtpService {
         otp.customerVisibleCode = code; otp.customerVisibleUntil = otp.expiresAt;
         otps.saveAndFlush(otp);
         notifications.createSystem(request.getCustomer().getUser().getId(), "Start-work code ready",
-            "Your technician has arrived. Open service " + request.getServiceId() + " to view your start-work code. Share it only after the technician reaches your site.");
+            "Your technician has arrived. Open request #" + request.getId() + " to view your start-work code. Share it only after the technician reaches your site.");
         return state(otp, false);
     }
 
@@ -70,7 +70,7 @@ class ArrivalOtpService {
         } else if (actor.getRole() == Role.TECHNICIAN) assigned(requestId, profiles.technician(actor), false);
         else if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied();
         final boolean canSeeCode = exposeCode;
-        return otps.findTopByRequestIdOrderByCreatedAtDescIdDesc(requestId).filter(o -> request.getStatus() == RequestStatus.COMPLETED || belongsToCurrentAssignment(requestId, o)).map(o -> state(o, o.verifiedAt != null, canSeeCode && request.getStatus() == RequestStatus.REACHED_SITE)).orElse(null);
+        return otps.findTopByRequestIdOrderByCreatedAtDescIdDesc(requestId).filter(o -> request.getStatus() == RequestStatus.COMPLETED || belongsToCurrentAssignment(requestId, o)).map(o -> state(o, o.verifiedAt != null, canSeeCode)).orElse(null);
     }
 
     void requireVerified(Long requestId) {

@@ -71,7 +71,7 @@ class ServiceVerificationFlowTest {
         CustomerProfile owner = new CustomerProfile(); owner.setUser(customer); owner.setFullName("Workflow customer");
         customers.saveAndFlush(owner);
         TechnicianProfile tech = technician();
-        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "Tower"), 200).get("id").asLong();
+        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "Tower", "latitude", 17.385044, "longitude", 78.486671), 200).get("id").asLong();
         long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Lift"), 200).get("id").asLong();
         long request = call(post("/api/v1/service-requests"), customer, creation(lift), 200).at("/request/id").asLong();
         return new Fixture(admin, customer, tech.getUser(), owner.getId(), tech.getId(), lift, request);

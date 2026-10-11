@@ -14,5 +14,9 @@ class TechnicianApplicationDocument {
     @Column(name = "file_size", nullable = false) Long fileSize;
     @Column(name = "storage_key", nullable = false, unique = true, length = 500) String storageKey;
     @Column(name = "created_at", nullable = false) LocalDateTime createdAt;
+    @Column(name = "review_status", nullable = false, length = 20) String reviewStatus = "PENDING";
+    @Column(name = "reviewer_user_id") Long reviewerUserId;
+    @Column(name = "review_reason", length = 1000) String reviewReason;
+    @Column(name = "reviewed_at") LocalDateTime reviewedAt;
     @PrePersist void create() { createdAt = LocalDateTime.now(); }
 }

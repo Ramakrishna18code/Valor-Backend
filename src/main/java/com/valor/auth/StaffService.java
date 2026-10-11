@@ -45,6 +45,7 @@ class StaffService {
         if(input.role()==Role.TECHNICIAN) {
             profile=new TechnicianProfile(); profile.user=user; profile.employeeId=optional(input.employeeId());
             profile.assignedArea=optional(input.assignedArea()); profile.specialization=optional(input.specialization()); profile.availabilityStatus=availability;
+            profile.setLatitude(input.latitude()); profile.setLongitude(input.longitude());
             technicians.saveAndFlush(profile);
         }
         StaffController.View result=view(user,profile);
@@ -75,7 +76,8 @@ class StaffService {
     private String setPasswordUrl(String token) { return setPasswordBaseUrl + (setPasswordBaseUrl.contains("?") ? "&" : "?") + "token=" + token; }
     private StaffController.View view(User user, TechnicianProfile profile) {
         return new StaffController.View(user.getId(),user.getEmail(),user.getRole(),user.isActive(),profile==null?null:profile.id,
-            profile==null?null:profile.employeeId,profile==null?null:profile.assignedArea,profile==null?null:profile.specialization,profile==null?null:profile.availabilityStatus);
+            profile==null?null:profile.employeeId,profile==null?null:profile.assignedArea,profile==null?null:profile.specialization,profile==null?null:profile.availabilityStatus,
+            profile==null?null:profile.getLatitude(), profile==null?null:profile.getLongitude());
     }
 }
 class StaffNotFoundException extends RuntimeException {}

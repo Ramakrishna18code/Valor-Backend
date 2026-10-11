@@ -21,7 +21,7 @@ class TechnicianApplicationSecurityTest {
     @Test void productionAndDefaultProfilesRejectDevelopmentOtp() {
         for (String[] profiles : new String[][] {{"prod"}, {"dev", "prod"}, {}}) {
             var env = new MockEnvironment(); env.setActiveProfiles(profiles);
-            var guarded = new TechnicianApplicationService(null, null, null, null, null, null, null, env);
+            var guarded = new TechnicianApplicationService(null, null, null, null, null, null, null, env, null);
             assertThrows(IllegalArgumentException.class, () -> guarded.sendOtp(1L, "token"));
             assertThrows(IllegalArgumentException.class, () -> guarded.verifyOtp(1L, "token", "1111"));
         }
@@ -62,6 +62,19 @@ class TechnicianApplicationSecurityTest {
     @Test void applicationTokenIsRequiredForPrivateData() {
         var created = draft();
         assertThrows(org.springframework.security.access.AccessDeniedException.class, () -> service.read(created.application().id(), "wrong-token"));
+    }
+
+    @Test void documentCorrectionsRemainAvailableUntilVerification() {
+        var created = draft(); var id = created.application().id(); var token = created.applicationToken();
+        var sent = service.sendOtp(id, token); service.verifyOtp(id, token, sent.otp());
+        var file = new org.springframework.mock.web.MockMultipartFile("file", "document.pdf", "application/pdf", "%PDF-1.4 test".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        for (String state : new String[] {"DOCUMENTS_PENDING", "DOCUMENTS_REJECTED"}) {
+            var row = applications.findById(id).orElseThrow(); row.status = state; applications.saveAndFlush(row);
+            assertEquals("PENDING", service.uploadDocument(id, token, "PROFILE_PHOTO", file).reviewStatus());
+            assertEquals("DOCUMENTS_PENDING", applications.findById(id).orElseThrow().status);
+        }
+        var row = applications.findById(id).orElseThrow(); row.status = "DOCUMENTS_VERIFIED"; applications.saveAndFlush(row);
+        assertThrows(IllegalArgumentException.class, () -> service.uploadDocument(id, token, "PROFILE_PHOTO", file));
     }
 
     @Test void documentCannotImpersonateAnAllowedType() {

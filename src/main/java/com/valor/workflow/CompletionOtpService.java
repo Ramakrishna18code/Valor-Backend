@@ -34,7 +34,7 @@ class CompletionOtpService {
         otp.customerVisibleCode = code; otp.customerVisibleUntil = otp.expiresAt;
         otps.saveAndFlush(otp);
         notifications.createSystem(request.getCustomer().getUser().getId(), "Completion code ready",
-            "Your technician is ready for handover. Open service " + request.getServiceId() + " to view your completion code. Share it only after the work is finished."); sender.sendCompletionOtp(request, code);
+            "Your technician is ready for handover. Open request #" + request.getId() + " to view your completion code. Share it only after the work is finished."); sender.sendCompletionOtp(request, code);
         return state(otp, false);
     }
     @Transactional(noRollbackFor = WorkflowException.class)

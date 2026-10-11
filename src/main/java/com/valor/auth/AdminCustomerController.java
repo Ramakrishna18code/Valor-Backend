@@ -41,7 +41,7 @@ class AdminCustomerController {
     record StateRequest(@Size(max=2000) String reason) {
         @JsonAnySetter public void unknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); }
     }
-    record BuildingSummary(Long id, String buildingName, String buildingType, String city, String buildingPreference, String status, boolean isActive) {}
+    record BuildingSummary(Long id, String buildingName, String buildingType, String city, String buildingPreference, String status, boolean isActive, java.math.BigDecimal latitude, java.math.BigDecimal longitude) {}
     record LiftSummary(Long id, Long buildingId, String name, String liftNumber, String currentStatus, boolean isActive) {}
     record AdminCustomerDetail(Long id, Long userId, Long customerProfileId, String email, String phone, String fullName,
             Boolean hasLift, String referralCode,
@@ -136,7 +136,7 @@ class AdminCustomerService {
     private AdminCustomerController.AdminCustomerDetail view(CustomerProfile profile) {
         Long id=profile.id;
         var buildings=em.createQuery("select b from Building b where b.customer.id=:id order by b.id", com.valor.assets.Building.class).setParameter("id", id).setMaxResults(25).getResultList().stream()
-            .map(b -> new AdminCustomerController.BuildingSummary(b.getId(), b.getBuildingName(), b.getBuildingType(), b.getCity(), b.getBuildingPreference(), b.getStatus(), b.isActive())).toList();
+            .map(b -> new AdminCustomerController.BuildingSummary(b.getId(), b.getBuildingName(), b.getBuildingType(), b.getCity(), b.getBuildingPreference(), b.getStatus(), b.isActive(), b.getLatitude(), b.getLongitude())).toList();
         var lifts=em.createQuery("select l from Lift l where l.building.customer.id=:id order by l.id", com.valor.assets.Lift.class).setParameter("id", id).setMaxResults(25).getResultList().stream()
             .map(l -> new AdminCustomerController.LiftSummary(l.getId(), l.getBuilding().getId(), l.getName(), l.getLiftNumber(), String.valueOf(l.getCurrentStatus()), l.isActive())).toList();
         var requests=em.createQuery("select r from ServiceRequest r where r.customer.id=:id order by r.serviceRequestedAt desc, r.id desc", com.valor.workflow.ServiceRequest.class).setParameter("id", id).setMaxResults(10).getResultList().stream().map(this::requestView).toList();
@@ -156,7 +156,8 @@ class AdminCustomerService {
             r.getCustomerRemarks(), r.getTechnicianRemarks(), r.getServiceRequestedAt(), r.getPreferredVisitDate(),
             r.getPreferredTimeSlot(), r.getInternalAdminNotes(), r.getCompletedAt(), r.getEstimatedCompletionMinutes(),
             r.getCreatedAt(), r.getUpdatedAt(), r.getCustomer().getFullName(), building == null ? null : building.getBuildingName(),
-            building == null ? null : building.getAddress(), lift == null ? null : lift.getName(), lift == null ? null : lift.getLiftNumber(), null, building == null ? null : building.getLatitude(), building == null ? null : building.getLongitude());
+            building == null ? null : building.getAddress(), lift == null ? null : lift.getName(), lift == null ? null : lift.getLiftNumber(), null, building == null ? null : building.getLatitude(), building == null ? null : building.getLongitude(),
+            r.getStartLatitude(), r.getStartLongitude(), r.getStartedAt(), r.getArrivalEstimateMinutes(), r.getArrivalEstimatedAt());
     }
     private String clean(String value) { var result=value==null?null:value.trim(); return result==null||result.isEmpty()?null:result; }
     private String setPasswordUrl(String token) { return setPasswordBaseUrl + (setPasswordBaseUrl.contains("?") ? "&" : "?") + "token=" + token; }
