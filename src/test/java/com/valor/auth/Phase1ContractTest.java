@@ -136,6 +136,7 @@ class Phase1ContractTest {
             JsonNode success=op.get("responses").get("200");assertNotNull(success);
             JsonNode envelope=resolve(doc,success.get("content").elements().next().get("schema"));
             JsonNode data=resolve(doc,envelope.at("/properties/data"));
+            if(operationId.equals("retries")) { assertEquals("integer",data.path("type").asText()); return; }
             assertTrue(data.has("properties")||data.has("items")||data.path("description").asText().contains("Always null"),operationId);
         });});
     }

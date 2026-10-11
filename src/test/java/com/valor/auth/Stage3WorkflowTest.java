@@ -337,7 +337,7 @@ class Stage3WorkflowTest {
 
     @Test void assignedTechnicianCanUploadEvidenceButForeignTechnicianCannot() throws Exception {
         Fixture f = fixture(); TechnicianProfile other = technician(); assign(f);
-        MockMultipartFile photo = new MockMultipartFile("file", "work.jpg", "image/jpeg", new byte[]{(byte)0xFF, (byte)0xD8, 0x01, 0x02});
+        MockMultipartFile photo = new MockMultipartFile("file", "work.jpg", "image/jpeg", new byte[]{(byte)0xFF, (byte)0xD8, (byte)0xFF, (byte)0xE0});
         String uploaded = mvc.perform(multipart(path(f) + "/attachments").file(photo)
                 .header("Authorization", "Bearer " + jwt.issue(f.technician())))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.originalFilename").value("work.jpg"))
@@ -346,7 +346,7 @@ class Stage3WorkflowTest {
         long attachmentId = json.readTree(uploaded).at("/data/id").asLong();
         call(get(path(f) + "/attachments"), f.customer(), null, 200);
         call(get(path(f) + "/attachments"), other.getUser(), null, 403);
-        MockMultipartFile otherPhoto = new MockMultipartFile("file", "other.jpg", "image/jpeg", new byte[]{(byte)0xFF, (byte)0xD8, 0x01, 0x02});
+        MockMultipartFile otherPhoto = new MockMultipartFile("file", "other.jpg", "image/jpeg", new byte[]{(byte)0xFF, (byte)0xD8, (byte)0xFF, (byte)0xE0});
         mvc.perform(multipart(path(f) + "/attachments").file(otherPhoto).header("Authorization", "Bearer " + jwt.issue(other.getUser())))
                 .andExpect(status().isForbidden());
         call(delete(path(f) + "/attachments/" + attachmentId), other.getUser(), null, 403);

@@ -60,7 +60,7 @@ public final class AssetDtos {
             LocalDate warrantyEndDate,
             LocalDate lastMaintenanceDate,
             LocalDate nextMaintenanceDate,
-            @Schema(type="integer",format="int32",minimum="0",maximum="100") @PositiveOrZero @Max(100) Byte healthScore,
+            @Schema(implementation=Integer.class,type="integer",format="int32",minimum="0",maximum="100") @PositiveOrZero @Max(100) Byte healthScore,
             @Size(max = 200) String machineRoom,
             @Size(max = 255) String qrCode,
             String specifications) {
@@ -135,7 +135,7 @@ public final class AssetDtos {
             LocalDate warrantyEndDate,
             LocalDate lastMaintenanceDate,
             LocalDate nextMaintenanceDate,
-            @Schema(type="integer",format="int32",minimum="0",maximum="100") Byte healthScore,
+            @Schema(implementation=Integer.class,type="integer",format="int32",minimum="0",maximum="100") Byte healthScore,
             String machineRoom,
             String qrCode,
             String specifications,

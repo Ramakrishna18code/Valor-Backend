@@ -28,7 +28,7 @@ import java.util.EnumSet;
 import java.util.Locale;
 
 @Component
-@Profile("dev")
+@Profile("dev & !prod")
 class DevBootstrap implements ApplicationRunner {
   private final UserRepo users; private final PasswordEncoder encoder;
   private final EntityManager em;

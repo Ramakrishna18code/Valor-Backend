@@ -27,6 +27,7 @@ class TechnicianPrivateAttachmentService {
         TechnicianProfile technician = authorize(technicianId); validate(file);
         try {
             byte[] bytes = file.getBytes(); String type = Optional.ofNullable(file.getContentType()).orElse("").toLowerCase(Locale.ROOT);
+            if (!AttachmentContent.matches(type, bytes)) throw new WorkflowException(400, "Attachment content does not match supported file type");
             var stored = storage.store(extension(type), new ByteArrayInputStream(bytes));
             TechnicianPrivateAttachment row = new TechnicianPrivateAttachment(); row.technician = technician; row.uploadedBy = identities.actor();
             row.originalFilename = filename(file.getOriginalFilename()); row.contentType = type; row.fileSize = file.getSize(); row.storageKey = stored.key();

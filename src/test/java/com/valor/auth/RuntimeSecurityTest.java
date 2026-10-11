@@ -53,6 +53,13 @@ class RuntimeSecurityTest {
         assertSafe(body);
     }
 
+    @Test void healthWithTrailingSlashIsPublic() throws Exception {
+        mvc.perform(get("/api/v1/health/"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.status").value("UP"));
+    }
+
     @Test void openApiIsPublic() throws Exception {
         mvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.openapi").exists());

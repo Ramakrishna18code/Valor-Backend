@@ -60,7 +60,7 @@ class AuthConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(routes -> routes
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**",
-                                "/api/v1/health", "/error").permitAll()
+                                "/api/v1/health", "/api/v1/health/", "/error").permitAll()
                         .requestMatchers("/api/v1/webhooks/razorpay").permitAll()
                         .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login/**",
                                 "/api/v1/auth/otp/**", "/api/v1/auth/refresh", "/api/v1/auth/set-password").permitAll()

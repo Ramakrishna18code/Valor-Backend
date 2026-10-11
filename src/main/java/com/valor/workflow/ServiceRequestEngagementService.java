@@ -47,7 +47,7 @@ class ServiceRequestEngagementService {
         if (file.getSize() <= 0 || file.getSize() > MAX_BYTES) throw new WorkflowException(400, "Attachment exceeds size limit");
         try {
             byte[] bytes = file.getBytes();
-            if (!looksLike(type, bytes)) throw new WorkflowException(400, "Attachment content does not match supported file type");
+            if (!AttachmentContent.matches(type, bytes)) throw new WorkflowException(400, "Attachment content does not match supported file type");
             var stored = storage.store(extension(type), new java.io.ByteArrayInputStream(bytes));
             ServiceRequestAttachment row = new ServiceRequestAttachment();
             row.setRequest(request); row.setUploadedBy(actor);
@@ -141,14 +141,6 @@ class ServiceRequestEngagementService {
     private FeedbackView view(ServiceRequestFeedback row) {
         return new FeedbackView(row.getId(), row.getRequest().getId(), row.getCustomer().getId(), row.getRating(),
                 row.getComment(), row.getCreatedAt(), row.getUpdatedAt());
-    }
-    private boolean looksLike(String type, byte[] bytes) {
-        if (bytes.length < 4) return false;
-        if (type.equals("application/pdf")) return bytes[0] == '%' && bytes[1] == 'P' && bytes[2] == 'D' && bytes[3] == 'F';
-        if (type.equals("image/png")) return bytes.length >= 8 && bytes[0] == (byte)0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47;
-        if (type.equals("image/jpeg")) return bytes[0] == (byte)0xFF && bytes[1] == (byte)0xD8;
-        if (type.equals("image/webp")) return bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F' && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P';
-        return false;
     }
     private String extension(String type) { return switch (type) { case "image/jpeg" -> ".jpg"; case "image/png" -> ".png"; case "image/webp" -> ".webp"; default -> ".pdf"; }; }
     private String filename(String value) { String name = value == null || value.isBlank() ? "attachment" : value.replaceAll("[\\\\/\\r\\n]", "_").trim(); return name.length() > 255 ? name.substring(name.length() - 255) : name; }

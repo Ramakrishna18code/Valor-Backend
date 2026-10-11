@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 class HealthController {
     record Health(String status) {}
     @Operation(operationId="health")
-    @GetMapping("/api/v1/health")
+    @GetMapping({"/api/v1/health", "/api/v1/health/"})
     ApiResponse<Health> health() {
         return ApiResponse.success("Healthy", new Health("UP"), 200);
     }

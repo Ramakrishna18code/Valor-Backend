@@ -11,6 +11,8 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 
 @Service
 @Transactional
@@ -26,12 +28,14 @@ class TechnicianApplicationService {
     private final PasswordEncoder encoder;
     private final TechnicianApplicationStorage storage;
     private final AssetIdentityAccess identities;
+    private final Environment environment;
 
     TechnicianApplicationService(TechnicianApplicationRepository applications, TechnicianApplicationDocumentRepository documents,
             UserRepo users, TechRepo technicians, PasswordEncoder encoder, TechnicianApplicationStorage storage,
-            AssetIdentityAccess identities) {
+            AssetIdentityAccess identities, Environment environment) {
         this.applications = applications; this.documents = documents; this.users = users; this.technicians = technicians;
         this.encoder = encoder; this.storage = storage; this.identities = identities;
+        this.environment = environment;
     }
 
     Created create(TechnicianApplicationController.Create input) {
@@ -52,15 +56,25 @@ class TechnicianApplicationService {
     }
 
     OtpView sendOtp(Long id, String token) {
+        requireDevelopmentOtp();
         TechnicianApplication row = access(id, token);
-        String code = "1111";
-        row.otpHash = encoder.encode(code); row.otpExpiresAt = LocalDateTime.now().plusMinutes(10); row.otpAttemptsRemaining = 3;
+        requireDraft(row);
+        var now = LocalDateTime.now();
+        if (row.otpExpiresAt != null && row.otpExpiresAt.isAfter(now)) {
+            if (row.otpAttemptsRemaining <= 0 || row.otpExpiresAt.minusMinutes(9).isAfter(now))
+                throw new IllegalArgumentException("OTP unavailable; wait before trying again");
+        } else row.otpAttemptsRemaining = 3;
+        String code = String.format("%04d", new java.security.SecureRandom().nextInt(10000));
+        row.otpHash = encoder.encode(code); row.otpExpiresAt = now.plusMinutes(10);
         return new OtpView(row.id, row.otpExpiresAt, true, code);
     }
 
+    @Transactional(dontRollbackOn = IllegalArgumentException.class)
     ApplicationView verifyOtp(Long id, String token, String otp) {
+        requireDevelopmentOtp();
         TechnicianApplication row = access(id, token);
-        if (row.otpHash == null || row.otpExpiresAt == null || row.otpExpiresAt.isBefore(LocalDateTime.now()) || row.otpAttemptsRemaining <= 0 || !encoder.matches(otp, row.otpHash)) {
+        requireDraft(row);
+        if (row.otpHash == null || row.otpExpiresAt == null || !row.otpExpiresAt.isAfter(LocalDateTime.now()) || row.otpAttemptsRemaining <= 0 || !encoder.matches(otp, row.otpHash)) {
             row.otpAttemptsRemaining = Math.max(0, row.otpAttemptsRemaining - 1); throw new IllegalArgumentException("The OTP is invalid or expired");
         }
         row.otpVerifiedAt = LocalDateTime.now(); row.status = "OTP_VERIFIED"; return view(row);
@@ -68,6 +82,7 @@ class TechnicianApplicationService {
 
     ApplicationView update(Long id, String token, TechnicianApplicationController.Update input) {
         TechnicianApplication row = access(id, token);
+        requireEditable(row);
         if (input.experience() != null) row.experience = input.experience(); if (input.specialization() != null) row.specialization = input.specialization();
         if (input.liftBrands() != null) row.liftBrands = input.liftBrands(); if (input.certifications() != null) row.certifications = input.certifications();
         if (input.highestQualification() != null) row.highestQualification = input.highestQualification(); if (input.handsOnExperience() != null) row.handsOnExperience = input.handsOnExperience();
@@ -78,7 +93,7 @@ class TechnicianApplicationService {
     }
 
     DocumentView uploadDocument(Long id, String token, String documentType, MultipartFile file) {
-        TechnicianApplication row = access(id, token); validateDocument(documentType, file);
+        TechnicianApplication row = access(id, token); requireEditable(row); validateDocument(documentType, file);
         try {
             String type = file.getContentType().toLowerCase(Locale.ROOT); String key = storage.store(extension(type), file.getInputStream());
             TechnicianApplicationDocument document = documents.findByApplicationIdAndDocumentType(id, documentType).orElseGet(TechnicianApplicationDocument::new);
@@ -90,7 +105,7 @@ class TechnicianApplicationService {
 
     ApplicationView submit(Long id, String token) {
         TechnicianApplication row = access(id, token);
-        if (row.otpVerifiedAt == null) throw new IllegalArgumentException("Verify your mobile number first");
+        if (row.otpVerifiedAt == null || !"OTP_VERIFIED".equals(row.status)) throw new IllegalArgumentException("Verify your mobile number before submitting a draft application");
         if (row.fullName == null || row.experience == null || row.specialization == null)
             throw new IllegalArgumentException("Complete your professional details before submitting");
         row.status = "SUBMITTED"; return view(row);
@@ -100,7 +115,10 @@ class TechnicianApplicationService {
     List<ApplicationView> adminList(int page, int size) { admin(); return applications.findAllByOrderByCreatedAtDesc(PageRequest.of(page, Math.min(size, 100))).map(this::view).getContent(); }
     ApplicationView adminStatus(Long id, String status) {
         admin(); if (!Set.of("UNDER_REVIEW", "APPROVED", "REJECTED").contains(status)) throw new IllegalArgumentException("Invalid application status");
-        TechnicianApplication row = applications.findById(id).orElseThrow(() -> new IllegalArgumentException("Application not found")); row.status = status; row.reviewedAt = LocalDateTime.now(); row.reviewedBy = identities.actor();
+        TechnicianApplication row = applications.lockById(id).orElseThrow(() -> new IllegalArgumentException("Application not found"));
+        if (!Set.of("SUBMITTED", "UNDER_REVIEW").contains(row.status) || row.otpVerifiedAt == null)
+            throw new IllegalArgumentException("Only verified, submitted applications can be reviewed");
+        row.status = status; row.reviewedAt = LocalDateTime.now(); row.reviewedBy = identities.actor();
         if ("APPROVED".equals(status)) provision(row);
         return view(row);
     }
@@ -112,7 +130,17 @@ class TechnicianApplicationService {
     }
 
     private TechnicianApplication admin() { User actor = identities.actor(); if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw new AccessDeniedException("Access denied"); return null; }
-    private TechnicianApplication access(Long id, String token) { if (token == null || token.isBlank()) throw new AccessDeniedException("Application access token required"); return applications.findById(id).filter(row -> row.tokenHash.equals(hash(token))).orElseThrow(() -> new AccessDeniedException("Application access denied")); }
+    private TechnicianApplication access(Long id, String token) { if (token == null || token.isBlank()) throw new AccessDeniedException("Application access token required"); return applications.lockById(id).filter(row -> row.tokenHash.equals(hash(token))).orElseThrow(() -> new AccessDeniedException("Application access denied")); }
+    private void requireDevelopmentOtp() {
+        if (environment.acceptsProfiles(Profiles.of("prod")) || !environment.acceptsProfiles(Profiles.of("dev", "test")))
+            throw new IllegalArgumentException("OTP delivery unavailable");
+    }
+    private void requireDraft(TechnicianApplication row) {
+        if (!"DRAFT".equals(row.status)) throw new IllegalArgumentException("Application is no longer awaiting verification");
+    }
+    private void requireEditable(TechnicianApplication row) {
+        if (!Set.of("DRAFT", "OTP_VERIFIED").contains(row.status)) throw new IllegalArgumentException("Submitted applications cannot be edited");
+    }
     private String newToken() { return UUID.randomUUID() + UUID.randomUUID().toString(); }
     private String normalizeEmail(String value) { return required(value, "Email is required").trim().toLowerCase(Locale.ROOT); }
     private String normalizePhone(String value) { return required(value, "Mobile number is required").replaceAll("[^0-9+]", ""); }
@@ -120,7 +148,21 @@ class TechnicianApplicationService {
     private String hash(String value) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); } catch (Exception ex) { throw new IllegalStateException(ex); } }
     private ApplicationView view(TechnicianApplication row) { return new ApplicationView(row.id,row.fullName,row.email,row.phone,row.experience,row.specialization,row.liftBrands,row.certifications,row.highestQualification,row.handsOnExperience,row.preferredLocations,row.willingToWorkAtHeights,row.travelAvailability,row.additionalNotes,row.aadhaarNumber,row.drivingLicenseNumber,row.status,row.otpVerifiedAt,row.createdAt,row.updatedAt,documents.findByApplicationIdOrderByCreatedAtAsc(row.id).stream().map(this::documentView).toList()); }
     private DocumentView documentView(TechnicianApplicationDocument row) { return new DocumentView(row.id,row.documentType,row.originalFilename,row.contentType,row.fileSize,row.createdAt); }
-    private void validateDocument(String type, MultipartFile file) { if (!DOCUMENT_TYPES.contains(type)) throw new IllegalArgumentException("Unsupported document type"); if (file == null || file.isEmpty() || file.getSize() > MAX_DOCUMENT_BYTES) throw new IllegalArgumentException("Document must be smaller than 5 MB"); if (!CONTENT_TYPES.contains(Optional.ofNullable(file.getContentType()).orElse("").toLowerCase(Locale.ROOT))) throw new IllegalArgumentException("Use JPG, PNG, or PDF"); }
+    private void validateDocument(String type, MultipartFile file) {
+        if (!DOCUMENT_TYPES.contains(type)) throw new IllegalArgumentException("Unsupported document type");
+        if (file == null || file.isEmpty() || file.getSize() > MAX_DOCUMENT_BYTES) throw new IllegalArgumentException("Document must be smaller than 5 MB");
+        String contentType = Optional.ofNullable(file.getContentType()).orElse("").toLowerCase(Locale.ROOT);
+        if (!CONTENT_TYPES.contains(contentType)) throw new IllegalArgumentException("Use JPG, PNG, or PDF");
+        byte[] expected = switch (contentType) {
+            case "image/png" -> new byte[] {(byte)137,80,78,71,13,10,26,10};
+            case "image/jpeg" -> new byte[] {(byte)255,(byte)216,(byte)255};
+            default -> "%PDF-".getBytes(StandardCharsets.US_ASCII);
+        };
+        try (var input = file.getInputStream()) {
+            if (!Arrays.equals(expected, input.readNBytes(expected.length)))
+                throw new IllegalArgumentException("Document content does not match its file type");
+        } catch (IOException ex) { throw new IllegalArgumentException("Document could not be read"); }
+    }
     private String extension(String type) { return switch (type) { case "image/jpeg" -> ".jpg"; case "image/png" -> ".png"; default -> ".pdf"; }; }
     private String cleanName(String value) { String name = value == null || value.isBlank() ? "document" : value.replaceAll("[\\\\/\\r\\n]", "_"); return name.length() > 255 ? name.substring(name.length() - 255) : name; }
     record Created(ApplicationView application, String applicationToken) {}
