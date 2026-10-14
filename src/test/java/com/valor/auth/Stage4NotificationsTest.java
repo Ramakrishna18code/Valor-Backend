@@ -3,6 +3,7 @@ package com.valor.auth;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.valor.notifications.Notification;
+import com.valor.notifications.NotificationService;
 import jakarta.persistence.EntityManager;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,6 +54,7 @@ class Stage4NotificationsTest {
     @Autowired JdbcTemplate db;
     @Autowired EntityManager em;
     @Autowired Flyway flyway;
+    @Autowired NotificationService notificationService;
     @Autowired Environment environment;
     @Autowired RequestMappingHandlerMapping mappings;
     @BeforeEach void resetTime() { clock.set("2032-01-01T12:00:00Z"); }
@@ -80,7 +82,7 @@ class Stage4NotificationsTest {
     private JsonNode read(User recipient, long id, int status) throws Exception { return call(put("/api/v1/notifications/" + id + "/read"), recipient, null, status); }
 
     @Test void latestMigrationsAndHibernateValidateUseOnlyCanonicalNotificationEntity() {
-        assertEquals("31", flyway.info().current().getVersion().getVersion());
+        assertEquals("44", flyway.info().current().getVersion().getVersion());
         assertEquals(0, flyway.info().pending().length);
         flyway.validate();
         assertEquals("validate", environment.getProperty("spring.jpa.hibernate.ddl-auto"));
@@ -117,6 +119,28 @@ class Stage4NotificationsTest {
                 assertEquals(1, inbox(recipient).get("totalElements").asInt());
             }
         }
+    }
+
+    @Test void systemEventKeysAreIdempotentAndPersistOwnerMetadata() {
+        User recipient = user(Role.CUSTOMER);
+        var first = notificationService.createSystemOnce(recipient.getId(), "INSTALLATION_SUBMITTED:42:7", "Submitted", "Request submitted");
+        var repeated = notificationService.createSystemOnce(recipient.getId(), "INSTALLATION_SUBMITTED:42:7", "Changed title", "Must not replace");
+        var distinct = notificationService.createSystemOnce(recipient.getId(), "INSPECTION_APPROVED:42:8", "Approved", "Inspection approved");
+
+        assertEquals(first.id(), repeated.id());
+        assertNotEquals(first.id(), distinct.id());
+        assertEquals(2, db.queryForObject("select count(*) from notifications where recipient_user_id=?", Integer.class, recipient.getId()));
+        assertEquals("CUSTOMER", db.queryForObject("select u.role from notifications n join users u on u.id=n.recipient_user_id where n.id=?", String.class, first.id()));
+        assertEquals("INSTALLATION_SUBMITTED:42:7", db.queryForObject("select event_key from notifications where id=?", String.class, first.id()));
+        assertEquals("Submitted", db.queryForObject("select title from notifications where id=?", String.class, repeated.id()));
+    }
+
+    @Test void legacySystemCallerStillCreatesIndependentInAppRecords() {
+        User recipient = user(Role.CUSTOMER);
+        var first = notificationService.createSystem(recipient.getId(), "Legacy", "Legacy message");
+        var second = notificationService.createSystem(recipient.getId(), "Legacy", "Legacy message");
+        assertNotEquals(first.id(), second.id());
+        assertEquals(2, db.queryForObject("select count(*) from notifications where recipient_user_id=? and event_key is null", Integer.class, recipient.getId()));
     }
 
     @Test void customerAndTechnicianCannotCreateNotifications() throws Exception {

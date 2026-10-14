@@ -43,6 +43,14 @@ public class NotificationService {
     }
 
     public View createSystem(Long recipientUserId, String title, String message) {
+        return createSystemOnce(recipientUserId, null, title, message);
+    }
+
+    public View createSystemOnce(Long recipientUserId, String eventKey, String title, String message) {
+        if (eventKey != null && !eventKey.isBlank()) {
+            var existing = notifications.findByEventKey(eventKey);
+            if (existing.isPresent()) return view(existing.get());
+        }
         var recipient = recipients.findById(recipientUserId)
                 .orElseThrow(() -> new NotificationException(404, "Recipient not found"));
         Notification notification = new Notification();
@@ -51,6 +59,7 @@ public class NotificationService {
         notification.setMessage(message == null || message.isBlank() ? "You have a new Valor update." : message);
         notification.setChannel(NotificationChannel.IN_APP);
         notification.setStatus(NotificationStatus.PENDING);
+        notification.setEventKey(eventKey == null || eventKey.isBlank() ? null : eventKey.trim());
         notifications.save(notification); notifications.flush();
         return view(notification);
     }

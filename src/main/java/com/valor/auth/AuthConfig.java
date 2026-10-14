@@ -81,6 +81,7 @@ class AuthConfig {
                         .requestMatchers("/api/v1/admin/service-visits/**", "/api/v1/admin/visit-change-requests/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/transactions", "/api/v1/admin/transactions/**", "/api/v1/admin/transactions.csv",
                                 "/api/v1/admin/reports/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/installations/**", "/api/v1/admin/config/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/payments/*/status", "/api/v1/invoices/*/status",
                                 "/api/v1/support-tickets/*/status", "/api/v1/amc-renewal-requests/*/quote", "/api/v1/amc-renewal-requests/*/status")

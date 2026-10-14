@@ -32,4 +32,6 @@ public class Notification extends AssetRecord {
     private LocalDateTime sentAt;
     @Column(name = "read_at")
     private LocalDateTime readAt;
+    @Column(name = "event_key", length = 180, unique = true)
+    private String eventKey;
 }

@@ -4,6 +4,7 @@ import com.valor.auth.AssetIdentityAccess;
 import com.valor.auth.AuditService;
 import com.valor.auth.Role;
 import com.valor.communication.EmailEventService;
+import com.valor.notifications.NotificationService;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.*;
@@ -57,15 +58,16 @@ public class AssetService {
     private final AssetCustomerRepository customerProfiles;
     private final AuditService audit;
     private final EmailEventService emails;
+    private final NotificationService notifications;
 
     public AssetService(BuildingRepository buildings, LiftRepository lifts,
             AmcContractRepository contracts, AssetIdentityAccess identities, Clock clock, AssetCustomerRepository customerProfiles,
-            AuditService audit, EmailEventService emails) {
+            AuditService audit, EmailEventService emails, NotificationService notifications) {
         this.buildings = buildings;
         this.lifts = lifts;
         this.contracts = contracts;
         this.identities = identities;
-        this.clock = clock;this.customerProfiles=customerProfiles;this.audit=audit;this.emails=emails;
+        this.clock = clock;this.customerProfiles=customerProfiles;this.audit=audit;this.emails=emails;this.notifications=notifications;
     }
 
     @Transactional(readOnly = true)
@@ -88,6 +90,7 @@ public class AssetService {
         apply(building, input);
         buildings.saveAndFlush(building);
         audit.record("BUILDING_CREATE", "BUILDING", building.getId(), "Created building customer=" + building.getCustomer().getId());
+        notifications.createSystemOnce(building.getCustomer().getUser().getId(), "BUILDING_CREATED:" + building.getId(), "Building added", "Your building was added successfully.");
         return buildingView(building, 0);
     }
 
@@ -129,6 +132,7 @@ public class AssetService {
         apply(lift, input);
         lifts.saveAndFlush(lift);
         audit.record("LIFT_CREATE", "LIFT", lift.getId(), "Created lift building=" + lift.getBuilding().getId());
+        notifications.createSystemOnce(lift.getBuilding().getCustomer().getUser().getId(), "LIFT_CREATED:" + lift.getId(), "Lift registered", "Your lift was registered successfully.");
         return liftView(lift, false, LocalDate.now(clock));
     }
 
@@ -247,6 +251,7 @@ public class AssetService {
         apply(building,new BuildingWrite(owner.getId(),input.buildingName(),input.buildingType(),input.address(),input.city(),input.state(),input.pincode(),input.latitude(),input.longitude(),input.emergencyContactName(),input.emergencyContactPhone(),input.buildingPreference(),"ACTIVE"));
         buildings.saveAndFlush(building);
         audit.record("BUILDING_CREATE", "BUILDING", building.getId(), "Created building customer=" + owner.getId());
+        notifications.createSystemOnce(owner.getUser().getId(), "BUILDING_CREATED:" + building.getId(), "Building added", "Your building was added successfully.");
         return buildingView(building,0);
     }
     public BuildingView updateCustomerBuilding(Long id, CustomerBuildingWrite input) {
@@ -279,6 +284,7 @@ public class AssetService {
         apply(lift, input);
         lifts.saveAndFlush(lift);
         audit.record("LIFT_CREATE", "LIFT", lift.getId(), "Created lift building=" + lift.getBuilding().getId());
+        notifications.createSystemOnce(lift.getBuilding().getCustomer().getUser().getId(), "LIFT_CREATED:" + lift.getId(), "Lift registered", "Your lift was registered successfully.");
         return liftView(lift, false, LocalDate.now(clock));
     }
     public LiftView updateCustomerLift(Long id, LiftWrite input) {

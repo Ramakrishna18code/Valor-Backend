@@ -145,7 +145,7 @@ class AdminCustomerService {
         long buildingCount=em.createQuery("select count(b) from Building b where b.customer.id=:id", Long.class).setParameter("id", id).getSingleResult();
         boolean active=profile.user.isActive() && profile.active;
         return new AdminCustomerController.AdminCustomerDetail(id, profile.user.getId(), id, profile.user.getEmail(), profile.user.getPhone(), profile.fullName,
-            profile.hasLift, profile.referralCode, profile.alternatePhone, profile.companyName, profile.address, active, profile.status, profile.createdAt, profile.updatedAt,
+            liftCount > 0, profile.referralCode, profile.alternatePhone, profile.companyName, profile.address, active, profile.status, profile.createdAt, profile.updatedAt,
             buildingCount, liftCount, serviceCount, buildings, lifts, requests);
     }
     private WorkflowDtos.RequestView requestView(com.valor.workflow.ServiceRequest r) {

@@ -7,9 +7,9 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
-@SpringBootApplication(scanBasePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication", "com.valor.pricing", "com.valor.locations", "com.valor.parts"})
-@EntityScan(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication", "com.valor.parts"})
-@EnableJpaRepositories(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication", "com.valor.parts"})
+@SpringBootApplication(scanBasePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication", "com.valor.pricing", "com.valor.locations", "com.valor.parts", "com.valor.installation", "com.valor.pincode", "com.valor.configuration"})
+@EntityScan(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication", "com.valor.parts", "com.valor.installation", "com.valor.pincode", "com.valor.configuration"})
+@EnableJpaRepositories(basePackages = {"com.valor.auth", "com.valor.assets", "com.valor.workflow", "com.valor.notifications", "com.valor.commerce", "com.valor.tracking", "com.valor.communication", "com.valor.parts", "com.valor.installation", "com.valor.pincode", "com.valor.configuration"})
 @EnableScheduling
 @ConfigurationPropertiesScan(basePackages = {"com.valor.communication", "com.valor.auth"})
 public class ValorBackendApplication {

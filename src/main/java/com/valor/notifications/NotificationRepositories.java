@@ -13,6 +13,7 @@ import org.springframework.data.repository.query.Param;
 interface NotificationRepository extends Repository<Notification, Long> {
     Notification save(Notification notification);
     void flush();
+    Optional<Notification> findByEventKey(String eventKey);
 
     @Query("select n from Notification n where n.recipient.id = :recipientId and n.channel = com.valor.notifications.NotificationChannel.IN_APP and (n.scheduledAt is null or n.scheduledAt <= :asOf) and (:status is null or n.status = :status)")
     Page<Notification> inbox(@Param("recipientId") Long recipientId, @Param("asOf") LocalDateTime asOf,

@@ -28,7 +28,7 @@ Building create/update payloads require non-null `latitude` and `longitude` with
 | POST /auth/logout | refreshToken; authenticated user must own it | null data; success message |
 | GET /me | bearer JWT | CurrentUser: userId, role, email, phone, nullable customerProfile and technicianProfile |
 
-Authentication data contains accessToken, refreshToken, role, userId, nullable customerProfile and technicianProfile. CustomerSummary contains id, fullName, alternatePhone, companyName, address, status, active. TechnicianSummary contains id, employeeId, assignedArea, specialization, availabilityStatus, active. Administrators have no profile. No tokens appear in /me.
+Authentication data contains accessToken, refreshToken, role, userId, nullable customerProfile and technicianProfile. CustomerSummary contains id, fullName, read-only account email and phone, alternatePhone, companyName, address, status, active, and referralCode. TechnicianSummary contains id, employeeId, assignedArea, specialization, availabilityStatus, active. Administrators have no profile. No tokens appear in /me.
 
 Registration does not advertise role and rejects any submitted role, including null, through strict unknown-field validation. Email is trimmed/lowercased; phone is trimmed with spaces/hyphens/parentheses removed and must be canonical +international digits. A phone identity or email/password identity is required. Password storage is BCrypt; refresh-token storage is SHA-256. Duplicate normalized identities return 409. Login failures for an active matching-role account increment a persisted counter under a user-row lock; five wrong passwords temporarily lock it for fifteen minutes. Successful login resets the counter and temporary lock. Staff login now requires email rather than the old identity field; customer login preserves identity.
 
@@ -102,9 +102,15 @@ Reactivation sets the canonical user active, sets the customer profile active, a
 
 ## Customer profile and owned assets
 
+### Verified Indian PIN-code lookup
+
+`GET /api/v1/locations/pincodes/{pincode}` is available to authenticated users. The path must contain exactly six digits with a first digit from 1-9. It returns `ApiResponse<Lookup>` with `data.pincode` and `data.locations[]`; each location contains `pincode`, `state`, `district`, `postOffice`, `locality`, `sourceName`, `sourceVersion`, and nullable `sourceUpdatedAt`. Only active rows imported from the maintained Government of India OGD All India Pincode Directory are returned. Multiple post offices are returned explicitly so clients must not guess a locality. Invalid format returns 400; a syntactically valid but unavailable PIN returns 404. The endpoint does not geocode or provide an exact building coordinate.
+
+The persistent directory is intentionally empty until an approved OGD snapshot is imported through a controlled operational process. The OGD catalog is licensed under the Government Open Data License–India; deployments must retain source/version metadata and refresh from the published directory rather than treating client-entered six-digit values as verified.
+
 | Method/path | Role | Input / data |
 |---|---|---|
-| GET /customers/me | CUSTOMER | CustomerSummary including backend-owned `referralCode` |
+| GET /customers/me | CUSTOMER | CustomerSummary including backend-owned `referralCode` and read-only account `email`/`phone` |
 | PUT /customers/me | CUSTOMER | fullName, alternatePhone?, companyName?, address? -> CustomerSummary |
 | GET /customers/me/buildings | CUSTOMER | owned BuildingView[] |
 | GET /customers/me/buildings/{id} | CUSTOMER owner | BuildingView |
@@ -644,3 +650,51 @@ Technician profile views and profile update requests expose nullable `latitude` 
 The existing `POST /service-requests/{id}/status` contract accepts optional `startLatitude` and `startLongitude` when moving a technician job to `ON_THE_WAY`. The backend writes `startedAt` authoritatively once, ignores repeat same-state calls, and calculates a static `arrivalEstimateMinutes` from the start point and building point when both are available. No routing provider is called.
 
 The former job live-location endpoints and route/geofence/ETA response are retained only for compatibility during migration and are not used by active clients. Customers receive status, building coordinates, and a static estimate only; technician home coordinates remain private.
+
+## Phase 1 Dedicated Installation Request Foundation
+
+Dedicated installation requests are separate from `/service-requests` and do not use the normal service-request status machine. Migration V39 adds installation requests, structured third-party property authorizations, request history, and document references. Phase 1 statuses are `DRAFT`, `SUBMITTED`, and `CANCELLED`; quotation, inspection, order, task, commissioning, handover, and lift activation states are not implemented yet.
+
+| Method/path | Authorization | Input / data |
+|---|---|---|
+| GET /customers/me/installations | CUSTOMER | `InstallationView[]` |
+| POST /customers/me/installations | CUSTOMER | `InstallationWriteRequest` -> `InstallationView`; optional clientRequestKey makes draft creation idempotent |
+| GET /customers/me/installations/{id} | owning CUSTOMER | `InstallationView` |
+| PUT /customers/me/installations/{id} | owning CUSTOMER, draft only | `InstallationWriteRequest` with current version -> `InstallationView` |
+| POST /customers/me/installations/{id}/submit | owning CUSTOMER, draft only | submissionKey and current version -> `InstallationView` |
+| POST /customers/me/installations/{id}/cancel | owning CUSTOMER, draft/submitted | reason and current version -> `InstallationView` |
+| POST /customers/me/installations/{id}/documents | owning CUSTOMER, draft only | opaque existing storage reference -> `InstallationView` |
+| POST /admin/installations/authorizations/{id}/review | ADMIN, SUPER_ADMIN | `AuthorizationReviewRequest` -> `AuthorizationView` |
+
+Customer identity is derived from the authenticated principal. An optional building must be active and owned by the customer. Third-party authorization is stored as `PENDING_REVIEW` and blocks submission until an Admin or SUPER_ADMIN approves it. Customer-owned drafts without a pre-existing lift are supported; no lift record is created by these endpoints. All successful responses use `ApiResponse<T>` with `/api/v1` routing. Optimistic version checks and customer-scoped client/submission keys prevent stale writes and repeated submission duplication.
+
+## Phase 3 installation site details
+
+Migration V40 adds nullable structured site fields to `installation_requests`: `siteAddressLine1`, `siteAddressLine2`, `siteLocality`, `siteCity`, `siteState`, `sitePostalCode`, `siteCountry`, and `sitePropertyDescription`. They round-trip through `InstallationDtos.WriteRequest` and `InstallationDtos.View` on the existing create, retrieve, list, and draft-update endpoints. Existing requests and requests linked to an owned `buildingId` remain valid; no Building or Lift is created by these operations.
+
+When `buildingId` is supplied, the authenticated customer must own an active building. When it is absent, structured site details may identify the proposed property and are persisted on the installation request itself. Third-party owner/organization, relationship, and authorization reference remain separate structured fields. The server derives customer identity and authorization status; client input cannot approve or reject authorization. Submission continues to require an eligible building or structured authorization and blocks pending/rejected authorization. V40 fields are nullable for backward compatibility and retain the existing version, idempotency, history, audit, and ownership rules.
+
+## Phase 4 inspection lifecycle
+
+V41 adds a separate one-to-one inspection domain for submitted installations. Statuses are `REQUESTED`, `SCHEDULED`, `ASSIGNED`, `IN_PROGRESS`, `SUBMITTED`, `REVIEW_REQUIRED`, `APPROVED`, `REWORK_REQUIRED`, `CANCELLED`, and `RESCHEDULE_REQUIRED`. Submission does not approve feasibility or create a quotation, order, Building, or Lift. Admins request, schedule, assign, reschedule, cancel, and review. The assigned technician may read, start, record structured assessment data, add existing evidence references, and submit; technicians cannot review their own assessment. Customers receive only their own authorized appointment/outcome view, without internal reviewer notes, reviewer identity, assigned technician identity, or evidence references.
+
+| Method/path | Authorization | Purpose |
+|---|---|---|
+| GET /customers/me/installations/{requestId}/inspection | owning CUSTOMER | Read appointment/outcome |
+| POST /admin/installations/{requestId}/inspection | ADMIN, SUPER_ADMIN | Request one inspection |
+| GET /admin/installations/inspections/{id} | ADMIN, SUPER_ADMIN | Read complete inspection |
+| PUT /admin/installations/inspections/{id}/schedule | ADMIN, SUPER_ADMIN | Schedule |
+| PUT /admin/installations/inspections/{id}/assign | ADMIN, SUPER_ADMIN | Assign active technician |
+| PUT /admin/installations/inspections/{id}/reschedule | ADMIN, SUPER_ADMIN | Reschedule with reason |
+| POST /admin/installations/inspections/{id}/cancel | ADMIN, SUPER_ADMIN | Cancel with reason |
+| POST /admin/installations/inspections/{id}/review | ADMIN, SUPER_ADMIN | Approve or return assessment |
+| GET /technician/me/inspections/{id} | assigned TECHNICIAN | Read assigned inspection |
+| POST /technician/me/inspections/{id}/start | assigned TECHNICIAN | Start visit |
+| PUT /technician/me/inspections/{id}/assessment | assigned TECHNICIAN | Submit assessment |
+| POST /technician/me/inspections/{id}/evidence | assigned TECHNICIAN | Add existing evidence reference |
+
+Discovery endpoints use the standard `PageView<T>` fields `items`, `page`, `size`, `totalElements`, and `totalPages`, inside the normal `ApiResponse<T>` envelope. `GET /admin/installations/{requestId}/inspection` returns the single inspection linked by V41 or the standard not-found response. `GET /admin/installations/inspections` accepts optional `status`, `technicianProfileId`, `from`, `to` ISO local date-times, `page` (default 0), and `size` (default 20, maximum 100); results are ordered by newest creation then ID descending. `GET /technician/me/inspections` accepts optional `status`, `page`, and `size` and derives the technician from the bearer principal; it never accepts a technician ID. Both queue responses use `InspectionSummary`, containing inspection ID, installation request ID, status, schedule/timezone, assigned technician ID where authorized, visit/submission timestamps, persisted property/address context, and inspection version. Admins receive complete inspection detail; assigned technicians receive only their assigned inspection; customer detail continues to redact reviewer identity/notes and evidence references.
+
+## Lifecycle notifications
+
+The existing `/api/v1/notifications` inbox stores in-app notifications only; email, SMS, push, and external delivery are not enabled by this contract. Successful building creation, lift registration, installation submission, inspection scheduling/rescheduling, and inspection review create customer-scoped notifications. Each system-generated lifecycle notification carries an internal `eventKey` with a unique database constraint so retries of the same persisted event do not create duplicates. Notification responses do not expose event keys or reviewer/private evidence data. Customer notification reads remain scoped to the authenticated recipient.

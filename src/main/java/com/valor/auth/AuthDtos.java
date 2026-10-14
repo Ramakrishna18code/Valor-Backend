@@ -24,7 +24,7 @@ final class AuthDtos {
     record Refresh(@NotBlank String refreshToken) implements StrictInput {}
     record SetPassword(@NotBlank String token,
         @Schema(accessMode=Schema.AccessMode.WRITE_ONLY,format="password") @NotBlank @Size(max=72) String password) implements StrictInput {}
-    record CustomerSummary(Long id,String fullName,String alternatePhone,String companyName,String address,String status,boolean active,String referralCode) {}
+    record CustomerSummary(Long id,String fullName,String email,String phone,String alternatePhone,String companyName,String address,String status,boolean active,String referralCode) {}
     record TechnicianSummary(Long id,String employeeId,String assignedArea,String specialization,
         @Schema(allowableValues={"AVAILABLE","BUSY","OFF_DUTY","ON_LEAVE"}) String availabilityStatus,boolean active) {}
     record CurrentUser(Long userId,Role role,String email,String phone,
