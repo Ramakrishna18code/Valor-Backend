@@ -14,7 +14,7 @@ interface InstallationRequestRepository extends JpaRepository<InstallationReques
     Optional<InstallationRequest> findByCustomerIdAndClientRequestKey(Long customerId, String key);
     Optional<InstallationRequest> findByCustomerIdAndSubmissionKey(Long customerId, String key);
     List<InstallationRequest> findByCustomerIdOrderByCreatedAtDescIdDesc(Long customerId);
-    @Query("select r from InstallationRequest r where (:status is null or r.status = :status) and (:q is null or lower(coalesce(r.propertyType,'')) like lower(concat('%',:q,'%')) or lower(coalesce(r.siteCity,'')) like lower(concat('%',:q,'%')) or lower(coalesce(r.siteAddressLine1,'')) like lower(concat('%',:q,'%')) or cast(r.id as string) like concat('%',:q,'%')) order by r.createdAt desc, r.id desc")
+    @Query("select r from InstallationRequest r where r.status <> com.valor.installation.InstallationStatus.DRAFT and (:status is null or r.status = :status) and (:q is null or lower(coalesce(r.propertyType,'')) like lower(concat('%',:q,'%')) or lower(coalesce(r.siteCity,'')) like lower(concat('%',:q,'%')) or lower(coalesce(r.siteAddressLine1,'')) like lower(concat('%',:q,'%')) or cast(r.id as string) like concat('%',:q,'%')) order by r.createdAt desc, r.id desc")
     Page<InstallationRequest> adminSearch(@Param("status") InstallationStatus status, @Param("q") String q, Pageable pageable);
 }
 interface InstallationHistoryRepository extends JpaRepository<InstallationRequestHistory, Long> {

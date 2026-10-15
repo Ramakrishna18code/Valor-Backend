@@ -1,9 +1,11 @@
 package com.valor.installation;
 import jakarta.validation.constraints.*;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
 final class InspectionDtos {
  private InspectionDtos(){}
+ record RequestInspectionRequest(LocalDate scheduledDate,LocalDateTime scheduledAt,@NotNull @Positive Long technicianProfileId){ }
  record ScheduleRequest(@NotNull LocalDateTime scheduledAt,@Size(max=80) String scheduledTimezone,@PositiveOrZero Long version){}
  record AssignRequest(@NotNull @Positive Long technicianProfileId,@PositiveOrZero Long version){}
  record RescheduleRequest(@NotNull LocalDateTime scheduledAt,@Size(max=80) String scheduledTimezone,@Size(max=500) String reason,@PositiveOrZero Long version){}

@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 @RestController @RequestMapping("/api/v1") class InspectionController {
  private final InspectionService service; InspectionController(InspectionService service){this.service=service;}
  @GetMapping("/customers/me/installations/{requestId}/inspection") ApiResponse<View> customer(@PathVariable Long requestId){return ok(service.customerRead(requestId));}
- @PostMapping("/admin/installations/{requestId}/inspection") ApiResponse<View> request(@PathVariable Long requestId){return ok(service.request(requestId));}
+ @PostMapping("/admin/installations/{requestId}/inspection") ApiResponse<View> request(@PathVariable Long requestId,@Valid @RequestBody RequestInspectionRequest input){return ok(service.request(requestId,input));}
  @GetMapping("/admin/installations/inspections/{id}") ApiResponse<View> admin(@PathVariable Long id){return ok(service.adminRead(id));}
  @GetMapping("/admin/installations/{requestId}/inspection") ApiResponse<View> adminForInstallation(@PathVariable Long requestId){return ok(service.adminReadForInstallation(requestId));}
  @GetMapping("/admin/installations/inspections") ApiResponse<PageView<Summary>> adminQueue(@RequestParam(required=false) InspectionStatus status,@RequestParam(required=false) Long technicianProfileId,@RequestParam(required=false) LocalDateTime from,@RequestParam(required=false) LocalDateTime to,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size){var p=service.adminQueue(status,technicianProfileId,from,to,page,size);return ok(new PageView<>(p.getContent(),p.getNumber(),p.getSize(),p.getTotalElements(),p.getTotalPages()));}
@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
  @PostMapping("/admin/installations/inspections/{id}/review") ApiResponse<View> review(@PathVariable Long id,@Valid @RequestBody ReviewRequest in){return ok(service.review(id,in));}
  @GetMapping("/technician/me/inspections/{id}") ApiResponse<View> technician(@PathVariable Long id){return ok(service.technicianRead(id));}
  @GetMapping("/technician/me/inspections") ApiResponse<PageView<Summary>> technicianQueue(@RequestParam(required=false) InspectionStatus status,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size){var p=service.technicianQueue(status,page,size);return ok(new PageView<>(p.getContent(),p.getNumber(),p.getSize(),p.getTotalElements(),p.getTotalPages()));}
+ @PostMapping("/technician/me/inspections/{id}/accept") ApiResponse<View> accept(@PathVariable Long id,@RequestParam long version){return ok(service.accept(id,version));}
  @PostMapping("/technician/me/inspections/{id}/start") ApiResponse<View> start(@PathVariable Long id){return ok(service.start(id));}
  @PutMapping("/technician/me/inspections/{id}/assessment") ApiResponse<View> assess(@PathVariable Long id,@Valid @RequestBody AssessmentRequest in){return ok(service.assess(id,in));}
  @PostMapping("/technician/me/inspections/{id}/evidence") ApiResponse<View> evidence(@PathVariable Long id,@Valid @RequestBody EvidenceRequest in){return ok(service.addEvidence(id,in));}

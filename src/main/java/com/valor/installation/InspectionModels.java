@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
 import lombok.Getter;
 import lombok.Setter;
 
-enum InspectionStatus { REQUESTED, SCHEDULED, ASSIGNED, IN_PROGRESS, SUBMITTED, REVIEW_REQUIRED, APPROVED, REWORK_REQUIRED, CANCELLED, RESCHEDULE_REQUIRED }
+enum InspectionStatus { REQUESTED, SCHEDULED, ASSIGNED, ACCEPTED, IN_PROGRESS, SUBMITTED, REVIEW_REQUIRED, APPROVED, REWORK_REQUIRED, CANCELLED, RESCHEDULE_REQUIRED }
 @Entity @Table(name="installation_inspections", uniqueConstraints=@UniqueConstraint(name="uk_installation_inspection_request", columnNames="installation_request_id")) @Getter @Setter
 class InstallationInspection {
  @Id @GeneratedValue(strategy=GenerationType.IDENTITY) Long id;

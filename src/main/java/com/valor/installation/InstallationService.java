@@ -87,8 +87,10 @@ public class InstallationService {
         var existing = requests.findByCustomerIdAndSubmissionKey(customer.getId(), clean(input.submissionKey()));
         if (existing.isPresent()) return view(existing.get());
         editable(row);
-        if (row.getRequirements() == null || row.getRequirements().isBlank() || row.getSiteContactName() == null || row.getSiteContactPhone() == null)
-            throw conflict("Requirements and site contact details are required before submission");
+        // A registered building already supplies the property's saved site context.
+        // Additional requirements/contact details remain optional for this flow.
+        if (row.getBuilding() == null && (row.getRequirements() == null || row.getRequirements().isBlank() || row.getSiteContactName() == null || row.getSiteContactPhone() == null))
+            throw conflict("Requirements and site contact details are required for a property without a registered building");
         if (row.getBuilding() == null && row.getAuthorization() == null) throw conflict("A building or structured property authorization is required");
         if (row.getAuthorization() != null && row.getAuthorization().getStatus() != AuthorizationStatus.APPROVED)
             throw conflict("Property authorization is pending review");

@@ -42,4 +42,9 @@ public class InstallationRequest extends AssetRecord {
     @Version @Column(nullable = false) private Long version;
     @Column(name = "submitted_at") private java.time.LocalDateTime submittedAt;
     @Column(name = "cancelled_at") private java.time.LocalDateTime cancelledAt;
+    @Column(name = "admin_requirements", columnDefinition = "TEXT") private String adminRequirements;
+    @Column(name = "requirements_reviewed_at") private java.time.LocalDateTime requirementsReviewedAt;
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "requirements_reviewed_by_user_id") private com.valor.auth.User requirementsReviewedBy;
+    @Column(name = "construction_started_at") private java.time.LocalDateTime constructionStartedAt;
+    @Column(name = "completed_at") private java.time.LocalDateTime completedAt;
 }
