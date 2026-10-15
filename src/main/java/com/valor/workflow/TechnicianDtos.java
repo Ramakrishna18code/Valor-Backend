@@ -27,4 +27,11 @@ final class TechnicianDtos {
             @DecimalMin("-180.0") @DecimalMax("180.0") BigDecimal longitude) implements StrictInput {}
     record Dashboard(Profile profile, long assignedJobs, long pendingJobs, long inProgressJobs,
             long completedJobs, long completedThisQuarter, long todaysScheduledVisits, long emergencyJobs) {}
+    record SavedLocation(Long id, String title, String pincode, String state, String district, String address,
+            BigDecimal latitude, BigDecimal longitude, boolean defaultLocation) {}
+    record SavedLocationInput(@NotBlank @Size(max=120) String title, @NotBlank @Pattern(regexp="[0-9]{6}") String pincode,
+            @Size(max=120) String state, @Size(max=120) String district, @Size(max=500) String address,
+            @NotNull @DecimalMin("-90.0") @DecimalMax("90.0") BigDecimal latitude,
+            @NotNull @DecimalMin("-180.0") @DecimalMax("180.0") BigDecimal longitude,
+            boolean defaultLocation) implements StrictInput {}
 }

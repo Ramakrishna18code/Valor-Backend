@@ -20,11 +20,12 @@ class TechnicianMeController {
     private final WorkflowIdentityAccess profiles;
     private final RequestRepository requests;
     private final ServiceVisitRepository visits;
+    private final TechnicianSavedLocationRepo savedLocations;
     private final Clock clock;
 
     TechnicianMeController(AssetIdentityAccess identities, WorkflowIdentityAccess profiles, RequestRepository requests,
-            ServiceVisitRepository visits, Clock clock) {
-        this.identities = identities; this.profiles = profiles; this.requests = requests; this.visits = visits; this.clock = clock;
+            ServiceVisitRepository visits, TechnicianSavedLocationRepo savedLocations, Clock clock) {
+        this.identities = identities; this.profiles = profiles; this.requests = requests; this.visits = visits; this.savedLocations = savedLocations; this.clock = clock;
     }
 
     @Operation(operationId = "technicianProfile")
@@ -40,6 +41,36 @@ class TechnicianMeController {
         profile.setLastActiveAt(LocalDateTime.now(clock));
         return ApiResponse.success("Technician profile updated", profile(profile), 200);
     }
+
+    @GetMapping("/locations")
+    ApiResponse<List<SavedLocation>> locations() { return ApiResponse.success("Technician locations", savedLocations.findByTechnicianIdOrderByDefaultLocationDescUpdatedAtDesc(current().getId()).stream().map(this::location).toList(), 200); }
+
+    @PostMapping("/locations")
+    ApiResponse<SavedLocation> addLocation(@Valid @RequestBody SavedLocationInput input) {
+        TechnicianProfile technician = current();
+        if (input.defaultLocation() || savedLocations.countByTechnicianId(technician.getId()) == 0) clearDefault(technician.getId());
+        TechnicianSavedLocation value = new TechnicianSavedLocation(); value.setTechnician(technician); apply(value, input);
+        return ApiResponse.success("Technician location saved", location(savedLocations.save(value)), 201);
+    }
+
+    @PutMapping("/locations/{id}")
+    ApiResponse<SavedLocation> updateLocation(@PathVariable Long id, @Valid @RequestBody SavedLocationInput input) {
+        TechnicianProfile technician = current();
+        TechnicianSavedLocation value = savedLocations.findById(id).filter(item -> item.getTechnician().getId().equals(technician.getId())).orElseThrow(() -> new IllegalArgumentException("Location not found"));
+        if (input.defaultLocation()) clearDefault(technician.getId()); apply(value, input);
+        return ApiResponse.success("Technician location updated", location(savedLocations.save(value)), 200);
+    }
+
+    @DeleteMapping("/locations/{id}")
+    ApiResponse<Void> deleteLocation(@PathVariable Long id) {
+        TechnicianProfile technician = current();
+        TechnicianSavedLocation value = savedLocations.findById(id).filter(item -> item.getTechnician().getId().equals(technician.getId())).orElseThrow(() -> new IllegalArgumentException("Location not found"));
+        savedLocations.delete(value); return ApiResponse.success("Technician location deleted", null, 200);
+    }
+
+    private void clearDefault(Long id) { savedLocations.findByTechnicianIdOrderByDefaultLocationDescUpdatedAtDesc(id).forEach(item -> item.setDefaultLocation(false)); }
+    private void apply(TechnicianSavedLocation value, SavedLocationInput input) { value.setTitle(input.title()); value.setPincode(input.pincode()); value.setState(input.state()); value.setDistrict(input.district()); value.setAddress(input.address()); value.setLatitude(input.latitude()); value.setLongitude(input.longitude()); value.setDefaultLocation(input.defaultLocation()); }
+    private SavedLocation location(TechnicianSavedLocation value) { return new SavedLocation(value.getId(), value.getTitle(), value.getPincode(), value.getState(), value.getDistrict(), value.getAddress(), value.getLatitude(), value.getLongitude(), value.isDefaultLocation()); }
 
     @Operation(operationId = "technicianDashboard")
     @GetMapping("/dashboard")

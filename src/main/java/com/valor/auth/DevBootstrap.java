@@ -104,6 +104,7 @@ class DevBootstrap implements ApplicationRunner {
         technician("tech.nisha@valor.local","VAL-T004","West Bengaluru","Controller diagnostics","AVAILABLE",password),
         technician("tech.rohan@valor.local","VAL-T005","Central Bengaluru","Emergency response","OFF_DUTY",password)
     };
+    seedTechnicianLocations(technicians);
     CustomerProfile[] customers = new CustomerProfile[] {
         customer("ananya.rao@example.com","+919810000001","Ananya Rao","Rao Residency","Indiranagar, Bengaluru",password),
         customer("vikram.menon@example.com","+919810000002","Vikram Menon","Menon Heights","Koramangala, Bengaluru",password),
@@ -115,6 +116,15 @@ class DevBootstrap implements ApplicationRunner {
     for (int i=0;i<customers.length;i++) seedCustomerAssetsAndRequest(admin, customers[i], technicians[i], i+1);
     seedGopiDemoCustomer(admin, technicians, password);
     seedParts(technicians, customers);
+  }
+
+  private void seedTechnicianLocations(TechnicianProfile[] technicians) {
+    String[][] values = {{"Home", "507003", "Telangana", "Khammam", "Khammam, Telangana", "17.24730", "80.15140"}, {"Home", "500001", "Telangana", "Hyderabad", "Abids, Hyderabad", "17.38500", "78.48670"}, {"Home", "508001", "Telangana", "Nalgonda", "Nalgonda, Telangana", "17.05750", "79.26840"}, {"Home", "520001", "Andhra Pradesh", "NTR", "Vijayawada, Andhra Pradesh", "16.50620", "80.64800"}, {"Home", "522001", "Andhra Pradesh", "Guntur", "Guntur, Andhra Pradesh", "16.30670", "80.43650"}};
+    for (int i = 0; i < technicians.length; i++) {
+      if (((Number) em.createNativeQuery("select count(*) from technician_saved_locations where technician_profile_id=? and title=?").setParameter(1, technicians[i].getId()).setParameter(2, values[i][0]).getSingleResult()).longValue() > 0) { em.createNativeQuery("update technician_saved_locations set pincode=?,state=?,district=?,address=?,latitude=?,longitude=? where technician_profile_id=? and title=?").setParameter(1, values[i][1]).setParameter(2, values[i][2]).setParameter(3, values[i][3]).setParameter(4, values[i][4]).setParameter(5, new BigDecimal(values[i][5])).setParameter(6, new BigDecimal(values[i][6])).setParameter(7, technicians[i].getId()).setParameter(8, values[i][0]).executeUpdate(); continue; }
+      em.createNativeQuery("insert into technician_saved_locations(technician_profile_id,title,pincode,state,district,address,latitude,longitude,is_default,created_at,updated_at) values (?,?,?,?,?,?,?,?,true,now(6),now(6))")
+          .setParameter(1, technicians[i].getId()).setParameter(2, values[i][0]).setParameter(3, values[i][1]).setParameter(4, values[i][2]).setParameter(5, values[i][3]).setParameter(6, values[i][4]).setParameter(7, new BigDecimal(values[i][5])).setParameter(8, new BigDecimal(values[i][6])).executeUpdate();
+    }
   }
 
   private void seedParts(TechnicianProfile[] technicians, CustomerProfile[] customers) {
