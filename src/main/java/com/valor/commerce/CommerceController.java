@@ -53,6 +53,8 @@ class CommerceController {
     ApiResponse<List<ReconciliationIssue>> reconciliation() { return ok(service.reconciliation()); }
     @PostMapping("/admin/payments/{id}/reconcile")
     ApiResponse<ReconciliationResult> reconcilePayment(@PathVariable Long id) { return ok(service.reconcilePayment(id)); }
+    @PostMapping("/admin/payments/refunds/{id}/reconcile")
+    ApiResponse<RefundReconciliationResult> reconcileRefund(@PathVariable Long id) { return ok(service.reconcileRefund(id)); }
     @PostMapping("/webhooks/razorpay")
     ApiResponse<Void> razorpayWebhook(@RequestBody String payload, @RequestHeader(name = "X-Razorpay-Signature", required = false) String signature) {
         service.razorpayWebhook(payload, signature); return ok(null);

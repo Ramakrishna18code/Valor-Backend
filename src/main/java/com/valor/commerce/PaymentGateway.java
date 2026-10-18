@@ -10,5 +10,6 @@ interface PaymentGateway {
     JsonNode lookupOrder(String razorpayOrderId);
     JsonNode lookupPayment(String razorpayPaymentId);
     JsonNode createRefund(String providerPaymentId, BigDecimal amount, String notes);
+    JsonNode lookupRefund(String providerRefundId);
     boolean validWebhookSignature(String payload, String signature);
 }

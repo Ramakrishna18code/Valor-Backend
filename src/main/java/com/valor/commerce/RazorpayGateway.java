@@ -17,6 +17,7 @@ class RazorpayGateway implements PaymentGateway {
     private final String keyId;
     private final String keySecret;
     private final String webhookSecret;
+    private final String mode;
     private final boolean offlineTestMode;
     private final RestClient rest;
     private final ObjectMapper mapper;
@@ -24,11 +25,13 @@ class RazorpayGateway implements PaymentGateway {
     RazorpayGateway(@Value("${razorpay.key-id:}") String keyId,
             @Value("${razorpay.key-secret:}") String keySecret,
             @Value("${razorpay.webhook-secret:}") String webhookSecret,
+            @Value("${razorpay.mode:}") String mode,
             @Value("${razorpay.offline-test-mode:false}") boolean offlineTestMode,
             RestClient.Builder builder, ObjectMapper mapper) {
         this.keyId = keyId;
         this.keySecret = keySecret;
         this.webhookSecret = webhookSecret;
+        this.mode = mode;
         this.offlineTestMode = offlineTestMode;
         this.rest = builder.baseUrl("https://api.razorpay.com/v1").build();
         this.mapper = mapper;
@@ -65,6 +68,12 @@ class RazorpayGateway implements PaymentGateway {
         return post("/payments/" + razorpayPaymentId + "/refund", body);
     }
 
+    public JsonNode lookupRefund(String razorpayRefundId) {
+        requireConfigured();
+        if (offlineTestMode) return mapper.valueToTree(Map.of("id", razorpayRefundId, "status", "pending"));
+        return get("/refunds/" + razorpayRefundId);
+    }
+
     public boolean validWebhookSignature(String payload, String signature) {
         if (webhookSecret.isBlank() || signature == null || signature.isBlank()) return false;
         return constantEquals(hmac(payload, webhookSecret), signature);
@@ -79,7 +88,21 @@ class RazorpayGateway implements PaymentGateway {
                 .retrieve().body(JsonNode.class);
     }
     private long paise(BigDecimal rupees) { return rupees.movePointRight(2).setScale(0).longValueExact(); }
-    private void requireConfigured() { if (!configured()) throw new CommerceException(503, "Razorpay test credentials are not configured"); }
+    private void requireConfigured() {
+        if (!configured()) throw new CommerceException(503, "Razorpay test credentials are not configured");
+        if (offlineTestMode) return;
+        validateMode();
+    }
+    void validateMode() {
+        String configuredMode = mode == null ? "" : mode.trim().toLowerCase(Locale.ROOT);
+        boolean testKey = keyId.startsWith("rzp_test_");
+        boolean liveKey = keyId.startsWith("rzp_live_");
+        if (!(testKey || liveKey) || !(configuredMode.equals("test") || configuredMode.equals("live"))
+                || (configuredMode.equals("test") && !testKey)
+                || (configuredMode.equals("live") && !liveKey)) {
+            throw new CommerceException(503, "Razorpay mode is missing or does not match the configured key");
+        }
+    }
     private String hmac(String payload, String secret) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");

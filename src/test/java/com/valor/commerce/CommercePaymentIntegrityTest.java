@@ -297,6 +297,25 @@ class CommercePaymentIntegrityTest {
     }
 
     @Test
+    void nonInrRefundIsRejectedFromCanonicalPaymentCurrency() {
+        payment.setStatus(PaymentStatus.SUCCEEDED);
+        payment.setCurrency("USD");
+        payment.setRazorpayPaymentId("pay_test");
+        User customerActor = mock(User.class);
+        when(customerActor.getRole()).thenReturn(Role.CUSTOMER);
+        when(customerActor.getId()).thenReturn(8L);
+        when(identities.actor()).thenReturn(customerActor);
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+
+        CommerceException error = assertThrows(CommerceException.class, () -> service.customerRequestRefund(11L,
+                new CommerceDtos.RefundCreate(new BigDecimal("10.00"), "unsupported currency")));
+
+        assertEquals(400, error.status);
+        verify(refunds, never()).saveAndFlush(any());
+        verifyNoInteractions(paymentGateway);
+    }
+
+    @Test
     void activeRefundRequestBlocksDuplicateRequestSafely() {
         payment.setStatus(PaymentStatus.SUCCEEDED); payment.setRazorpayPaymentId("pay_test");
         User customerActor = mock(User.class); when(customerActor.getRole()).thenReturn(Role.CUSTOMER); when(customerActor.getId()).thenReturn(8L);
@@ -323,6 +342,60 @@ class CommercePaymentIntegrityTest {
         when(refunds.lockById(31L)).thenReturn(Optional.of(refund)); when(payments.lockById(11L)).thenReturn(Optional.of(payment));
         assertThrows(CommerceException.class, () -> service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "approve")));
         verifyNoInteractions(paymentGateway);
+    }
+
+    @Test
+    void malformedNegativeAndExcessiveDecimalThresholdsFailClosed() throws Exception {
+        for (String threshold : List.of("not-a-number", "-1.00", "5000.001")) {
+            setThreshold(threshold);
+            PaymentRefund refund = pendingRefund();
+            when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+            when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+
+            assertThrows(CommerceException.class, () -> service.approveRefund(31L,
+                    new CommerceDtos.RefundApproval(31L, "invalid threshold")));
+            verifyNoInteractions(paymentGateway);
+        }
+    }
+
+    @Test
+    void refundAtOrBelowProposedBoundaryUsesOneAdminApproval() throws Exception {
+        setThreshold("5000.00");
+        for (String amount : List.of("4999.99", "5000.00")) {
+            PaymentRefund refund = pendingRefund();
+            refund.setAmount(new BigDecimal(amount));
+            when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+            when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+            when(refunds.saveAndFlush(any(PaymentRefund.class))).thenAnswer(inv -> inv.getArgument(0));
+            when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal(amount)), any()))
+                    .thenReturn(node("id", "rfnd_" + amount.replace('.', '_'), "status", "pending"));
+
+            service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "within threshold"));
+        }
+        verify(paymentGateway, times(2)).createRefund(any(), any(), any());
+    }
+
+    @Test
+    void amountAboveProposedBoundaryRequiresDistinctSecondAdmin() throws Exception {
+        setThreshold("5000.00");
+        PaymentRefund refund = pendingRefund();
+        refund.setAmount(new BigDecimal("5000.01"));
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(refunds.saveAndFlush(any(PaymentRefund.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "first"));
+        assertThrows(CommerceException.class, () -> service.approveRefund(31L,
+                new CommerceDtos.RefundApproval(31L, "same admin")));
+
+        User secondAdmin = mock(User.class);
+        when(secondAdmin.getId()).thenReturn(99L);
+        when(identities.actor()).thenReturn(secondAdmin);
+        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("5000.01")), any()))
+                .thenReturn(node("id", "rfnd_above", "status", "pending"));
+
+        service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "second"));
+        verify(paymentGateway).createRefund(eq("pay_test"), eq(new BigDecimal("5000.01")), any());
     }
 
     @Test
@@ -593,6 +666,99 @@ class CommercePaymentIntegrityTest {
     }
 
     @Test
+    void refundReconciliationAppliesVerifiedProcessedStatusWithoutCreatingRefund() {
+        PaymentRefund refund = reconciliationRefund();
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(refunds.findByPaymentIdOrderByCreatedAtAscIdAsc(11L)).thenReturn(List.of(refund));
+        when(paymentGateway.lookupRefund("rfnd_test")).thenReturn(refundNode("rfnd_test", "processed", "pay_test", 10000, "INR"));
+
+        CommerceDtos.RefundReconciliationResult result = service.reconcileRefund(31L);
+        CommerceDtos.RefundReconciliationResult repeated = service.reconcileRefund(31L);
+
+        assertEquals("REFUND_CONFIRMED", result.action());
+        assertEquals(RefundStatus.SUCCEEDED, refund.getStatus());
+        assertEquals(PaymentStatus.PARTIALLY_REFUNDED, payment.getStatus());
+        assertEquals("NO_ACTION", repeated.action());
+        verify(paymentGateway, times(1)).lookupRefund("rfnd_test");
+        verify(paymentGateway, never()).createRefund(any(), any(), any());
+    }
+
+    @Test
+    void refundReconciliationAppliesVerifiedFailedStatus() {
+        PaymentRefund refund = reconciliationRefund();
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(paymentGateway.lookupRefund("rfnd_test")).thenReturn(refundNode("rfnd_test", "failed", "pay_test", 10000, "INR"));
+
+        CommerceDtos.RefundReconciliationResult result = service.reconcileRefund(31L);
+
+        assertEquals("FAILURE_CONFIRMED", result.action());
+        assertEquals(RefundStatus.FAILED, refund.getStatus());
+        assertEquals(PaymentStatus.SUCCEEDED, payment.getStatus());
+    }
+
+    @Test
+    void pendingUnavailableOrMissingRefundEvidenceStaysUnresolved() {
+        PaymentRefund missing = reconciliationRefund();
+        missing.setRazorpayRefundId(null);
+        when(refunds.lockById(31L)).thenReturn(Optional.of(missing));
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        CommerceDtos.RefundReconciliationResult noId = service.reconcileRefund(31L);
+        assertEquals("NO_ACTION", noId.action());
+        assertEquals(RefundStatus.PROCESSING, missing.getStatus());
+        verify(paymentGateway, never()).lookupRefund(any());
+
+        PaymentRefund pending = reconciliationRefund();
+        when(refunds.lockById(31L)).thenReturn(Optional.of(pending));
+        when(paymentGateway.lookupRefund("rfnd_test")).thenReturn(refundNode("rfnd_test", "pending", "pay_test", 10000, "INR"));
+        CommerceDtos.RefundReconciliationResult pendingResult = service.reconcileRefund(31L);
+        assertEquals("NO_ACTION", pendingResult.action());
+        assertEquals(RefundStatus.PROCESSING, pending.getStatus());
+
+        when(paymentGateway.lookupRefund("rfnd_test")).thenThrow(new RuntimeException("unavailable"));
+        CommerceDtos.RefundReconciliationResult unavailable = service.reconcileRefund(31L);
+        assertFalse(unavailable.providerEvidence());
+        assertEquals(RefundStatus.PROCESSING, pending.getStatus());
+    }
+
+    @Test
+    void refundReconciliationRejectsMismatchedProviderEvidence() {
+        PaymentRefund refund = reconciliationRefund();
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(paymentGateway.lookupRefund("rfnd_test")).thenReturn(refundNode("rfnd_other", "processed", "pay_test", 10000, "INR"));
+
+        CommerceDtos.RefundReconciliationResult result = service.reconcileRefund(31L);
+
+        assertEquals("NO_ACTION", result.action());
+        assertFalse(result.referencesMatch());
+        assertEquals(RefundStatus.PROCESSING, refund.getStatus());
+        assertEquals(PaymentStatus.SUCCEEDED, payment.getStatus());
+    }
+
+    @Test
+    void refundReconciliationRequiresAdminAuthorization() {
+        doThrow(new org.springframework.security.access.AccessDeniedException("denied"))
+                .when(identities).requireAdmin();
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> service.reconcileRefund(31L));
+        verifyNoInteractions(refunds, paymentGateway);
+    }
+
+    private PaymentRefund reconciliationRefund() {
+        payment.setStatus(PaymentStatus.SUCCEEDED);
+        payment.setRazorpayPaymentId("pay_test");
+        PaymentRefund refund = pendingRefund();
+        refund.setStatus(RefundStatus.PROCESSING);
+        refund.setRazorpayRefundId("rfnd_test");
+        refund.setCurrency("INR");
+        refund.setAmount(new BigDecimal("100.00"));
+        return refund;
+    }
+
+    @Test
     void verifiedFailureMarksPaymentFailedWithoutPayingInvoice() {
         prepareReconciliation();
         when(paymentGateway.lookupOrder("order_test")).thenReturn(node("id", "order_test", "status", "created"));
@@ -618,6 +784,11 @@ class CommercePaymentIntegrityTest {
     private JsonNode paymentNode(String id, String orderId, String status, int amount, String currency) {
         return new ObjectMapper().createObjectNode().put("id", id).put("order_id", orderId)
                 .put("status", status).put("amount", amount).put("currency", currency);
+    }
+
+    private JsonNode refundNode(String id, String status, String paymentId, int amount, String currency) {
+        return new ObjectMapper().createObjectNode().put("id", id).put("status", status)
+                .put("payment_id", paymentId).put("amount", amount).put("currency", currency);
     }
 
     @Test

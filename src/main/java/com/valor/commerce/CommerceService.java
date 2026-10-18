@@ -238,6 +238,7 @@ class CommerceService {
 
     private PaymentRefund createRefundRequest(PaymentRecord payment, RefundCreate input, User requester) {
         if (payment.getStatus() != PaymentStatus.SUCCEEDED && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) throw new CommerceException(409, "Payment is not refundable");
+        if (!"INR".equalsIgnoreCase(payment.getCurrency())) throw new CommerceException(400, "Refunds are supported only for INR payments");
         if (payment.getRazorpayPaymentId() == null) throw new CommerceException(409, "Payment has no gateway payment id");
         if (input.amount().scale() > 2 || input.amount().signum() <= 0) throw new CommerceException(400, "Invalid refund amount");
         if (refunds.existsByPaymentIdAndStatusIn(payment.getId(), List.of(RefundStatus.REQUESTED, RefundStatus.PROCESSING))) throw new CommerceException(409, "Refund already in progress");
@@ -509,6 +510,91 @@ class CommerceService {
         } catch (RuntimeException ex) {
             return reconciliationResult(payment, false, null, false, "NO_ACTION",
                     "Gateway lookup unavailable; payment remains unresolved");
+        }
+    }
+
+    @Transactional
+    RefundReconciliationResult reconcileRefund(Long refundId) {
+        requireAdmin();
+        PaymentRefund refund = refunds.lockById(refundId).orElseThrow(() -> missing("Refund"));
+        PaymentRecord payment = payments.lockById(refund.getPayment().getId()).orElseThrow(() -> missing("Payment"));
+        String localStatus = refund.getStatus().name();
+        if (refund.getStatus() != RefundStatus.PROCESSING) {
+            return refundReconciliationResult(refund, payment, false, refund.getGatewayStatus(), true,
+                    "NO_ACTION", "Refund is not awaiting provider reconciliation");
+        }
+        if (refund.getRazorpayRefundId() == null || refund.getRazorpayRefundId().isBlank()) {
+            audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
+                    "Refund provider reference is missing; manual investigation required");
+            return refundReconciliationResult(refund, payment, false, null, false,
+                    "NO_ACTION", "Provider refund reference is missing");
+        }
+        if (!"INR".equalsIgnoreCase(payment.getCurrency())
+                || !payment.getCurrency().equalsIgnoreCase(refund.getCurrency())) {
+            audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
+                    "Refund currency does not match the canonical payment currency");
+            return refundReconciliationResult(refund, payment, false, null, false,
+                    "NO_ACTION", "Refund currency does not match the payment");
+        }
+        try {
+            JsonNode provider = paymentGateway.lookupRefund(refund.getRazorpayRefundId());
+            String providerId = text(provider, "id");
+            String providerPaymentId = text(provider, "payment_id");
+            String providerCurrency = text(provider, "currency");
+            boolean matches = refund.getRazorpayRefundId().equals(providerId)
+                    && payment.getRazorpayPaymentId() != null
+                    && payment.getRazorpayPaymentId().equals(providerPaymentId)
+                    && "INR".equalsIgnoreCase(providerCurrency)
+                    && refund.getCurrency().equalsIgnoreCase(providerCurrency)
+                    && providerAmountMatches(refund.getAmount(), provider);
+            String providerStatus = text(provider, "status");
+            if (!matches) {
+                audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
+                        "Provider refund evidence did not match the local payment obligation");
+                return refundReconciliationResult(refund, payment, true, providerStatus, false,
+                        "NO_ACTION", "Provider refund reference, payment, amount, or currency did not match");
+            }
+            refund.setGatewayStatus(providerStatus);
+            if ("processed".equalsIgnoreCase(providerStatus)) {
+                refund.setStatus(RefundStatus.SUCCEEDED);
+                updateRefundedPayment(payment);
+                audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
+                        "Verified provider refund status applied: processed");
+                return refundReconciliationResult(refund, payment, true, providerStatus, true,
+                        "REFUND_CONFIRMED", "Verified provider refund is processed");
+            }
+            if ("failed".equalsIgnoreCase(providerStatus)) {
+                refund.setStatus(RefundStatus.FAILED);
+                audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
+                        "Verified provider refund status applied: failed");
+                return refundReconciliationResult(refund, payment, true, providerStatus, true,
+                        "FAILURE_CONFIRMED", "Verified provider refund is failed");
+            }
+            audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
+                    "Provider refund remains unresolved with status=" + (providerStatus == null ? "unknown" : providerStatus));
+            return refundReconciliationResult(refund, payment, true, providerStatus, true,
+                    "NO_ACTION", "Provider refund is not in a recognized terminal state");
+        } catch (RuntimeException ex) {
+            audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
+                    "Provider refund lookup unavailable; manual investigation required");
+            return refundReconciliationResult(refund, payment, false, null, false,
+                    "NO_ACTION", "Provider refund lookup unavailable; outcome remains unresolved");
+        }
+    }
+
+    private RefundReconciliationResult refundReconciliationResult(PaymentRefund refund, PaymentRecord payment,
+            boolean evidence, String providerStatus, boolean referencesMatch, String action, String reason) {
+        return new RefundReconciliationResult(refund.getId(), payment.getId(), refund.getStatus().name(),
+                refund.getAmount(), refund.getCurrency(), evidence, providerStatus, referencesMatch, action, reason);
+    }
+
+    private boolean providerAmountMatches(BigDecimal expected, JsonNode provider) {
+        JsonNode amount = provider == null ? null : provider.get("amount");
+        if (amount == null || amount.isNull() || expected == null) return false;
+        try {
+            return expected.compareTo(new BigDecimal(amount.asText()).movePointLeft(2)) == 0;
+        } catch (NumberFormatException ex) {
+            return false;
         }
     }
 

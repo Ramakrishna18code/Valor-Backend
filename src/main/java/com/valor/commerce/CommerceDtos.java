@@ -33,6 +33,9 @@ final class CommerceDtos {
     record RefundView(Long id, Long paymentId, BigDecimal amount, String currency, RefundStatus status,
         String razorpayRefundId, String gatewayStatus, String reason, LocalDateTime createdAt, LocalDateTime updatedAt) {}
     record ReconciliationIssue(Long paymentId, Long invoiceId, String type, String detail) {}
+    record RefundReconciliationResult(Long refundId, Long paymentId, String localStatus, BigDecimal amount,
+        String currency, boolean providerEvidence, String providerStatus, boolean referencesMatch,
+        String action, String reason) {}
     record ReconciliationResult(Long paymentId, Long invoiceId, String localStatus, BigDecimal amount, String currency,
         boolean gatewayEvidence, String gatewayStatus, boolean referencesMatch, String action, String reason) {}
     record PaymentView(Long id, Long customerProfileId, Long serviceRequestId, Long amcContractId, Long invoiceId,
