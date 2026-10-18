@@ -75,7 +75,7 @@ class Stage2AssetsTest {
     }
     private long building(User admin, CustomerProfile owner) throws Exception {
         return request(post("/api/v1/buildings"), admin,
-                Map.of("customerProfileId", owner.getId(), "buildingName", "Tower"), 200).get("id").asLong();
+                Map.of("customerProfileId", owner.getId(), "buildingName", "Tower", "latitude", 17.385044, "longitude", 78.486671), 200).get("id").asLong();
     }
     private long lift(User admin, long building) throws Exception {
         return request(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Lift"), 200).get("id").asLong();
@@ -120,7 +120,7 @@ class Stage2AssetsTest {
             User admin = user(role);
             CustomerProfile owner = customer();
             long b = building(admin, owner);
-            request(put("/api/v1/buildings/" + b), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "Updated"), 200);
+            request(put("/api/v1/buildings/" + b), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "Updated", "latitude", 17.385044, "longitude", 78.486671), 200);
             assertEquals("Updated", find(request(get("/api/v1/buildings"), admin, null, 200), b).get("buildingName").asText());
             long l = lift(admin, b);
             request(put("/api/v1/lifts/" + l), admin, Map.of("buildingId", b, "name", "Updated lift", "currentStatus", "MAINTENANCE"), 200);
@@ -172,7 +172,7 @@ class Stage2AssetsTest {
                 "buildingName", "Customer Tower",
                 "buildingType", "Apartment",
                 "address", "1 Main Road",
-                "city", "Hyderabad"), 200);
+                "city", "Hyderabad", "latitude", 17.385044, "longitude", 78.486671), 200);
         long own = created.get("id").asLong();
         assertEquals(owner.getId(), created.get("customerProfileId").asLong());
         assertFalse(created.has("customerId"));
@@ -182,9 +182,9 @@ class Stage2AssetsTest {
         request(post("/api/v1/customers/me/buildings"), owner.getUser(), Map.of("buildingName", "Bad", "customerProfileId", other.getId()), 400);
         JsonNode updated = request(put("/api/v1/customers/me/buildings/" + own), owner.getUser(), Map.of(
                 "buildingName", "Updated Tower",
-                "buildingType", "Office"), 200);
+                "buildingType", "Office", "latitude", 17.385044, "longitude", 78.486671), 200);
         assertEquals("Updated Tower", updated.get("buildingName").asText());
-        request(put("/api/v1/customers/me/buildings/" + foreign), owner.getUser(), Map.of("buildingName", "Moved"), 404);
+        request(put("/api/v1/customers/me/buildings/" + foreign), owner.getUser(), Map.of("buildingName", "Moved", "latitude", 17.385044, "longitude", 78.486671), 404);
         request(delete("/api/v1/customers/me/buildings/" + foreign), owner.getUser(), null, 404);
         request(delete("/api/v1/customers/me/buildings/" + own), owner.getUser(), null, 200);
         em.flush();
@@ -314,7 +314,7 @@ class Stage2AssetsTest {
         assertEquals(1, db.queryForObject("select count(*) from lifts where id=?", Integer.class, l));
         assertEquals(1, db.queryForObject("select count(*) from amc_contracts where id=?", Integer.class, a));
         request(post("/api/v1/lifts"), admin, Map.of("buildingId", b, "name", "Blocked"), 409);
-        request(put("/api/v1/buildings/" + b), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "Blocked"), 409);
+        request(put("/api/v1/buildings/" + b), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "Blocked", "latitude", 17.385044, "longitude", 78.486671), 409);
         request(put("/api/v1/lifts/" + l), admin, Map.of("buildingId", b, "name", "Blocked"), 409);
         request(post("/api/v1/amc-contracts"), admin, contract(l, "2031-01-01", "2031-12-31"), 409);
         assertEquals(a, request(get("/api/v1/amc-contracts"), owner.getUser(), null, 200).get(0).get("id").asLong());

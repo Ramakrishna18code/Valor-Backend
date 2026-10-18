@@ -7,6 +7,8 @@ interface PaymentGateway {
     String keyId();
     boolean configured();
     JsonNode createOrder(BigDecimal amount, String currency, String receipt);
+    JsonNode lookupOrder(String razorpayOrderId);
+    JsonNode lookupPayment(String razorpayPaymentId);
     JsonNode createRefund(String providerPaymentId, BigDecimal amount, String notes);
     boolean validWebhookSignature(String payload, String signature);
 }

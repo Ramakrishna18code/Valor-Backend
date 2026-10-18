@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX uk_invoice_installation_milestone ON invoices(installation_milestone_id);

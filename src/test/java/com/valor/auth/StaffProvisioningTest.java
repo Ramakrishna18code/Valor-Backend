@@ -41,7 +41,8 @@ class StaffProvisioningTest {
     }
     @Test void technicianCreatedWithProfile()throws Exception{
         var body=input(Role.TECHNICIAN);body.put("employeeId",UUID.randomUUID().toString());body.put("assignedArea","North");body.put("specialization","Electrical");body.put("availabilityStatus","OFF_DUTY");
-        long id=create(actor(Role.SUPER_ADMIN),body,200).get("userId").asLong();var p=techs.findByUserId(id).orElseThrow();
+        JsonNode response=create(actor(Role.SUPER_ADMIN),body,200); assertFalse(response.has("latitude")); assertFalse(response.has("longitude"));
+        long id=response.get("userId").asLong();var p=techs.findByUserId(id).orElseThrow();
         assertTrue(p.active);assertEquals("North",p.assignedArea);assertEquals("Electrical",p.specialization);assertEquals("OFF_DUTY",p.availabilityStatus);assertTrue(customers.findByUserId(id).isEmpty());
     }
     @Test void emailNormalizedAndDuplicateRejected()throws Exception{
@@ -83,7 +84,10 @@ class StaffProvisioningTest {
     }
     @Test void invalidFieldsAndMissingStaffHaveSafeErrors()throws Exception{
         var a=actor(Role.SUPER_ADMIN);var b=input(Role.TECHNICIAN);b.put("availabilityStatus","INVALID");create(a,b,400);
-        b=input(Role.ADMIN);b.put("email","invalid");create(a,b,400);b=input(Role.ADMIN);b.put("password","");create(a,b,400);
+        b=input(Role.ADMIN);b.put("email","invalid");create(a,b,400);b=input(Role.ADMIN);b.put("password","");
+        JsonNode generatedPasswordStaff=create(a,b,200);
+        assertTrue(generatedPasswordStaff.has("userId"));
+        assertFalse(generatedPasswordStaff.toString().contains("password"));
         b=input(Role.ADMIN);b.put("passwordHash","forbidden");create(a,b,400);
         call(delete("/api/v1/admin/users/9223372036854775807"),a,null,404);call(delete("/api/v1/admin/users/invalid"),a,null,400);
     }

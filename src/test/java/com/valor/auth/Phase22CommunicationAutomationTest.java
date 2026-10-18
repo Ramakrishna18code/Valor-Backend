@@ -44,7 +44,7 @@ class Phase22CommunicationAutomationTest {
         call(put("/api/v1/admin/communications/preferences/" + customer.getId()), admin,
                 Map.of("emailEnabled", true, "smsEnabled", true, "whatsappEnabled", true, "inAppEnabled", true,
                         "serviceNotificationsEnabled", false));
-        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", profile.getId(), "buildingName", "Automation Tower")).get("id").asLong();
+        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", profile.getId(), "buildingName", "Automation Tower", "latitude", 17.385044, "longitude", 78.486671)).get("id").asLong();
         long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Automation Lift")).get("id").asLong();
         long request = call(post("/api/v1/service-requests"), customer,
                 Map.of("liftId", lift, "title", "Automation request", "description", "Issue", "serviceType", "BREAKDOWN"))

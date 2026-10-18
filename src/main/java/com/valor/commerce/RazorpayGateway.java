@@ -44,6 +44,18 @@ class RazorpayGateway implements PaymentGateway {
         return post("/orders", body);
     }
 
+    public JsonNode lookupOrder(String razorpayOrderId) {
+        requireConfigured();
+        if (offlineTestMode) return mapper.valueToTree(Map.of("id", razorpayOrderId, "status", "created"));
+        return get("/orders/" + razorpayOrderId);
+    }
+
+    public JsonNode lookupPayment(String razorpayPaymentId) {
+        requireConfigured();
+        if (offlineTestMode) return mapper.valueToTree(Map.of("id", razorpayPaymentId, "status", "authorized"));
+        return get("/payments/" + razorpayPaymentId);
+    }
+
     public JsonNode createRefund(String razorpayPaymentId, BigDecimal amount, String notes) {
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", "rfnd_test_" + razorpayPaymentId + "_" + paise(amount), "status", "pending"));
@@ -61,6 +73,10 @@ class RazorpayGateway implements PaymentGateway {
     private JsonNode post(String path, Map<String,Object> body) {
         return rest.post().uri(path).headers(h -> h.setBasicAuth(keyId, keySecret, StandardCharsets.UTF_8))
                 .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
+    }
+    private JsonNode get(String path) {
+        return rest.get().uri(path).headers(h -> h.setBasicAuth(keyId, keySecret, StandardCharsets.UTF_8))
+                .retrieve().body(JsonNode.class);
     }
     private long paise(BigDecimal rupees) { return rupees.movePointRight(2).setScale(0).longValueExact(); }
     private void requireConfigured() { if (!configured()) throw new CommerceException(503, "Razorpay test credentials are not configured"); }

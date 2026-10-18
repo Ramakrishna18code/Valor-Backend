@@ -67,8 +67,8 @@ class Phase13B1AuditCoverageTest {
         User admin = user(Role.ADMIN);
         CustomerProfile owner = customer();
         TechnicianProfile tech = technician();
-        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "Audit Tower"), 200).get("id").asLong();
-        long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Audit Lift"), 200).get("id").asLong();
+        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "Audit Tower", "latitude", 17.385044, "longitude", 78.486671), 200).get("id").asLong();
+        long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Audit Lift", "doorType", "MANUAL", "floorCount", 5), 200).get("id").asLong();
         long amc = call(post("/api/v1/amc-contracts"), admin, Map.of("liftId", lift, "plan", "Standard", "startDate", "2030-01-01", "endDate", "2030-12-31"), 200).get("id").asLong();
         long request = call(post("/api/v1/service-requests"), owner.getUser(), Map.of("liftId", lift, "title", "Audit service", "description", "Issue", "serviceType", "BREAKDOWN"), 200)
                 .at("/request/id").asLong();
@@ -89,8 +89,8 @@ class Phase13B1AuditCoverageTest {
         assertAudit("CUSTOMER_REACTIVATE", "CUSTOMER", customer, admin, "active=false");
 
         CustomerProfile owner = customer();
-        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "B1"), 200).get("id").asLong();
-        call(put("/api/v1/buildings/" + building), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "B2"), 200);
+        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "B1", "latitude", 17.385044, "longitude", 78.486671), 200).get("id").asLong();
+        call(put("/api/v1/buildings/" + building), admin, Map.of("customerProfileId", owner.getId(), "buildingName", "B2", "latitude", 17.385044, "longitude", 78.486671), 200);
         long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "L1"), 200).get("id").asLong();
         call(put("/api/v1/lifts/" + lift), admin, Map.of("buildingId", building, "name", "L2", "currentStatus", "MAINTENANCE"), 200);
         long amc = call(post("/api/v1/amc-contracts"), admin, Map.of("liftId", lift, "plan", "Basic", "startDate", "2030-01-01", "endDate", "2030-12-31"), 200).get("id").asLong();

@@ -12,6 +12,8 @@ Default port: 8081. Swagger: /swagger-ui.html. OpenAPI: /v3/api-docs. Public hea
 
 `GET /customers/me/lifts/{liftId}/service-code` and `POST /customers/me/lifts/{liftId}/service-code/regenerate` are scoped to the authenticated owner. Service-request arrival/completion URLs remain compatible shims, but verification uses the same lift-owned code with separate START and COMPLETE audit records. Codes do not expire or regenerate per assignment. Verification is limited to the assigned technician, matching request lift and workflow state, with three failed attempts per action. Installation requests without a lift bypass this requirement. Attempt counters, hashes, expiry metadata, and raw codes are not exposed to customers or Admin users.
 
+Technicians verify START or COMPLETE codes for a job with `POST /technician/me/jobs/{requestId}/service-code/verify` using `{ "action": "START|COMPLETE", "code": "..." }`. The request ID is canonical; the lift and active assignment are loaded server-side from the request. Only the assigned authenticated technician may call this route. START is accepted only at `REACHED_SITE` and gates `DIAGNOSIS`; COMPLETE is accepted only at `TESTING` and gates `COMPLETED`. The response contains `liftId`, `status`, `lockedUntil`, `attempts`, and `verifiedAt`; it never returns the submitted or stored code. Verification does not advance the request state; the existing workflow transition checks the recorded action-specific verification. Regenerating a customer code continues to replace the stored code without invalidating existing verification rows; whether regeneration should invalidate prior verification is a pending product/security decision.
+
 Building create/update payloads require non-null `latitude` and `longitude` within `[-90,90]` and `[-180,180]`. Database NOT NULL enforcement is deferred until existing NULL rows are safely audited.
 
 ## Authentication and identity
@@ -221,6 +223,12 @@ The canonical payment domain remains the application's business system of record
 ## Admin Transactions, Reports, and Exports
 
 Admin finance reporting is read from the application's existing normalized database records. It does not create a second payment ledger and does not query Razorpay directly for report generation. Transaction rows are derived from `PaymentRecord` and `PaymentRefund`; invoice, customer, service request and AMC context are returned only where already linked by those records.
+
+Financial document scope: the current contract exposes authoritative invoice, payment, and refund data through the JSON APIs above, and Admin transaction/report CSV exports. There is no customer receipt-download endpoint or consolidated refund PDF/CSV/JSON document endpoint in this phase. The service-report PDF is a separate operational document and is not a payment receipt. Clients must use the persisted status, amount, currency, refund status, and gateway fields; pending, failed, or uncertain payments must not be presented as successful receipts. No 12-month refund-document history or resend-notification feature is claimed by this contract.
+
+Customer payment receipts: `GET /payments/{id}/receipt.pdf` is available to the owning customer or authorized Admin/SUPER_ADMIN only, and returns `application/pdf` with filename `receipt-{paymentId}.pdf`. It is generated from the persisted successful `PaymentRecord` and its matching `Invoice`. The document includes a stable derived receipt reference (`RECEIPT-PAYMENT-{paymentId}`), invoice/payment references, authoritative payment date, amount, currency, and successful status. Pending, failed, processing, uncertain, missing-invoice, or mismatched payment records are rejected. The receipt is not a tax invoice and does not invent merchant, tax, or refund data.
+
+Consolidated refund documents: `GET /payments/{id}/refunds/document?format=pdf&includeUnsettled=false` is available to the owning customer or authorized Admin/SUPER_ADMIN. PDF is currently the only supported format. Customer results are limited to refund records created in the most recent 12 months; Admin/SUPER_ADMIN results include the full persisted history. By default, only `SUCCEEDED` refunds are listed. `includeUnsettled=true` includes `REQUESTED`, `PROCESSING`, and `FAILED` records with their status, but those records never contribute to the successful refunded total or net amount. The document is not a credit note or tax document and never changes payment, invoice, refund, or milestone state.
 
 | Method/path | Role | Input / data |
 |---|---|---|
@@ -469,7 +477,9 @@ The Phase 1 payment/invoice domain remains the application business system of re
 |---|---|---|
 | POST /payments/razorpay/checkout | CUSTOMER owner, ADMIN/SUPER_ADMIN | invoiceId -> paymentId, invoiceId, razorpayKeyId, razorpayOrderId, amount, currency, status |
 | POST /webhooks/razorpay | Razorpay signed webhook | raw body plus `X-Razorpay-Signature`; verifies signature, stores event id, processes idempotently |
-| POST /payments/{id}/refunds | ADMIN/SUPER_ADMIN | amount, reason? -> current PaymentView |
+| POST /payments/{id}/refund-requests | owner CUSTOMER | amount, reason? -> RefundView; creates a REQUESTED record only |
+| POST /payments/{id}/refunds | ADMIN/SUPER_ADMIN | amount, reason? -> current PaymentView; creates/approves through the refund policy |
+| POST /admin/payments/refunds/{id}/approve | ADMIN/SUPER_ADMIN | refundId, reason? -> current PaymentView; records the required approval and initiates only when policy permits |
 | GET /payments/{id}/refunds | owner CUSTOMER, ADMIN/SUPER_ADMIN | RefundView[] |
 | GET /admin/payments/reconciliation | ADMIN/SUPER_ADMIN | lightweight mismatch issue list |
 
@@ -477,7 +487,9 @@ Checkout creation never trusts a frontend amount. It validates invoice ownership
 
 Razorpay event mapping currently handles documented event names `payment.authorized`, `payment.captured`, `payment.failed`, `refund.processed`, and `refund.failed`. Internal statuses remain compatible: `PENDING`, `PROCESSING`, `SUCCEEDED`, `FAILED`, `CANCELLED`, `REFUNDED`, and `PARTIALLY_REFUNDED`. Unknown Razorpay events with valid signatures are stored as processed and ignored safely.
 
-Refund requests require an existing successful or partially refunded Razorpay payment, reject an active refund in progress, and reject over-refunding. Admin clicking refund creates a gateway refund request but does not mark completion; webhook synchronization updates refund/payment state.
+Refund requests require an existing successful or partially refunded Razorpay payment, reject an active refund in progress, and reject over-refunding. Customer requests create a persisted REQUESTED record without gateway side effects. Approval requires `VALOR_REFUNDS_SAME_ADMIN_THRESHOLD`; an absent or invalid value fails closed. Requests above the configured threshold require a second distinct Admin approval. Gateway initiation does not mark completion; webhook synchronization updates refund/payment state.
+
+Refund operational visibility is provided by the existing Admin transaction listing/detail and persisted refund fields, including approval actors/reasons, gateway status, provider refund ID, timestamps, payment references, and safe amount/currency data. The current `PaymentGateway` abstraction has no read-only provider refund lookup operation; therefore an `outcome_unknown` refund remains `PROCESSING` and is not automatically retried or reconciled from elapsed time. Confirmed `refund.processed`/`refund.failed` webhook events are the supported external settlement evidence. No refund reconciliation endpoint or provider polling behavior is claimed until a safe gateway lookup is added to the abstraction.
 
 Live tracking is latest-location only. Tracking is active for canonical Service Request statuses `ON_THE_WAY`, `REACHED_SITE`, `DIAGNOSIS`, `REPAIR_IN_PROGRESS`, `WAITING_FOR_PARTS`, and `TESTING`; it stops for `COMPLETED`, `CANCELLED`, and other non-trackable states.
 
@@ -654,6 +666,24 @@ The former job live-location endpoints and route/geofence/ETA response are retai
 ## Phase 1 Dedicated Installation Request Foundation
 
 Dedicated installation requests are separate from `/service-requests` and do not use the normal service-request status machine. Migration V39 adds installation requests, structured third-party property authorizations, request history, and document references. Phase 1 statuses are `DRAFT`, `SUBMITTED`, and `CANCELLED`; quotation, inspection, order, task, commissioning, handover, and lift activation states are not implemented yet.
+
+Installation milestone billing storage is additive in V50. No milestone schedule, percentage split, tax rule, due-date policy, or billing trigger is approved or configured by this contract. Milestone schedule activation and invoice generation therefore remain blocked until an authorized schedule and trigger policy are introduced; no default advance or synthetic milestone is created.
+
+### Phase 3 schedule configuration foundation (V51)
+
+Installation schedules are immutable version records. A schedule revision uses the same stable `scheduleKey` and an increasing `versionNo`; a previously approved version is never edited in place. Lifecycle values are `DRAFT`, `AWAITING_APPROVAL`, `APPROVED`, `SUPERSEDED`, and `CANCELLED`. The server stores the supplied currency and ordered milestone-definition document, but does not supply defaults or infer percentages, fixed amounts, tax, due dates, or billing triggers. Terms must be non-empty and currency must be a three-letter code before submission.
+
+| Method/path | Authorization | Input / data |
+|---|---|---|
+| GET /admin/installations/{requestId}/schedules | ADMIN, SUPER_ADMIN | versioned `InstallationScheduleView[]` |
+| POST /admin/installations/{requestId}/schedules | ADMIN, SUPER_ADMIN | non-empty currency and milestone definitions -> new `DRAFT` version |
+| POST /admin/installations/schedules/{id}/submit | ADMIN, SUPER_ADMIN | draft -> `AWAITING_APPROVAL` |
+| POST /admin/installations/schedules/{id}/company-approve | ADMIN, SUPER_ADMIN | authenticated company actor; no actor ID in body |
+| POST /customers/me/installations/schedules/{id}/approve | owning CUSTOMER | authenticated customer actor; ownership is checked against the schedule installation |
+
+Company and customer approvals are persisted against the exact schedule version. Repeated approval of the same type is idempotent. The schedule becomes `APPROVED` only after both approvals; approval of another customer or a changed version is rejected. There is no management exception, client-supplied approval status, or billing activation flag. V50 milestone invoice generation remains disabled: an approved schedule is stored for future review only and does not create, activate, or settle milestones or invoices. Missing business terms or required approval leaves the schedule non-approvable and non-billable.
+
+Milestone invoice generation is exposed only through `POST /admin/installations/milestones/{id}/invoice` for authenticated `ADMIN` or `SUPER_ADMIN` users. The server locks and loads the milestone, installation, linked schedule, and customer; request bodies cannot supply amount, currency, tax, trigger, status, ownership, or due date. Generation requires the exact linked schedule version to be `APPROVED`, both approval records, a matching milestone definition, positive authoritative amount, explicit tax amount, matching currency, and the supported authoritative trigger `INSTALLATION_COMPLETED` with the installation already `COMPLETED`. Missing or unverifiable conditions fail closed. Existing non-void/non-cancelled milestone invoices are reused, and the milestone is marked `INVOICED` only after invoice insertion succeeds. Generation never marks a milestone paid; existing verified payment, webhook, and reconciliation flows remain authoritative.
 
 | Method/path | Authorization | Input / data |
 |---|---|---|

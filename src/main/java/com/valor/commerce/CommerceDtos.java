@@ -29,9 +29,12 @@ final class CommerceDtos {
         LocalDateTime expiresAt, short attemptsRemaining, LocalDateTime lockedUntil, LocalDateTime verifiedAt, String code) {}
     record TechnicianServicePaymentView(Long serviceRequestId, InvoiceView invoice, PaymentView payment, CashPaymentOtpView cashOtp) {}
     record RefundCreate(@NotNull @DecimalMin("0.01") BigDecimal amount, @Size(max=500) String reason) implements StrictInput {}
+    record RefundApproval(@NotNull @Positive Long refundId, @Size(max=500) String reason) implements StrictInput {}
     record RefundView(Long id, Long paymentId, BigDecimal amount, String currency, RefundStatus status,
         String razorpayRefundId, String gatewayStatus, String reason, LocalDateTime createdAt, LocalDateTime updatedAt) {}
     record ReconciliationIssue(Long paymentId, Long invoiceId, String type, String detail) {}
+    record ReconciliationResult(Long paymentId, Long invoiceId, String localStatus, BigDecimal amount, String currency,
+        boolean gatewayEvidence, String gatewayStatus, boolean referencesMatch, String action, String reason) {}
     record PaymentView(Long id, Long customerProfileId, Long serviceRequestId, Long amcContractId, Long invoiceId,
         BigDecimal amount, String currency, PaymentPurpose purpose, PaymentStatus status, String providerReference,
         String razorpayOrderId, String razorpayPaymentId, String razorpayPaymentLinkId, String gatewayStatus,

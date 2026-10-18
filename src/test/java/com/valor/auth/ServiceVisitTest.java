@@ -54,7 +54,7 @@ class ServiceVisitTest {
         User admin = user(Role.ADMIN), customer = user(Role.CUSTOMER), techUser = user(Role.TECHNICIAN), otherUser = user(Role.TECHNICIAN);
         CustomerProfile customerProfile = new CustomerProfile(); customerProfile.setUser(customer); customerProfile.setFullName("Visit customer"); customers.saveAndFlush(customerProfile);
         TechnicianProfile tech = technician(techUser); technician(otherUser);
-        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", customerProfile.getId(), "buildingName", "Tower"), 200).get("id").asLong();
+        long building = call(post("/api/v1/buildings"), admin, Map.of("customerProfileId", customerProfile.getId(), "buildingName", "Tower", "latitude", 17.385044, "longitude", 78.486671), 200).get("id").asLong();
         long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Lift"), 200).get("id").asLong();
         Map<String, Object> requestInput = new HashMap<>(Map.of("title", "Repair", "description", "Issue", "serviceType", registeredLift ? "BREAKDOWN" : "INSTALLATION"));
         if (registeredLift) requestInput.put("liftId", lift);

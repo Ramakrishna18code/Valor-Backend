@@ -19,6 +19,14 @@ class PaymentRefund {
     private PaymentRecord payment;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "requested_by_user_id", nullable = false)
     private User requestedBy;
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "approved_by_user_id")
+    private User approvedBy;
+    @Column(name = "approved_at") private LocalDateTime approvedAt;
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "second_approved_by_user_id")
+    private User secondApprovedBy;
+    @Column(name = "second_approved_at") private LocalDateTime secondApprovedAt;
+    @Column(name = "approval_reason", length = 500) private String approvalReason;
+    @Column(name = "second_approval_reason", length = 500) private String secondApprovalReason;
     @Column(name = "amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
     @Column(name = "currency", nullable = false, length = 3)

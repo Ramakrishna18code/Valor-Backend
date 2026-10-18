@@ -125,7 +125,8 @@ class InstallationRequestTest {
         long id = draft.get("id").asLong(); long authId = draft.at("/authorization/id").asLong();
         call("POST", "/api/v1/admin/installations/authorizations/" + authId + "/review", admin, Map.of("status", "APPROVED"), 200);
         JsonNode submitted = call("POST", "/api/v1/customers/me/installations/" + id + "/submit", owner, Map.of("submissionKey", "inspection-submit", "version", draft.get("version").asLong()), 200);
-        JsonNode inspection = call("POST", "/api/v1/admin/installations/" + id + "/inspection", admin, null, 200);
+        JsonNode inspection = call("POST", "/api/v1/admin/installations/" + id + "/inspection", admin,
+                Map.of("scheduledDate", "2030-01-02", "technicianProfileId", inspector.getId()), 200);
         inspection = call("PUT", "/api/v1/admin/installations/inspections/" + inspection.get("id").asLong() + "/schedule", admin, Map.of("scheduledAt", "2030-01-02T10:00:00", "scheduledTimezone", "Asia/Kolkata", "version", inspection.get("version").asLong()), 200);
         inspection = call("PUT", "/api/v1/admin/installations/inspections/" + inspection.get("id").asLong() + "/assign", admin, Map.of("technicianProfileId", inspector.getId(), "version", inspection.get("version").asLong()), 200);
         long inspectionId = inspection.get("id").asLong();

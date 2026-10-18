@@ -90,7 +90,8 @@ class Phase1ContractTest {
         User a=user(Role.CUSTOMER),b=user(Role.CUSTOMER),admin=user(Role.ADMIN);
         call(put("/api/v1/customers/me"),a,Map.of("fullName","Changed","companyName","Acme"),200);
         assertEquals("Changed",call(get("/api/v1/customers/me"),a,null,200).get("fullName").asText());assertEquals("Customer",call(get("/api/v1/customers/me"),b,null,200).get("fullName").asText());
-        JsonNode building=call(post("/api/v1/customers/me/buildings"),a,Map.of("buildingName","Owned"),200);
+        JsonNode building=call(post("/api/v1/customers/me/buildings"),a,Map.of("buildingName","Owned",
+                "latitude",new java.math.BigDecimal("17.3850"),"longitude",new java.math.BigDecimal("78.4867")),200);
         assertEquals(1,call(get("/api/v1/customers/me/buildings"),a,null,200).size());assertEquals(0,call(get("/api/v1/customers/me/buildings"),b,null,200).size());
         call(post("/api/v1/customers/me/buildings"),a,Map.of("buildingName","Spoof","customerProfileId",customers.findByUserId(b.getId()).orElseThrow().id),400);
         JsonNode lift=call(post("/api/v1/lifts"),admin,Map.of("buildingId",building.get("id").asLong(),"name","Lift","healthScore",100),200);assertEquals(100,lift.get("healthScore").asInt());

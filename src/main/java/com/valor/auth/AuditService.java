@@ -1,6 +1,7 @@
 package com.valor.auth;
 
 import java.time.LocalDateTime;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,9 +23,14 @@ public class AuditService {
     public void record(String action, String entityType, Object entityId, String summary, String before, String after, String status) {
         AuditLog log = new AuditLog();
         try {
-            User actor = identities.actor();
-            log.actorUserId = actor.getId();
-            log.actorRole = actor.getRole().name();
+            var authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.getPrincipal() instanceof Long) {
+                User actor = identities.actor();
+                log.actorUserId = actor.getId();
+                log.actorRole = actor.getRole().name();
+            } else {
+                log.actorRole = "SYSTEM";
+            }
         } catch (RuntimeException ignored) {
             log.actorRole = "SYSTEM";
         }

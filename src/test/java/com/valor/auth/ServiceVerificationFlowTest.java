@@ -124,6 +124,14 @@ class ServiceVerificationFlowTest {
         return call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/report"), tech,
                 Map.of("diagnosis", "Diagnosed", "workPerformed", "Repaired", "testingResult", "Passed"), status);
     }
+    private void verifyServiceCode(Fixture f, String action) throws Exception {
+        String submitted = call(get("/api/v1/customers/me/lifts/" + f.liftId() + "/service-code"), f.customer(), null, 200).get("code").asText();
+        JsonNode result = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
+                Map.of("action", action, "code", submitted), 200);
+        assertEquals("VERIFIED", result.get("status").asText());
+        assertFalse(result.toString().contains(submitted));
+        assertFalse(result.has("code"));
+    }
     private void reach(Fixture f, String target) throws Exception {
         if (target.equals("PENDING")) return;
         long a = assign(f);
@@ -159,6 +167,7 @@ class ServiceVerificationFlowTest {
     }
     private void testing(Fixture f) throws Exception {
         arrive(f); send(f,"arrival",200); verify(f,"arrival",code(f,"arrival",f.customer()),200);
+        verifyServiceCode(f, "START");
         transition(f,f.technician(),"DIAGNOSIS","Diagnosed",200);
         transition(f,f.technician(),"REPAIR_IN_PROGRESS","Repair",200);
         transition(f,f.technician(),"TESTING","Test",200);
@@ -174,6 +183,7 @@ class ServiceVerificationFlowTest {
         assertTrue(inbox.toString().contains("Start-work code ready")); assertFalse(inbox.toString().contains(start.get("code").asText()));
         transition(f,f.technician(),"DIAGNOSIS","Blocked",409);
         verify(f,"arrival",start,200); assertTrue(code(f,"arrival",f.customer()).get("code").isNull());
+        verifyServiceCode(f, "START");
         transition(f,f.technician(),"DIAGNOSIS","Diagnosed",200);
         transition(f,f.technician(),"REPAIR_IN_PROGRESS","Repair",200);
         transition(f,f.technician(),"TESTING","Test",200); report(f,f.technician(),200);
@@ -181,7 +191,7 @@ class ServiceVerificationFlowTest {
         assertTrue(send(f,"completion",200).get("code").isNull()); JsonNode finish=code(f,"completion",f.customer());
         assertEquals(1, db.queryForObject("select count(*) from completion_otps where service_request_id=?", Integer.class, f.requestId()));
         inbox=call(get("/api/v1/notifications"),f.customer(),null,200); assertTrue(inbox.toString().contains("Completion code ready")); assertFalse(inbox.toString().contains(finish.get("code").asText()));
-        verify(f,"completion",finish,200); transition(f,f.technician(),"COMPLETED","Done",200);
+        verify(f,"completion",finish,200); verifyServiceCode(f, "COMPLETE"); transition(f,f.technician(),"COMPLETED","Done",200);
         assertEquals("VERIFIED",code(f,"completion",f.customer()).get("status").asText());
         assertTrue(code(f,"completion",f.technician()).get("code").isNull());
     }
@@ -199,7 +209,7 @@ class ServiceVerificationFlowTest {
         Fixture f=fixture(); arrive(f); send(f,"arrival",200); JsonNode old=code(f,"arrival",f.customer());verify(f,"arrival",old,200);
         long next=assign(f); assertTrue(code(f,"arrival",f.customer()).isNull()); send(f,"arrival",409);
         accept(f,next,f.technician()); assertEquals("REACHED_SITE",state(f)); transition(f,f.technician(),"DIAGNOSIS","Blocked",409);
-        verify(f,"arrival",old,400); send(f,"arrival",200); verify(f,"arrival",code(f,"arrival",f.customer()),200); transition(f,f.technician(),"DIAGNOSIS","Confirmed",200);
+        verify(f,"arrival",old,400); send(f,"arrival",200); verify(f,"arrival",code(f,"arrival",f.customer()),200); verifyServiceCode(f, "START"); transition(f,f.technician(),"DIAGNOSIS","Confirmed",200);
     }
     @Test void installationLocationWithoutLiftIsOptionalUntilTravelAndDoesNotThrow() throws Exception {
         Fixture f=fixture(); long request=call(post("/api/v1/service-requests"),f.customer(),Map.of("title","New lift","description","Install","serviceType","INSTALLATION"),200).at("/request/id").asLong();

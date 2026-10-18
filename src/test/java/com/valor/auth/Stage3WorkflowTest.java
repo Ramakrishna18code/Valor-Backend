@@ -100,20 +100,28 @@ class Stage3WorkflowTest {
         JsonNode otp=call(get(path(f)+"/"+kind+"-otp"),f.customer(),null,200);
         call(post(base+"/verify"),technician,Map.of("otpId",otp.get("id").asLong(),"otp",otp.get("code").asText()),200);
     }
+    private void verifyServiceCode(Fixture f, String action, User technician) throws Exception {
+        String submitted = call(get("/api/v1/customers/me/lifts/" + f.liftId() + "/service-code"), f.customer(), null, 200).get("code").asText();
+        JsonNode result = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), technician,
+                Map.of("action", action, "code", submitted), 200);
+        assertEquals("VERIFIED", result.get("status").asText());
+        assertFalse(result.has("code"));
+        assertFalse(result.toString().contains(submitted));
+    }
     private void reach(Fixture f, String target) throws Exception {
         if (target.equals("PENDING")) return;
         long a=assign(f); if(target.equals("ASSIGNED"))return;
         accept(f,a,f.technician()); if(target.equals("ACCEPTED"))return;
         transition(f,f.technician(),"ON_THE_WAY","Progress",200); if(target.equals("ON_THE_WAY"))return;
         transition(f,f.technician(),"REACHED_SITE","Progress",200);
-        verifyCustomerOtp(f,"arrival",f.technician()); if(target.equals("REACHED_SITE"))return;
+        verifyCustomerOtp(f,"arrival",f.technician()); verifyServiceCode(f,"START",f.technician()); if(target.equals("REACHED_SITE"))return;
         transition(f,f.technician(),"DIAGNOSIS","Progress",200); if(target.equals("DIAGNOSIS"))return;
         if(target.equals("WAITING_FOR_PARTS")){transition(f,f.technician(),target,"Waiting",200);return;}
         transition(f,f.technician(),"REPAIR_IN_PROGRESS","Repair",200); if(target.equals("REPAIR_IN_PROGRESS"))return;
         transition(f,f.technician(),"TESTING","Test",200);
         verifyCustomerOtp(f,"completion",f.technician()); if(target.equals("TESTING"))return;
-        if(target.equals("COMPLETED"))report(f,f.technician(),200);
-        transition(f,f.admin(),target,"Terminal reason",200);
+        if(target.equals("COMPLETED")) { report(f,f.technician(),200); verifyServiceCode(f,"COMPLETE",f.technician()); }
+        transition(f,target.equals("COMPLETED") ? f.technician() : f.admin(),target,"Terminal reason",200);
     }
 
     @Test void v3AndHibernateValidateUseSignedCanonicalMappingsAndExactMysqlSql() throws Exception {
@@ -323,9 +331,10 @@ class Stage3WorkflowTest {
         assertEquals(1, call(get("/api/v1/technician/me/dashboard"), f.technician(), null, 200).get("inProgressJobs").asLong());
         for (String next : List.of("REACHED_SITE", "DIAGNOSIS", "REPAIR_IN_PROGRESS", "TESTING")) {
             transition(f, f.technician(), next, "Progress", 200);
-            if (next.equals("REACHED_SITE")) verifyCustomerOtp(f, "arrival", f.technician());
+            if (next.equals("REACHED_SITE")) { verifyCustomerOtp(f, "arrival", f.technician()); verifyServiceCode(f, "START", f.technician()); }
         }
         verifyCustomerOtp(f, "completion", f.technician());
+        verifyServiceCode(f, "COMPLETE", f.technician());
         report(f, f.technician(), 200);
         transition(f, f.technician(), "COMPLETED", "Done", 200);
         JsonNode completed = call(get("/api/v1/technician/me/dashboard"), f.technician(), null, 200);
@@ -379,7 +388,8 @@ class Stage3WorkflowTest {
         JsonNode updated = report(f, replacement.getUser(), 200);
         assertEquals(old.get("id"), updated.get("id")); assertEquals(next, updated.get("assignmentId").asLong());
         verifyCustomerOtp(f, "completion", replacement.getUser());
-        transition(f, f.admin(), "COMPLETED", "", 200);
+        verifyServiceCode(f, "COMPLETE", replacement.getUser());
+        transition(f, replacement.getUser(), "COMPLETED", "", 200);
     }
 
     private Map<String,List<String>> graph() {
@@ -396,7 +406,7 @@ class Stage3WorkflowTest {
     @Test void everyAllowedTransitionAddsExactlyOneCorrectEvent() throws Exception {
         for (var entry : graph().entrySet()) for (String next : entry.getValue()) {
             Fixture f = fixture(); reach(f, entry.getKey());
-            if (next.equals("COMPLETED")) report(f, f.technician(), 200);
+            if (next.equals("COMPLETED")) { report(f, f.technician(), 200); verifyServiceCode(f, "COMPLETE", f.technician()); }
             int before = events(f);
             if (next.equals("ASSIGNED")) assign(f);
             else transition(f, entry.getKey().equals("PENDING") ? f.admin() : f.technician(), next, "Required notes", 200);
@@ -453,6 +463,7 @@ class Stage3WorkflowTest {
         transition(f, f.technician(), "COMPLETED", "", 409);
         assertEquals("TESTING", state(f)); assertEquals(before, events(f));
         report(f, f.technician(), 200);
+        verifyServiceCode(f, "COMPLETE", f.technician());
         transition(f, f.technician(), "COMPLETED", "", 200);
         assertEquals(before + 1, events(f)); assertNotNull(db.queryForObject("select completed_at from service_requests where id=?", Timestamp.class, f.requestId()));
         assertEquals(1, db.queryForObject("select count(*) from technician_assignments where service_request_id=? and status='COMPLETED' and active_request_id is null", Integer.class, f.requestId()));
@@ -462,7 +473,7 @@ class Stage3WorkflowTest {
     }
 
     @Test void completionRejectsReportWithWrongReporterWithoutMutation() throws Exception {
-        Fixture f = fixture(); reach(f, "TESTING"); report(f, f.technician(), 200); int before = events(f);
+        Fixture f = fixture(); reach(f, "TESTING"); report(f, f.technician(), 200); verifyServiceCode(f, "COMPLETE", f.technician()); int before = events(f);
         db.update("update service_reports set reported_by_user_id=? where service_request_id=?", f.admin().getId(), f.requestId());
         transition(f, f.admin(), "COMPLETED", "", 409);
         assertEquals("TESTING", state(f)); assertEquals(before, events(f));
@@ -508,11 +519,11 @@ class Stage3WorkflowTest {
     }
 
     @Test void concurrentCompletionProducesOneSuccessAndOneHistoryEvent() throws Exception {
-        Fixture f = fixture(); reach(f, "TESTING"); report(f, f.technician(), 200); int before = events(f);
+        Fixture f = fixture(); reach(f, "TESTING"); report(f, f.technician(), 200); verifyServiceCode(f, "COMPLETE", f.technician()); int before = events(f);
         ExecutorService executor = Executors.newFixedThreadPool(2); CountDownLatch go = new CountDownLatch(1);
         try {
             Callable<Integer> completion = () -> {
-                go.await(); return mvc.perform(post(path(f) + "/status").header("Authorization", "Bearer " + jwt.issue(f.admin()))
+                go.await(); return mvc.perform(post(path(f) + "/status").header("Authorization", "Bearer " + jwt.issue(f.technician()))
                         .contentType("application/json").content("{\"toStatus\":\"COMPLETED\"}")).andReturn().getResponse().getStatus();
             };
             Future<Integer> first = executor.submit(completion), second = executor.submit(completion); go.countDown();
@@ -527,6 +538,7 @@ class Stage3WorkflowTest {
             JsonNode created = report(f, f.technician(), 200);
             JsonNode saved = call(get(path(f)), f.technician(), null, 200).get("report");
             assertEquals(created.get("id"), saved.get("id"));
+            if (terminal.equals("COMPLETED")) verifyServiceCode(f, "COMPLETE", f.technician());
             transition(f, f.technician(), terminal, "Terminal explanation", 200);
             for (User actor : List.of(f.customer(), f.admin(), f.technician())) {
                 JsonNode detail = call(get(path(f)), actor, null, 200);

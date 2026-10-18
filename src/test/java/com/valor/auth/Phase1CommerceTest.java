@@ -106,7 +106,8 @@ class Phase1CommerceTest {
         CustomerProfile owner = customer();
         TechnicianProfile tech = technician();
         long building = call(post("/api/v1/buildings"), admin,
-                Map.of("customerProfileId", owner.getId(), "buildingName", "Phase 1 Tower"), 200).get("id").asLong();
+                Map.of("customerProfileId", owner.getId(), "buildingName", "Phase 1 Tower",
+                        "latitude", new java.math.BigDecimal("17.3850"), "longitude", new java.math.BigDecimal("78.4867")), 200).get("id").asLong();
         long lift = call(post("/api/v1/lifts"), admin, Map.of("buildingId", building, "name", "Phase 1 Lift",
                 "floorCount", 5, "doorType", "MANUAL"), 200).get("id").asLong();
         long amc = call(post("/api/v1/amc-contracts"), admin, Map.of("liftId", lift, "amcNumber", UUID.randomUUID().toString(),
@@ -121,6 +122,63 @@ class Phase1CommerceTest {
                 Map.of("technicianProfileId", f.technicianId()), 200).at("/activeAssignment/id").asLong();
         call(post("/api/v1/service-requests/" + f.requestId() + "/assignments/" + assignment + "/accept"), f.technician(), null, 200);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "ON_THE_WAY"), 200);
+    }
+
+    private void verifyStartCode(Fixture f) throws Exception {
+        String code = call(get("/api/v1/customers/me/lifts/" + f.liftId() + "/service-code"), f.customer(), null, 200).get("code").asText();
+        JsonNode result = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
+                Map.of("action", "START", "code", code), 200);
+        assertEquals("VERIFIED", result.get("status").asText());
+        assertFalse(result.has("code"));
+    }
+
+    private void verifyCompleteCode(Fixture f) throws Exception {
+        String code = call(get("/api/v1/customers/me/lifts/" + f.liftId() + "/service-code"), f.customer(), null, 200).get("code").asText();
+        JsonNode result = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
+                Map.of("action", "COMPLETE", "code", code), 200);
+        assertEquals("VERIFIED", result.get("status").asText());
+        assertFalse(result.has("code"));
+    }
+
+    @Test void technicianCanVerifyStartCodeWithoutReceivingTheCodeBack() throws Exception {
+        Fixture f = fixture();
+        startTracking(f);
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "REACHED_SITE"), 200);
+        String code = call(get("/api/v1/customers/me/lifts/" + f.liftId() + "/service-code"), f.customer(), null, 200).get("code").asText();
+
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "DIAGNOSIS"), 409);
+        JsonNode verified = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
+                Map.of("action", "START", "code", code), 200);
+        assertEquals("VERIFIED", verified.get("status").asText());
+        assertFalse(verified.has("code"));
+        JsonNode repeated = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
+                Map.of("action", "START", "code", "not-returned"), 200);
+        assertEquals("VERIFIED", repeated.get("status").asText());
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "DIAGNOSIS"), 200);
+    }
+
+    @Test void technicianCanVerifyCompleteCodeOnlyDuringTesting() throws Exception {
+        Fixture f = fixture();
+        startTracking(f);
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "REACHED_SITE"), 200);
+        verifyStartCode(f);
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "DIAGNOSIS"), 200);
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "REPAIR_IN_PROGRESS"), 200);
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "TESTING"), 200);
+        call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/report"), f.technician(),
+                Map.of("diagnosis", "Diagnosed", "workPerformed", "Repaired", "testingResult", "Passed"), 200);
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "COMPLETED"), 409);
+        String code = call(get("/api/v1/customers/me/lifts/" + f.liftId() + "/service-code"), f.customer(), null, 200).get("code").asText();
+        call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
+                Map.of("action", "COMPLETE", "code", "000000"), 400);
+        JsonNode verified = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
+                Map.of("action", "COMPLETE", "code", code), 200);
+        assertEquals("VERIFIED", verified.get("status").asText());
+        assertFalse(verified.has("code"));
+        JsonNode repeated = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
+                Map.of("action", "COMPLETE", "code", "not-returned"), 200);
+        assertEquals("VERIFIED", repeated.get("status").asText());
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "COMPLETED"), 200);
     }
 
     @Test void wrongCashOtpAttemptsPersistAndLockWithoutPayingInvoice() throws Exception {
@@ -190,7 +248,8 @@ class Phase1CommerceTest {
         assertEquals("INR", checkout.get("currency").asText());
         long paymentId = checkout.get("paymentId").asLong();
         String orderId = checkout.get("razorpayOrderId").asText();
-        call(post("/api/v1/payments/razorpay/checkout"), f.customer(), Map.of("invoiceId", invoice), 409);
+        JsonNode reusedCheckout = call(post("/api/v1/payments/razorpay/checkout"), f.customer(), Map.of("invoiceId", invoice), 200);
+        assertEquals(paymentId, reusedCheckout.get("paymentId").asLong());
 
         String captured = """
                 {"id":"evt_capture_1","event":"payment.captured","payload":{"payment":{"entity":{"id":"pay_test_1","order_id":"%s","status":"captured"}}}}
@@ -262,7 +321,7 @@ class Phase1CommerceTest {
         Fixture f = fixture();
         long invoice = call(post("/api/v1/invoices"), f.admin(), Map.of("customerProfileId", f.customerId(),
                 "serviceRequestId", f.requestId(), "description", "Report invoice", "subtotal", 800, "taxAmount", 160, "currency", "INR"), 200).get("id").asLong();
-        long payment = call(post("/api/v1/payments"), f.customer(), Map.of("invoiceId", invoice, "amount", 960,
+        long payment = call(post("/api/v1/payments"), f.customer(), Map.of("invoiceId", invoice, "amount", 999,
                 "currency", "INR", "purpose", "INVOICE"), 200).get("id").asLong();
         call(put("/api/v1/payments/" + payment + "/status"), f.admin(), Map.of("status", "SUCCEEDED"), 200);
         call(put("/api/v1/invoices/" + invoice + "/status"), f.admin(), Map.of("status", "PAID"), 200);
@@ -271,7 +330,7 @@ class Phase1CommerceTest {
             JsonNode data = call(get("/api/v1/admin/reports/" + report), f.admin(), null, 200);
             assertTrue(data.get("summary").isObject(), report);
         }
-        assertTrue(call(get("/api/v1/admin/reports/revenue"), f.admin(), null, 200).at("/summary/netAmount").asDouble() >= 960);
+        assertTrue(call(get("/api/v1/admin/reports/revenue"), f.admin(), null, 200).at("/summary/netAmount").asDouble() >= 999);
         call(get("/api/v1/admin/reports/payments?status=INVALID"), f.admin(), null, 400);
         call(get("/api/v1/admin/reports/revenue?dateFrom=2030-02-01&dateTo=2030-01-01"), f.admin(), null, 400);
         call(get("/api/v1/admin/reports/revenue"), f.customer(), null, 403);
@@ -284,7 +343,7 @@ class Phase1CommerceTest {
         call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/location"), f.technician(),
                 Map.of("latitude", 12.9716, "longitude", 77.5946, "timestamp", "2026-09-16T10:00:00"), 409);
         startTracking(f);
-        call(get("/api/v1/customers/me/service-requests/" + f.requestId() + "/technician-location"), f.customer(), null, 404);
+        assertTrue(call(get("/api/v1/customers/me/service-requests/" + f.requestId() + "/technician-location"), f.customer(), null, 200).isNull());
         call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/location"), other.technician(),
                 Map.of("latitude", 12.9716, "longitude", 77.5946, "timestamp", "2026-09-16T10:00:00"), 403);
         call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/location"), f.technician(),
@@ -297,15 +356,20 @@ class Phase1CommerceTest {
         assertEquals("2026-09-16T10:00:00", seen.get("timestamp").asText());
         call(get("/api/v1/customers/me/service-requests/" + f.requestId() + "/technician-location"), other.customer(), null, 403);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "REACHED_SITE"), 200);
+        String locationCode = call(get("/api/v1/customers/me/lifts/" + f.liftId() + "/service-code"), f.customer(), null, 200).get("code").asText();
+        JsonNode locationVerification = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
+                Map.of("action", "START", "code", locationCode), 200);
+        assertFalse(locationVerification.has("code"));
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "DIAGNOSIS"), 200);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "REPAIR_IN_PROGRESS"), 200);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "TESTING"), 200);
         call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/report"), f.technician(),
                 Map.of("diagnosis", "Diagnosed", "workPerformed", "Repaired", "testingResult", "Passed"), 200);
+        verifyCompleteCode(f);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "COMPLETED"), 200);
         call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/location"), f.technician(),
                 Map.of("latitude", 12.9716, "longitude", 77.5946), 403);
-        call(get("/api/v1/customers/me/service-requests/" + f.requestId() + "/technician-location"), f.customer(), null, 409);
+        call(get("/api/v1/customers/me/service-requests/" + f.requestId() + "/technician-location"), f.customer(), null, 200);
     }
 
     @Test void supportTicketsCanBeCreatedByCustomersAndTechniciansButManagedByAdmin() throws Exception {
@@ -329,14 +393,23 @@ class Phase1CommerceTest {
                 Map.of("requestedStartDate", "2031-01-01", "requestedEndDate", "2031-12-31"), 409);
         long invoice = call(post("/api/v1/invoices"), f.admin(), Map.of("customerProfileId", f.customerId(), "amcContractId", f.amcId(),
                 "description", "AMC renewal", "subtotal", 5000, "taxAmount", 900), 200).get("id").asLong();
-        long payment = call(post("/api/v1/payments"), f.customer(), Map.of("invoiceId", invoice, "amount", 5900, "purpose", "AMC_RENEWAL"), 200).get("id").asLong();
-        call(put("/api/v1/amc-renewal-requests/" + renewal + "/quote"), f.admin(), Map.of("quotedAmount", 5900,
+        JsonNode checkout = call(post("/api/v1/payments/razorpay/checkout"), f.customer(), Map.of("invoiceId", invoice), 200);
+        long payment = checkout.get("paymentId").asLong();
+        call(put("/api/v1/amc-renewal-requests/" + renewal + "/quote"), f.admin(), Map.of("quotedAmount", 14999,
                 "currency", "INR", "invoiceId", invoice, "paymentId", payment), 200);
         call(put("/api/v1/amc-renewal-requests/" + renewal + "/status"), f.admin(), Map.of("status", "RENEWED", "paymentId", payment), 409);
-        call(put("/api/v1/payments/" + payment + "/status"), f.admin(), Map.of("status", "SUCCEEDED"), 200);
+        webhook("""
+                {"id":"evt_amc_capture","event":"payment.captured","payload":{"payment":{"entity":{"id":"pay_amc_1","order_id":"%s","status":"captured"}}}}
+                """.formatted(checkout.get("razorpayOrderId").asText()), 200);
+        assertEquals("PAID", call(get("/api/v1/invoices/" + invoice), f.customer(), null, 200).get("status").asText());
         JsonNode applied = call(put("/api/v1/amc-renewal-requests/" + renewal + "/status"), f.admin(),
                 Map.of("status", "RENEWED", "paymentId", payment, "invoiceId", invoice), 200);
         assertEquals("RENEWED", applied.get("status").asText());
+        JsonNode repeated = call(put("/api/v1/amc-renewal-requests/" + renewal + "/status"), f.admin(),
+                Map.of("status", "RENEWED", "paymentId", payment, "invoiceId", invoice), 200);
+        assertEquals("RENEWED", repeated.get("status").asText());
+        assertEquals(1, em.createQuery("select a.renewalCount from AmcContract a where a.id=:id", Integer.class)
+                .setParameter("id", f.amcId()).getSingleResult());
         assertEquals(LocalDate.parse("2031-12-31"), em.createQuery("select a.endDate from AmcContract a where a.id=:id", LocalDate.class)
                 .setParameter("id", f.amcId()).getSingleResult());
     }
@@ -406,11 +479,13 @@ class Phase1CommerceTest {
         call(post("/api/v1/service-requests/" + f.requestId() + "/assignments/" + call(get("/api/v1/service-requests/" + f.requestId()), f.admin(), null, 200).at("/activeAssignment/id").asLong() + "/accept"), f.technician(), null, 200);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "ON_THE_WAY"), 200);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "REACHED_SITE"), 200);
+        verifyStartCode(f);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "DIAGNOSIS"), 200);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "REPAIR_IN_PROGRESS"), 200);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "TESTING"), 200);
         call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/report"), f.technician(),
                 Map.of("diagnosis", "Diagnosed", "workPerformed", "Repaired", "testingResult", "Passed"), 200);
+        verifyCompleteCode(f);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "COMPLETED"), 200);
         JsonNode feedback = call(put("/api/v1/service-requests/" + f.requestId() + "/feedback"), f.customer(),
                 Map.of("rating", 5, "comment", "Good work"), 200);

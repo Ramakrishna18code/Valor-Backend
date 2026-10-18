@@ -33,12 +33,26 @@ class CommerceController {
     ApiResponse<CashPaymentOtpView> verifyCashOtp(@Valid @RequestBody CashPaymentOtpVerify input) { return ok(service.verifyCashPaymentOtp(input)); }
     @GetMapping("/payments/{id}/cash-otp")
     ApiResponse<CashPaymentOtpView> cashOtpState(@PathVariable Long id) { return ok(service.latestCashPaymentOtp(id)); }
+    @GetMapping("/payments/{id}/receipt.pdf")
+    ResponseEntity<Resource> paymentReceiptPdf(@PathVariable Long id) { return download(service.paymentReceiptPdf(id)); }
     @PostMapping("/payments/{id}/refunds")
     ApiResponse<PaymentView> refund(@PathVariable Long id, @Valid @RequestBody RefundCreate input) { return ok(service.requestRefund(id, input)); }
+    @PostMapping("/payments/{id}/refund-requests")
+    ApiResponse<RefundView> refundRequest(@PathVariable Long id, @Valid @RequestBody RefundCreate input) { return ok(service.customerRequestRefund(id, input)); }
+    @PostMapping("/admin/payments/refunds/{id}/approve")
+    ApiResponse<PaymentView> approveRefund(@PathVariable Long id, @Valid @RequestBody RefundApproval input) { return ok(service.approveRefund(id, input)); }
     @GetMapping("/payments/{id}/refunds")
     ApiResponse<List<RefundView>> refunds(@PathVariable Long id) { return ok(service.paymentRefunds(id)); }
+    @GetMapping("/payments/{id}/refunds/document")
+    ResponseEntity<Resource> refundDocumentPdf(@PathVariable Long id,
+            @RequestParam(defaultValue = "pdf") String format,
+            @RequestParam(defaultValue = "false") boolean includeUnsettled) {
+        return download(service.refundDocument(id, format, includeUnsettled));
+    }
     @GetMapping("/admin/payments/reconciliation")
     ApiResponse<List<ReconciliationIssue>> reconciliation() { return ok(service.reconciliation()); }
+    @PostMapping("/admin/payments/{id}/reconcile")
+    ApiResponse<ReconciliationResult> reconcilePayment(@PathVariable Long id) { return ok(service.reconcilePayment(id)); }
     @PostMapping("/webhooks/razorpay")
     ApiResponse<Void> razorpayWebhook(@RequestBody String payload, @RequestHeader(name = "X-Razorpay-Signature", required = false) String signature) {
         service.razorpayWebhook(payload, signature); return ok(null);
