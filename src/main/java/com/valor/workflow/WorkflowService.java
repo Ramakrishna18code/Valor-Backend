@@ -155,18 +155,42 @@ public class WorkflowService {
                 .sorted(Comparator.comparing((ServiceRequest request) -> request.getPriority() != RequestPriority.EMERGENCY)
                         .thenComparing(ServiceRequest::getId)).toList();
         int assigned = 0;
+        List<AutoAssignSkipped> skipped = new ArrayList<>();
         for (ServiceRequest request : pending) {
-            if (assignments.active(request.getId()).isPresent()) continue;
+            if (assignments.active(request.getId()).isPresent()) {
+                skipped.add(new AutoAssignSkipped(request.getId(), "Already has an active technician assignment."));
+                continue;
+            }
             TechnicianProfile technician = available.stream()
                     .filter(candidate -> eligibleForAutoAssignment(request, candidate))
                     .min(Comparator.comparingInt((TechnicianProfile candidate) -> matchingScore(request, candidate))
                             .thenComparingLong(candidate -> assignments.activeCount(candidate.getId()))
                             .thenComparing(TechnicianProfile::getId)).orElse(null);
-            if (technician == null) continue;
+            if (technician == null) {
+                skipped.add(new AutoAssignSkipped(request.getId(), autoAssignReason(request, available)));
+                continue;
+            }
             assign(request.getId(), new AssignRequest(technician.getId(), "Auto-assigned by availability, service match, and active workload."));
             assigned++;
         }
-        return new AutoAssignSummary(assigned, pending.size() - assigned);
+        return new AutoAssignSummary(assigned, skipped.size(), skipped);
+    }
+
+    private String autoAssignReason(ServiceRequest request, List<TechnicianProfile> available) {
+        if (available.isEmpty()) return "No active and available technician was found.";
+        String service = request.getServiceType() == null ? "service type" : request.getServiceType().name();
+        String category = request.getIssueCategory();
+        String city = request.getLift() == null || request.getLift().getBuilding() == null ? null : request.getLift().getBuilding().getCity();
+        if (available.stream().noneMatch(candidate -> {
+            String specialization = normalize(candidate.getSpecialization());
+            return specialization.isEmpty() || ((!normalize(service).isEmpty() && (specialization.contains(normalize(service)) || normalize(service).contains(specialization)))
+                    || (!normalize(category).isEmpty() && (specialization.contains(normalize(category)) || normalize(category).contains(specialization))));
+        })) return "No available technician matches service type '" + service + "' or issue category '" + (category == null ? "not provided" : category) + "'.";
+        if (city != null && available.stream().noneMatch(candidate -> {
+            String area = normalize(candidate.getAssignedArea());
+            return area.isEmpty() || area.contains(normalize(city)) || normalize(city).contains(area);
+        })) return "Available technicians do not cover the request city/area ('" + city + "').";
+        return "No eligible technician passed the service, issue category, and city/area matching rules.";
     }
 
     private int matchingScore(ServiceRequest request, TechnicianProfile technician) {
@@ -198,7 +222,8 @@ public class WorkflowService {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
     }
 
-    public record AutoAssignSummary(int assigned, int skipped) {}
+    public record AutoAssignSummary(int assigned, int skipped, List<AutoAssignSkipped> skippedRequests) {}
+    public record AutoAssignSkipped(Long requestId, String reason) {}
 
     public Detail accept(Long id, Long assignmentId) {
         User actor = identities.actor();
