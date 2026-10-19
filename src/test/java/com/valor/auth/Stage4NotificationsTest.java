@@ -82,7 +82,7 @@ class Stage4NotificationsTest {
     private JsonNode read(User recipient, long id, int status) throws Exception { return call(put("/api/v1/notifications/" + id + "/read"), recipient, null, status); }
 
     @Test void latestMigrationsAndHibernateValidateUseOnlyCanonicalNotificationEntity() {
-        assertEquals("54", flyway.info().current().getVersion().getVersion());
+        assertEquals("55", flyway.info().current().getVersion().getVersion());
         assertEquals(0, flyway.info().pending().length);
         flyway.validate();
         assertEquals("validate", environment.getProperty("spring.jpa.hibernate.ddl-auto"));

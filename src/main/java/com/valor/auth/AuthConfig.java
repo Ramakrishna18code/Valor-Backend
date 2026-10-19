@@ -78,6 +78,7 @@ class AuthConfig {
                         .requestMatchers("/api/v1/admin/customers", "/api/v1/admin/customers/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/checklist-templates", "/api/v1/admin/checklist-templates/**",
                                 "/api/v1/admin/technicians/**").hasAnyRole("ADMIN","SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/checklists", "/api/v1/admin/checklists/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/service-visits/**", "/api/v1/admin/visit-change-requests/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/transactions", "/api/v1/admin/transactions/**", "/api/v1/admin/transactions.csv",
                                 "/api/v1/admin/reports/**").hasAnyRole("ADMIN", "SUPER_ADMIN")

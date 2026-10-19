@@ -28,6 +28,8 @@ class Phase15Controller {
     @PostMapping("/admin/checklist-templates/{id}/items") ApiResponse<ItemView> addItem(@PathVariable Long id, @Valid @RequestBody ItemWrite input) { return ok(checklists.addItem(id, input)); }
     @PutMapping("/admin/checklist-templates/{id}/items/{itemId}") ApiResponse<ItemView> updateItem(@PathVariable Long id, @PathVariable Long itemId, @Valid @RequestBody ItemWrite input) { return ok(checklists.updateItem(id, itemId, input)); }
     @DeleteMapping("/admin/checklist-templates/{id}/items/{itemId}") ApiResponse<Void> deleteItem(@PathVariable Long id, @PathVariable Long itemId) { checklists.deleteItem(id, itemId); return ok(null); }
+    @GetMapping("/admin/checklists") ApiResponse<WorkflowDtos.PageView<AdminChecklistSummary>> adminChecklists(@RequestParam(required=false) Long serviceRequestId, @RequestParam(required=false) JobChecklistStatus status, @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="20") int size) { return ok(checklists.adminList(serviceRequestId, status, page, size)); }
+    @GetMapping("/admin/checklists/{serviceRequestId}") ApiResponse<JobChecklistView> adminChecklist(@PathVariable Long serviceRequestId) { return ok(checklists.adminDetail(serviceRequestId)); }
 
     @GetMapping("/technician/me/jobs/{id}/checklist") ApiResponse<JobChecklistView> jobChecklist(@PathVariable Long id) { return ok(checklists.technicianChecklist(id)); }
     @PutMapping("/technician/me/jobs/{id}/checklist/responses") ApiResponse<JobChecklistView> saveChecklist(@PathVariable Long id, @Valid @RequestBody ResponseBatch input) { return ok(checklists.saveResponses(id, input)); }

@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.*;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
@@ -89,6 +90,8 @@ interface ChecklistItemRepository extends JpaRepository<ChecklistItem, Long> {
 
 interface JobChecklistRepository extends JpaRepository<JobChecklist, Long> {
     Optional<JobChecklist> findByRequestId(Long requestId);
+    @org.springframework.data.jpa.repository.Query("select j from JobChecklist j where (:requestId is null or j.request.id=:requestId) and (:status is null or j.status=:status) order by j.updatedAt desc, j.id desc")
+    Page<JobChecklist> search(@Param("requestId") Long requestId, @Param("status") JobChecklistStatus status, Pageable pageable);
 }
 
 interface ChecklistResponseRepository extends JpaRepository<ChecklistResponse, Long> {

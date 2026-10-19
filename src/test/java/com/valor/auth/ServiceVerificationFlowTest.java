@@ -89,6 +89,30 @@ class ServiceVerificationFlowTest {
         JsonNode saved=call(get(checklistPath),f.technician(),null,200);
         assertEquals("COMPLETED",saved.get("status").asText());assertEquals(1,saved.get("requiredCompleted").asInt());assertEquals(item,saved.get("responses").get(0).get("itemId").asLong());
     }
+    @Test void adminChecklistAuditIsAuthorizedAndReadOnly() throws Exception {
+        Fixture f=fixture(); assign(f);
+        long template=call(post("/api/v1/admin/checklist-templates"),f.admin(),Map.of("name","Audit checks","active",true,"serviceTypes",List.of("BREAKDOWN")),200).get("id").asLong();
+        long item=call(post("/api/v1/admin/checklist-templates/"+template+"/items"),f.admin(),Map.of("label","Audit item","required",true,"inputType","CHECKBOX"),200).get("id").asLong();
+        String path="/api/v1/technician/me/jobs/"+f.requestId()+"/checklist";
+        call(get(path),f.technician(),null,200);
+        call(put(path+"/responses"),f.technician(),Map.of("responses",List.of(Map.of("itemId",item,"checked",true))),200);
+        db.update("update job_checklists set status='IN_PROGRESS' where service_request_id=?",f.requestId());
+        JsonNode detail=call(get("/api/v1/admin/checklists/"+f.requestId()),f.admin(),null,200);
+        assertEquals("IN_PROGRESS",detail.get("status").asText());
+        assertEquals("IN_PROGRESS",db.queryForObject("select status from job_checklists where service_request_id=?",String.class,f.requestId()));
+        assertEquals(1,call(get("/api/v1/admin/checklists").param("serviceRequestId",String.valueOf(f.requestId())).param("status","IN_PROGRESS").param("page","-2").param("size","1000"),f.admin(),null,200).get("items").size());
+        assertEquals(0,call(get("/api/v1/admin/checklists").param("serviceRequestId",String.valueOf(f.requestId())).param("status","COMPLETED"),f.admin(),null,200).get("items").size());
+        call(get("/api/v1/admin/checklists"),f.technician(),null,403);
+        call(get("/api/v1/admin/checklists"),f.customer(),null,403);
+        call(get("/api/v1/admin/checklists"),user(Role.SUPER_ADMIN),null,200);
+        call(get("/api/v1/admin/checklists/999999"),f.admin(),null,404);
+    }
+    @Test void adminChecklistReadDoesNotCreateMissingChecklist() throws Exception {
+        Fixture f=fixture();
+        assertEquals(0,db.queryForObject("select count(*) from job_checklists where service_request_id=?",Integer.class,f.requestId()));
+        call(get("/api/v1/admin/checklists/"+f.requestId()),f.admin(),null,404);
+        assertEquals(0,db.queryForObject("select count(*) from job_checklists where service_request_id=?",Integer.class,f.requestId()));
+    }
     @Test void locationEndpointsAreRegisteredAndValidateInput() throws Exception {
         User customer=user(Role.CUSTOMER);
         CustomerProfile owner=new CustomerProfile();owner.setUser(customer);owner.setFullName("Location QA");customers.saveAndFlush(owner);

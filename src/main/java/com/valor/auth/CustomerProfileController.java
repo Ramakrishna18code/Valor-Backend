@@ -16,21 +16,26 @@ class CustomerProfileController {
     record ProfileWrite(@NotBlank @Size(max=160) String fullName,@Size(max=20) String alternatePhone,
                         @Size(max=200) String companyName,@Size(max=500) String address) implements AuthDtos.StrictInput {}
     private CustomerProfile profile(){User u=identities.actor();if(u.getRole()!=Role.CUSTOMER)throw new org.springframework.security.access.AccessDeniedException("Access denied");identities.requireActiveCustomerUser(u);return customers.findByUserId(u.getId()).orElseThrow();}
-    record TechnicianCounts(long districtCount,long stateCount) {}
+    record TechnicianCounts(long districtCount,long stateCount,long pincodeCount) {}
     private AuthDtos.CustomerSummary view(CustomerProfile p){if(p.referralCode==null)p.referralCode=auth.generateReferralCode(p.fullName);return new AuthDtos.CustomerSummary(p.id,p.fullName,p.user.getEmail(),p.user.getPhone(),p.alternatePhone,p.companyName,p.address,p.status,p.active,p.referralCode);}
     @Operation(operationId="getCustomerProfile") @GetMapping("/customers/me")
     ApiResponse<AuthDtos.CustomerSummary> get(){return ApiResponse.success("Success",view(profile()),200);}
     @Operation(operationId="updateCustomerProfile") @PutMapping("/customers/me")
     ApiResponse<AuthDtos.CustomerSummary> update(@Valid @RequestBody ProfileWrite input){CustomerProfile p=profile();p.fullName=input.fullName();p.alternatePhone=input.alternatePhone();p.companyName=input.companyName();p.address=input.address();return ApiResponse.success("Success",view(p),200);}
     @Operation(operationId="getCustomerTechnicianCounts") @GetMapping("/customers/me/technician-counts")
-    ApiResponse<TechnicianCounts> technicianCounts(@RequestParam(required=false) String district,@RequestParam(required=false) String state){
+    ApiResponse<TechnicianCounts> technicianCounts(@RequestParam(required=false) String district,@RequestParam(required=false) String state,@RequestParam(required=false) String pincode){
         profile();
         long districtCount=countTechnicians(district);
         long stateCount=countTechnicians(state);
-        return ApiResponse.success("Success",new TechnicianCounts(districtCount,stateCount),200);
+        long pincodeCount=countTechniciansByPincode(pincode);
+        return ApiResponse.success("Success",new TechnicianCounts(districtCount,stateCount,pincodeCount),200);
     }
     private long countTechnicians(String area){
         if(area==null||area.isBlank())return 0;
         return em.createQuery("select count(t) from TechnicianProfile t join t.user u where t.active=true and u.active=true and u.role=com.valor.auth.Role.TECHNICIAN and lower(t.assignedArea)=lower(:area)",Long.class).setParameter("area",area.trim()).getSingleResult();
+    }
+    private long countTechniciansByPincode(String pincode){
+        if(pincode==null||pincode.isBlank())return 0;
+        return em.createQuery("select count(t) from TechnicianProfile t join t.user u where t.active=true and u.active=true and u.role=com.valor.auth.Role.TECHNICIAN and exists (select 1 from TechnicianSavedLocation l where l.technician=t and l.pincode=:pincode)",Long.class).setParameter("pincode",pincode.trim()).getSingleResult();
     }
 }

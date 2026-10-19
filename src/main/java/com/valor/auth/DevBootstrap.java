@@ -54,6 +54,8 @@ class DevBootstrap implements ApplicationRunner {
     User u=users.findByEmail(normalizedEmail).orElseGet(()->{User n=new User();n.setEmail(normalizedEmail);n.setRole(Role.SUPER_ADMIN);n.setPasswordHash(encoder.encode(configuredPassword));return users.save(n);});
     if(u.getPasswordHash()==null){u.setPasswordHash(encoder.encode(configuredPassword));users.save(u);}
     ensureSuperAdmin("rk4053727@gmail.com", configuredPassword);
+    ensureAdmin("rk4053728@gmail.com", configuredPassword);
+    ensureAdmin("rk4053729@gmail.com", configuredPassword);
     if (sampleDataEnabled) seedSampleData(u);
   }
 
@@ -66,14 +68,24 @@ class DevBootstrap implements ApplicationRunner {
     if (user.getPasswordHash() == null) { user.setPasswordHash(encoder.encode(password)); users.save(user); }
   }
 
+  private void ensureAdmin(String email, String password) {
+    String normalized = email.trim().toLowerCase(Locale.ROOT);
+    User user = users.findByEmail(normalized).orElseGet(() -> {
+      User created = new User(); created.setEmail(normalized); created.setRole(Role.ADMIN); created.setPasswordHash(encoder.encode(password));
+      return users.save(created);
+    });
+    user.setRole(Role.ADMIN);
+    if (user.getPasswordHash() == null) user.setPasswordHash(encoder.encode(password));
+    users.save(user);
+  }
+
   private void pruneUnexpectedDevData(String configuredAdminEmail) {
     Set<String> allowedEmails = new HashSet<>();
     allowedEmails.add(configuredAdminEmail);
-    allowedEmails.add("rk4053727@gmail.com");
-    allowedEmails.add("mgopichakradhar@gmail.com");
+    allowedEmails.addAll(Set.of("rk4053727@gmail.com", "rk4053728@gmail.com", "rk4053729@gmail.com"));
     allowedEmails.addAll(Set.of(
-        "tech.arjun@valor.local", "tech.meera@valor.local", "tech.kabir@valor.local", "tech.nisha@valor.local", "tech.rohan@valor.local",
-        "ananya.rao@example.com", "vikram.menon@example.com", "priya.shah@example.com", "farhan.khan@example.com", "neha.iyer@example.com"));
+        "tech.arjun@valor.local", "tech.meera@valor.local", "tech.kabir@valor.local",
+        "mgopichakradhar@gmail.com", "gopichowdary1603@gmail.com", "gopimandepudi1603@gmail.com"));
 
     em.createNativeQuery("SET FOREIGN_KEY_CHECKS=0").executeUpdate();
     try {
@@ -100,21 +112,16 @@ class DevBootstrap implements ApplicationRunner {
     TechnicianProfile[] technicians = new TechnicianProfile[] {
         technician("tech.arjun@valor.local","VAL-T001","North Bengaluru","Traction lifts","AVAILABLE",password),
         technician("tech.meera@valor.local","VAL-T002","South Bengaluru","Hydraulic lifts","AVAILABLE",password),
-        technician("tech.kabir@valor.local","VAL-T003","East Bengaluru","Door systems","BUSY",password),
-        technician("tech.nisha@valor.local","VAL-T004","West Bengaluru","Controller diagnostics","AVAILABLE",password),
-        technician("tech.rohan@valor.local","VAL-T005","Central Bengaluru","Emergency response","OFF_DUTY",password)
+        technician("tech.kabir@valor.local","VAL-T003","East Bengaluru","Door systems","BUSY",password)
     };
     seedTechnicianLocations(technicians);
     CustomerProfile[] customers = new CustomerProfile[] {
-        customer("ananya.rao@example.com","+919810000001","Ananya Rao","Rao Residency","Indiranagar, Bengaluru",password),
-        customer("vikram.menon@example.com","+919810000002","Vikram Menon","Menon Heights","Koramangala, Bengaluru",password),
-        customer("priya.shah@example.com","+919810000003","Priya Shah","Shah Arcade","Whitefield, Bengaluru",password),
-        customer("farhan.khan@example.com","+919810000004","Farhan Khan","Khan Towers","Jayanagar, Bengaluru",password),
-        customer("neha.iyer@example.com","+919810000005","Neha Iyer","Iyer Enclave","Malleshwaram, Bengaluru",password)
+        customer("mgopichakradhar@gmail.com","+919810000001","M. Gopi Chakradhar","Gopi Residency","Indiranagar, Bengaluru",password),
+        customer("gopichowdary1603@gmail.com","+919810000002","Gopi Chowdary","Chowdary Heights","Koramangala, Bengaluru",password),
+        customer("gopimandepudi1603@gmail.com","+919810000003","Gopi Mandeepudi","Mandeepudi House","Whitefield, Bengaluru",password)
     };
     seedAnanyaCustomerDemo(admin, customers[0], technicians, password);
-    for (int i=0;i<customers.length;i++) seedCustomerAssetsAndRequest(admin, customers[i], technicians[i], i+1);
-    seedGopiDemoCustomer(admin, technicians, password);
+    for (int i=0;i<2;i++) seedCustomerAssetsAndRequest(admin, customers[i], technicians[i], i+1);
     seedParts(technicians, customers);
   }
 

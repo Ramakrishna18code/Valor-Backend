@@ -22,4 +22,7 @@ final class ChecklistDtos {
     record JobChecklistView(Long id, Long serviceRequestId, Long serviceVisitId, Long templateId, String templateName,
             int templateVersion, JobChecklistStatus status, int requiredTotal, int requiredCompleted,
             List<ItemView> items, List<ResponseView> responses, LocalDateTime updatedAt) {}
+    record AdminChecklistSummary(Long id, Long serviceRequestId, Long templateId, String templateName,
+            int templateVersion, JobChecklistStatus status, int requiredTotal, int requiredCompleted,
+            LocalDateTime updatedAt) {}
 }

@@ -36,10 +36,9 @@ class Phase1ContractTest {
     JsonNode send(User u)throws Exception{return call(post("/api/v1/auth/otp/send"),null,Map.of("phone",u.getPhone()),200);}
     Map<String,Object> verify(User u,JsonNode sent){return new HashMap<>(Map.of("phone",u.getPhone(),"otp",sent.get("otp").asText(),"requestId",sent.get("requestId").asLong()));}
     @Test void registrationAndMeHaveTypedProfilesAndRejectEvenNullRole()throws Exception{
-        String email=UUID.randomUUID()+"@example.test";var body=new HashMap<String,Object>(Map.of("email",email,"password","test-password","fullName","Name","companyName","Company"));
-        JsonNode session=call(post("/api/v1/auth/register"),null,body,200);assertEquals("CUSTOMER",session.get("role").asText());assertEquals("Company",session.at("/customerProfile/companyName").asText());
-        User u=users.findByEmail(email).orElseThrow();JsonNode me=call(get("/api/v1/me"),u,null,200);assertEquals(u.getId(),me.get("userId").asLong());assertEquals("CUSTOMER",me.get("role").asText());assertEquals("Name",me.at("/customerProfile/fullName").asText());
-        body.put("email",UUID.randomUUID()+"@example.test");body.put("role",null);call(post("/api/v1/auth/register"),null,body,400);
+        User u=user(Role.CUSTOMER);u.setEmail(UUID.randomUUID()+"@example.test");u.setPhone(null);users.saveAndFlush(u);
+        JsonNode me=call(get("/api/v1/me"),u,null,200);assertEquals(u.getId(),me.get("userId").asLong());assertEquals("CUSTOMER",me.get("role").asText());assertEquals("Customer",me.at("/customerProfile/fullName").asText());
+        String email=UUID.randomUUID()+"@example.test";long before=users.count();Map<String,Object> legacy=new HashMap<>();legacy.put("email",email);legacy.put("password","test-password");legacy.put("fullName","Name");legacy.put("role",null);call(post("/api/v1/auth/register"),null,legacy,400);assertEquals(before,users.count());assertTrue(users.findByEmail(email).isEmpty());
     }
     @Test void emailOnlyStaffLoginAndNormalizedCustomerPhone()throws Exception{
         for(Role role:List.of(Role.ADMIN,Role.SUPER_ADMIN,Role.TECHNICIAN)){
@@ -74,8 +73,7 @@ class Phase1ContractTest {
         call(post("/api/v1/auth/login/admin"),null,Map.of("email",u.getEmail(),"password","test-password"),400);
         call(get("/api/v1/me"),u,null,401);
         String email=UUID.randomUUID()+"@example.test";
-        call(post("/api/v1/auth/register"),null,Map.of("email",email,"phone","+1888"+String.format("%07d",Math.abs(UUID.randomUUID().getLeastSignificantBits()%10000000)),"fullName","Phone account"),200);
-        assertNull(users.findByEmail(email).orElseThrow().getPasswordHash());
+        long before=users.count();call(post("/api/v1/auth/register"),null,Map.of("email",email,"phone","+1888"+String.format("%07d",Math.abs(UUID.randomUUID().getLeastSignificantBits()%10000000)),"fullName","Phone account"),400);assertEquals(before,users.count());assertTrue(users.findByEmail(email).isEmpty());
     }
     @Test void productionNeverExposesOrPersistsDevelopmentOtp()throws Exception{
         String[] active=environment.getActiveProfiles();long before=otps.count();
@@ -109,10 +107,11 @@ class Phase1ContractTest {
     JsonNode schema(JsonNode doc,String path,String method,boolean request){JsonNode op=doc.get("paths").get(path).get(method);JsonNode c=request?op.get("requestBody"):op.at("/responses/200");return resolve(doc,c.get("content").elements().next().get("schema"));}
     Set<String> values(JsonNode n){Set<String>s=new HashSet<>();n.forEach(v->s.add(v.asText()));return s;}
     @Test void authOpenApiIsTypedAndOtpInputsAreDistinct()throws Exception{
-        JsonNode doc=docs(),reg=schema(doc,"/api/v1/auth/register","post",true);assertFalse(reg.get("properties").has("role"));assertTrue(reg.at("/properties/password/writeOnly").asBoolean());
+        JsonNode doc=docs(),reg=schema(doc,"/api/v1/auth/register/email/start","post",true);assertFalse(reg.get("properties").has("role"));assertTrue(reg.at("/properties/password/writeOnly").asBoolean());assertTrue(reg.get("required").toString().contains("email"));
+        JsonNode resend=schema(doc,"/api/v1/auth/register/email/resend","post",true),verifyRegistration=schema(doc,"/api/v1/auth/register/email/verify","post",true);assertTrue(resend.get("properties").has("challengeId"));assertEquals(Set.of("challengeId"),values(resend.get("required")));assertEquals(Set.of("challengeId","otp"),values(verifyRegistration.get("required")));
         for(String p:List.of("admin","technician")){JsonNode input=schema(doc,"/api/v1/auth/login/"+p,"post",true);assertTrue(input.get("properties").has("email"));assertFalse(input.get("properties").has("identity"));}
         JsonNode send=schema(doc,"/api/v1/auth/otp/send","post",true),verify=schema(doc,"/api/v1/auth/otp/verify","post",true);assertEquals(1,send.get("properties").size());assertTrue(send.get("properties").has("phone"));assertEquals(Set.of("phone","otp","requestId"),values(verify.get("required")));
-        for(String p:List.of("register","login/customer","login/admin","login/technician","otp/verify")){JsonNode response=schema(doc,"/api/v1/auth/"+p,"post",false);JsonNode data=resolve(doc,response.at("/properties/data"));for(String f:List.of("userId","role","accessToken","refreshToken","customerProfile","technicianProfile"))assertTrue(data.get("properties").has(f));}
+        for(String p:List.of("login/customer","login/admin","login/technician","otp/verify","register/email/verify")){JsonNode response=schema(doc,"/api/v1/auth/"+p,"post",false);JsonNode data=resolve(doc,response.at("/properties/data"));for(String f:List.of("userId","role","accessToken","refreshToken","customerProfile","technicianProfile"))assertTrue(data.get("properties").has(f));}
         JsonNode me=resolve(doc,schema(doc,"/api/v1/me","get",false).at("/properties/data"));assertTrue(me.get("properties").has("role"));assertTrue(me.get("properties").has("customerProfile"));
         JsonNode otp=resolve(doc,schema(doc,"/api/v1/auth/otp/send","post",false).at("/properties/data"));assertTrue(otp.get("properties").has("requestId"));assertTrue(otp.get("properties").has("expiresAt"));
         assertTrue(resolve(doc,schema(doc,"/api/v1/auth/refresh","post",false).at("/properties/data")).get("properties").has("refreshToken"));

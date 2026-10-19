@@ -556,15 +556,19 @@ class CommerceService {
             }
             refund.setGatewayStatus(providerStatus);
             if ("processed".equalsIgnoreCase(providerStatus)) {
+                boolean newlySucceeded = refund.getStatus() != RefundStatus.SUCCEEDED;
                 refund.setStatus(RefundStatus.SUCCEEDED);
                 updateRefundedPayment(payment);
+                if (newlySucceeded) emails.refundResult(payment.getCustomer().getUser().getId(), payment.getCustomer().getFullName(), refund.getId(), refund.getStatus().name(), refund.getAmount().toPlainString(), refund.getCurrency());
                 audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
                         "Verified provider refund status applied: processed");
                 return refundReconciliationResult(refund, payment, true, providerStatus, true,
                         "REFUND_CONFIRMED", "Verified provider refund is processed");
             }
             if ("failed".equalsIgnoreCase(providerStatus)) {
+                boolean newlyFailed = refund.getStatus() != RefundStatus.FAILED;
                 refund.setStatus(RefundStatus.FAILED);
+                if (newlyFailed) emails.refundResult(payment.getCustomer().getUser().getId(), payment.getCustomer().getFullName(), refund.getId(), refund.getStatus().name(), refund.getAmount().toPlainString(), refund.getCurrency());
                 audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
                         "Verified provider refund status applied: failed");
                 return refundReconciliationResult(refund, payment, true, providerStatus, true,
@@ -887,10 +891,12 @@ class CommerceService {
             // event may still resolve a previously failed/processing local record.
             if (event.equals("refund.processed") && refund.getStatus() != RefundStatus.SUCCEEDED) {
                 refund.setStatus(RefundStatus.SUCCEEDED);
+                emails.refundResult(refund.getPayment().getCustomer().getUser().getId(), refund.getPayment().getCustomer().getFullName(), refund.getId(), refund.getStatus().name(), refund.getAmount().toPlainString(), refund.getCurrency());
             }
             if (event.equals("refund.failed") && refund.getStatus() != RefundStatus.SUCCEEDED
                     && refund.getStatus() != RefundStatus.FAILED) {
                 refund.setStatus(RefundStatus.FAILED);
+                emails.refundResult(refund.getPayment().getCustomer().getUser().getId(), refund.getPayment().getCustomer().getFullName(), refund.getId(), refund.getStatus().name(), refund.getAmount().toPlainString(), refund.getCurrency());
             }
             updateRefundedPayment(refund.getPayment());
             audit.record(event.equals("refund.processed") ? "PAYMENT_REFUND_SETTLED" : "PAYMENT_REFUND_FAILED",

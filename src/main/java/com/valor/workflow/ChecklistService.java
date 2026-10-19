@@ -4,6 +4,7 @@ import com.valor.auth.*;
 import java.time.LocalDateTime;
 import java.util.*;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,6 +69,16 @@ class ChecklistService {
         refreshStatus(job);
         return jobView(job);
     }
+    WorkflowDtos.PageView<AdminChecklistSummary> adminList(Long requestId, JobChecklistStatus status, int page, int size) {
+        admin();
+        int safePage = Math.max(0, page), safeSize = Math.min(Math.max(1, size), 100);
+        var result = jobs.search(requestId, status, Pageable.ofSize(safeSize).withPage(safePage));
+        return new WorkflowDtos.PageView<>(result.getContent().stream().map(this::summaryView).toList(), safePage, safeSize, result.getTotalElements(), result.getTotalPages());
+    }
+    JobChecklistView adminDetail(Long requestId) {
+        admin();
+        return jobs.findByRequestId(requestId).map(this::jobView).orElseThrow(ChecklistService::missing);
+    }
     void requireComplete(Long requestId) {
         jobs.findByRequestId(requestId).ifPresent(job -> {
             refreshStatus(job);
@@ -121,6 +132,13 @@ class ChecklistService {
         return new JobChecklistView(job.id, job.request.getId(), job.visit == null ? null : job.visit.getId(), job.template.getId(), job.template.getName(),
                 job.templateVersion, job.status, required, done, itemRows.stream().map(this::itemView).toList(),
                 responseRows.stream().map(r -> new ResponseView(r.item.getId(), r.checked, r.valueText, r.technician.getId(), r.respondedAt)).toList(), job.updatedAt);
+    }
+    private AdminChecklistSummary summaryView(JobChecklist job) {
+        List<ChecklistItem> itemRows = items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId());
+        List<ChecklistResponse> responseRows = responses.findByChecklistId(job.id);
+        int required = (int)itemRows.stream().filter(i -> i.required).count();
+        int done = (int)itemRows.stream().filter(i -> i.required).filter(i -> responseRows.stream().anyMatch(r -> r.item.getId().equals(i.id) && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank()))).count();
+        return new AdminChecklistSummary(job.id, job.request.getId(), job.template.getId(), job.template.getName(), job.templateVersion, job.status, required, done, job.updatedAt);
     }
     private void admin() { User actor = identities.actor(); if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied(); }
     private static String clean(String value, int max) { if (value == null || value.isBlank()) return null; String v = value.trim(); return v.length() > max ? v.substring(0, max) : v; }

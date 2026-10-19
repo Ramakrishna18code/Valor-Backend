@@ -55,10 +55,10 @@ public class CommunicationService {
             Map<String,String> vars = withEvent(input.variables(), input.eventType());
             CommunicationMessage m = new CommunicationMessage(); m.event = event; m.recipient = recipient; m.channel = channel;
             m.template = template.orElse(null); m.templateKey = input.templateKey() != null ? input.templateKey() : template.map(t -> t.templateKey).orElse(input.eventType());
-            m.subject = render(template.map(t -> t.subject).orElse(input.eventType()), vars);
-            m.body = textFallback(render(template.map(t -> t.body).orElse("{{eventType}}"), vars));
+            m.subject = render(template.map(t -> t.subject).orElse(fallbackSubject(input.eventType())), vars);
+            m.body = textFallback(render(template.map(t -> t.body).orElse(fallbackBody(input.eventType())), vars));
             if (channel == CommunicationChannel.EMAIL) {
-                m.htmlBody = html(render(template.map(t -> t.body).orElse("{{eventType}}"), vars));
+                m.htmlBody = html(render(template.map(t -> t.body).orElse(fallbackBody(input.eventType())), vars));
                 m.fromAddress = value(vars, "from", emailProperties.from());
                 m.fromName = value(vars, "fromName", emailProperties.fromName());
                 m.replyTo = value(vars, "replyTo", emailProperties.replyTo());
@@ -176,6 +176,20 @@ public class CommunicationService {
     private static String textFallback(String body) { return (body == null ? "" : body).replaceAll("<[^>]+>", "").replace("&nbsp;", " ").trim(); }
     private static String escape(String value) { return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"); }
     private static String payload(Map<String,String> variables) { return Optional.ofNullable(variables).orElse(Map.of()).toString(); }
+    private static String fallbackSubject(String eventType) {
+        return switch (eventType == null ? "" : eventType) {
+            case "CUSTOMER_WELCOME" -> "Welcome to Valor";
+            case "REFUND_RESULT" -> "Refund status update";
+            default -> eventType == null ? "Valor notification" : eventType;
+        };
+    }
+    private static String fallbackBody(String eventType) {
+        return switch (eventType == null ? "" : eventType) {
+            case "CUSTOMER_WELCOME" -> "Hello {{name}},\n\nYour Valor account has been created. You can sign in using your existing credentials.\n\nThis email does not contain a password or authentication secret.";
+            case "REFUND_RESULT" -> "Hello {{name}},\n\nRefund {{refundId}} is now {{status}} for {{amount}} {{currency}}. The status reflects verified backend records.";
+            default -> "{{eventType}}";
+        };
+    }
     private static String safeFailure(String reason) { return reason == null ? "Provider failed" : Pattern.compile("(?i)(key|secret|token|password)=\\S+").matcher(reason).replaceAll("$1=***"); }
     private static boolean bool(Boolean value, boolean fallback) { return value == null ? fallback : value; }
     private MessageView view(CommunicationMessage m) { return new MessageView(m.id, m.event.id, m.event.eventType, m.recipient.getId(), m.recipientMasked, m.channel, m.status, m.provider, m.providerMessageId, m.templateKey, m.retryCount, m.maxRetryCount, m.nextRetryAt, m.failureReason, m.sentAt, m.deliveredAt, m.failedAt, m.createdAt, m.updatedAt); }

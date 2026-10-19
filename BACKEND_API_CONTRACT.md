@@ -224,7 +224,7 @@ The canonical payment domain remains the application's business system of record
 
 Admin finance reporting is read from the application's existing normalized database records. It does not create a second payment ledger and does not query Razorpay directly for report generation. Transaction rows are derived from `PaymentRecord` and `PaymentRefund`; invoice, customer, service request and AMC context are returned only where already linked by those records.
 
-Financial document scope: the current contract exposes authoritative invoice, payment, and refund data through the JSON APIs above, and Admin transaction/report CSV exports. There is no customer receipt-download endpoint or consolidated refund PDF/CSV/JSON document endpoint in this phase. The service-report PDF is a separate operational document and is not a payment receipt. Clients must use the persisted status, amount, currency, refund status, and gateway fields; pending, failed, or uncertain payments must not be presented as successful receipts. No 12-month refund-document history or resend-notification feature is claimed by this contract.
+Financial document scope: the current contract exposes authoritative invoice, payment, and refund data through the JSON APIs above, Admin transaction/report CSV exports, a customer/Admin payment receipt PDF, and a consolidated refund PDF. The service-report PDF is a separate operational document and is not a payment receipt. Clients must use the persisted status, amount, currency, refund status, and gateway fields; pending, failed, or uncertain payments must not be presented as successful receipts. Refund-document history and inclusion rules are defined in the consolidated refund document section below; no resend-notification feature is claimed by this contract.
 
 Customer payment receipts: `GET /payments/{id}/receipt.pdf` is available to the owning customer or authorized Admin/SUPER_ADMIN only, and returns `application/pdf` with filename `receipt-{paymentId}.pdf`. It is generated from the persisted successful `PaymentRecord` and its matching `Invoice`. The document includes a stable derived receipt reference (`RECEIPT-PAYMENT-{paymentId}`), invoice/payment references, authoritative payment date, amount, currency, and successful status. Pending, failed, processing, uncertain, missing-invoice, or mismatched payment records are rejected. The receipt is not a tax invoice and does not invent merchant, tax, or refund data.
 
@@ -397,6 +397,8 @@ The Technician application is built on canonical Service Requests, technician as
 | GET /service-requests/{id}/completion-otp | owner CUSTOMER, assigned TECHNICIAN, ADMIN/SUPER_ADMIN | safe OTP state; code only for owner customer while pending/valid |
 | GET /technician/me/jobs/{id}/checklist | assigned TECHNICIAN | JobChecklistView or null data when no active applicable template exists |
 | PUT /technician/me/jobs/{id}/checklist/responses | assigned TECHNICIAN | item response batch -> JobChecklistView |
+| GET /admin/checklists | ADMIN, SUPER_ADMIN | paginated read-only checklist summaries; optional `serviceRequestId`, `status=IN_PROGRESS|COMPLETED`, `page`, and `size` filters |
+| GET /admin/checklists/{serviceRequestId} | ADMIN, SUPER_ADMIN | read-only `JobChecklistView` for the canonical service request, including template version, item definitions, saved responses, responder profile IDs, response timestamps, and current status |
 | GET /technician/me/private-attachments | TECHNICIAN | own private attachment metadata |
 | POST /technician/me/private-attachments | TECHNICIAN | multipart file -> metadata |
 | GET /technician/me/private-attachments/{id} | owner TECHNICIAN | file download |
@@ -573,7 +575,11 @@ OTP plaintext, and authorization tokens must not be logged.
 V1-V4 remain unchanged. V5 adds typed service visits and visit-change requests with restrictive foreign keys, date/technician/request indexes, active-visit uniqueness, and time-range validation. V6 adds the single global admin_settings record for non-secret Admin runtime preferences. V7 adds request-scoped attachments and one feedback row per service request. V8 adds payment_records, invoices, support_tickets, amc_renewal_requests and asset_documents with restrictive foreign keys, owner indexes, status checks and no credential storage. V9 adds Razorpay identifiers to payment_records, payment_refunds, razorpay_webhook_events and technician_latest_locations. V10 adds roles, permissions, role_permissions and audit_logs with seeded role capability mappings and audit indexes. V11 adds technician advanced operations tables for checklist, completion OTP, expanded profiles, and technician-private attachments. V12 adds nullable building coordinates plus location history and geofence state/event tables. V13 adds provider-independent communication templates, preferences, events, and messages with channel/status/retry/idempotency indexes. The H2 test adapter still only removes V3 STORED syntax for H2; it is not deployed and cannot prove MySQL storage semantics. Live Razorpay Test Mode transaction verification, public HTTPS webhook delivery, routing provider activation, communication provider activation, and real background/device tracking validation remain environment-dependent.
 ## Phase 18 Email System Contract
 
-Email is a backend-driven communication channel under `/api/v1` and reuses the Phase 17 communication APIs and data model. Clients do not receive provider secrets or provider configuration.
+## Email-verified customer registration
+
+New self-registered customers use `POST /auth/register/email/start`, `POST /auth/register/email/resend`, and `POST /auth/register/email/verify`. Start accepts the existing customer registration fields with a required normalized email and returns only an opaque `challengeId`, expiry, and `EMAIL_ACCEPTED` status. Resend accepts the challenge ID and applies a 60-second cooldown. Verify accepts the challenge ID and six-digit code and returns the normal authentication response only after the customer and profile are created transactionally. SMTP must be explicitly enabled and configured; disabled or failed delivery creates no canonical account. The legacy `/auth/register` route rejects new unverified registration with a safe migration message. Existing accounts and Admin-provisioned accounts retain their prior login behavior. SMS is not enabled.
+
+Email is a backend-driven communication channel under `/api/v1` and reuses the Phase 17 communication APIs and data model. Clients do not receive provider secrets or provider configuration. The default provider remains the safe `mock` provider; real SMTP is opt-in with `EMAIL_PROVIDER=smtp` and `SMTP_ENABLED=true` (the legacy `EMAIL_*` aliases remain supported for compatibility).
 
 Architecture:
 
@@ -586,9 +592,11 @@ CommunicationService
 
 `EmailProvider.send(...)` receives provider-neutral data only: recipient, sender, sender display name, reply-to, subject, HTML body, plain-text body, communication message id, event/template metadata, and idempotency key. No SMTP, SES, SendGrid, Mailgun, Resend, or other provider model is part of the core contract.
 
+When SMTP is explicitly enabled, the provider reads `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM` through the server configuration. It requires authenticated STARTTLS and bounded connection, read, and write timeouts. Missing or invalid SMTP configuration fails the individual delivery safely; it never rolls back the originating business transaction and never exposes credentials. The application does not send passwords, password hashes, OTPs, tokens, or provider secrets in email content.
+
 Configuration is generic and optional: `EMAIL_PROVIDER`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME`, `EMAIL_REPLY_TO`, `EMAIL_ENABLED`, and `APP_SET_PASSWORD_URL`. Real provider activation is deferred.
 
-`communication_messages` remains the delivery source of truth. Email delivery uses the existing statuses `PENDING`, `PROCESSING`, `SENT`, `DELIVERED`, `FAILED`, and `CANCELLED`, stores provider/provider message references when available, retries transient failures with `retry_count`, `max_retry_count`, `next_retry_at`, and preserves sanitized `failure_reason`.
+`communication_messages` remains the delivery source of truth. Email delivery uses the existing statuses `PENDING`, `PROCESSING`, `SENT`, `DELIVERED`, `FAILED`, and `CANCELLED`, stores provider/provider message references when available, retries transient failures with `retry_count`, `max_retry_count`, `next_retry_at`, and preserves sanitized `failure_reason`. The current implementation persists messages after the originating transaction and exposes authorized Admin processing/retry operations; it does not run an automatic email worker. A future worker requires an approved claim/lease design before concurrent dispatch can be enabled. SMTP acceptance is recorded as `SENT`, not proof of inbox delivery; ambiguous network failures can still produce provider-side duplicate delivery on a later retry.
 
 Safe onboarding:
 
@@ -598,7 +606,7 @@ Safe onboarding:
 
 `POST /auth/set-password` accepts `{ token, password }`. Tokens are hashed at rest, expire, are single-use, and are not returned by read APIs. Account-created emails must use the configured set-password URL and must never include raw passwords.
 
-Backend-triggered email events currently include customer account/set-password, service request created/status/completed/feedback, appointment scheduled/changed/cancelled, technician account/assignment/job status/visit/change-request decision, AMC renewal request, invoice created, payment result, and admin alert template support where existing backend events dispatch it.
+Backend-triggered email events currently include customer account/set-password, service request created/status/completed/feedback, appointment scheduled/changed/cancelled, technician account/assignment/job status/visit/change-request decision, AMC renewal request, invoice created, payment result, and admin alert template support where existing backend events dispatch it. They are deduplicated by persisted event keys and honor recipient communication preferences. Weekly digests and earnings/payroll notifications are not enabled because this backend has no verified digest scheduler/timezone delivery contract or authoritative payroll/payout record suitable for those messages.
 
 ## Phases 19-21 SMS, WhatsApp, And Preference Contract
 
@@ -727,6 +735,62 @@ V41 adds a separate one-to-one inspection domain for submitted installations. St
 Discovery endpoints use the standard `PageView<T>` fields `items`, `page`, `size`, `totalElements`, and `totalPages`, inside the normal `ApiResponse<T>` envelope. `GET /admin/installations/{requestId}/inspection` returns the single inspection linked by V41 or the standard not-found response. `GET /admin/installations/inspections` accepts optional `status`, `technicianProfileId`, `from`, `to` ISO local date-times, `page` (default 0), and `size` (default 20, maximum 100); results are ordered by newest creation then ID descending. `GET /technician/me/inspections` accepts optional `status`, `page`, and `size` and derives the technician from the bearer principal; it never accepts a technician ID. Both queue responses use `InspectionSummary`, containing inspection ID, installation request ID, status, schedule/timezone, assigned technician ID where authorized, visit/submission timestamps, persisted property/address context, and inspection version. Admins receive complete inspection detail; assigned technicians receive only their assigned inspection; customer detail continues to redact reviewer identity/notes and evidence references.
 
 ## Lifecycle notifications
+
+## Complete implemented route inventory
+
+### Protected Admin profile photos
+
+The existing profile-photo storage also supports read-only Admin access: `GET /api/v1/profile/photo/admin/customers/{customerProfileId}` and `GET /api/v1/profile/photo/admin/technicians/{technicianProfileId}`. Only `ADMIN` and `SUPER_ADMIN` may call these routes; the path is resolved through the canonical customer or technician profile and returns `{ dataUri }`, with `dataUri: null` when no photo exists. Upload and delete remain owner-scoped through `GET/POST/DELETE /api/v1/profile/photo`.
+
+This inventory supplements the detailed contracts above. Paths are grouped by controller and reflect the current backend mappings. Request validation, ownership checks, and role authorization remain enforced by the implementation; undocumented request fields must not be inferred from a path name.
+
+### Public/authentication and common authenticated routes
+
+- `GET /api/v1/health` — health check.
+- `POST /api/v1/auth/register`, `/api/v1/auth/login/customer`, `/api/v1/auth/login/admin`, `/api/v1/auth/login/technician` — registration and role-specific login.
+- `POST /api/v1/auth/otp/send`, `/otp/resend`, `/otp/verify`, `/auth/refresh`, `/auth/set-password`, `/auth/logout`; `GET /api/v1/me` — OTP, token, password, logout, and current identity operations.
+- `GET/PUT /api/v1/customers/me`, `GET /api/v1/customers/me/technician-counts`; `GET/POST/PUT/DELETE /api/v1/profile/photo` — authenticated profile operations.
+- `GET /api/v1/locations/search`, `/locations/reverse`, `/locations/pincodes/{pincode}` — authenticated location lookup operations.
+
+### Customer assets, service, visits, and documents
+
+- Customer buildings/lifts: `GET/POST/PUT/DELETE /api/v1/customers/me/buildings`, `/customers/me/buildings/{id}`, `/customers/me/lifts`, `/customers/me/lifts/{id}`; compatible asset routes also exist under `/api/v1/buildings`, `/lifts`, and `/amc-contracts` with server-side ownership checks.
+- Service requests: `POST/GET /api/v1/service-requests`, `GET /api/v1/service-requests/{id}`, `POST /api/v1/service-requests/{id}/assignments`, `POST /api/v1/service-requests/{id}/assignments/{assignmentId}/accept`, `POST /api/v1/service-requests/{id}/status`, `GET /api/v1/customers/me/service-requests`, and technician job/report routes under `/api/v1/technician/me/jobs`.
+- Request attachments/feedback: `GET/POST/DELETE /api/v1/service-requests/{id}/attachments[/{attachmentId}]`, `GET/PUT /api/v1/service-requests/{id}/feedback`, and `GET /api/v1/service-requests/{id}/report.pdf`.
+- Visits: Admin `/api/v1/admin/service-visits` (list/create/read/update/cancel), technician `/api/v1/technician/me/visits` (list/read/status/reschedule/additional-visit/cancel), Admin visit-change request list/approve/reject, and `GET /api/v1/customers/me/visits`.
+- Service codes: `GET /api/v1/customers/me/lifts/{liftId}/service-code`, `POST /api/v1/customers/me/lifts/{liftId}/service-code/regenerate`; `POST /api/v1/technician/me/jobs/{requestId}/service-code/verify` accepts explicit `START` or `COMPLETE` action and returns safe verification state only.
+- Tracking and workflow support: technician location post/read, customer technician-location read, checklists, arrival/completion OTPs, private attachments, and job status routes are under `/api/v1` with role/assignment checks.
+
+### Installation and schedule routes
+
+- Customer installation lifecycle: `GET/POST /api/v1/customers/me/installations`, `GET/PUT /{id}`, `POST /{id}/submit`, `/cancel`, and `/documents`.
+- Installation proposals: Admin history/save/present/start/requirements/complete under `/api/v1/admin/installations`; customer proposal read/history/decision under `/api/v1/customers/me/installations`.
+- Assignments: Admin list/create/cancel under `/api/v1/admin/installations`; technician list/accept/decline under `/api/v1/technician/me/installations/assignments`.
+- Inspection: customer read; Admin request/read/queue/update/cancel; technician inspection list/read/start/assess/evidence routes under `/api/v1`.
+- Schedule approval: Admin list/create/submit/company-approve under `/api/v1/admin/installations`; customer exact-version approve under `/api/v1/customers/me/installations/schedules/{id}/approve`.
+- Milestone billing: `POST /api/v1/admin/installations/milestones/{id}/invoice` is the narrowly scoped gated generation operation. It requires the exact approved schedule, approvals, terms, trigger, ownership, and milestone eligibility; it does not invent financial terms.
+- Installation authorization review: `/api/v1/admin/installations/authorizations` list/read/review.
+
+### Payments, invoices, refunds, and finance
+
+- Payments: `GET/POST /api/v1/payments`, `GET /api/v1/payments/{id}`, status update, Razorpay checkout, cash OTP request/verify, cash OTP state, and `GET /api/v1/payments/{id}/receipt.pdf`.
+- Refunds: `POST /api/v1/payments/{id}/refund-requests` (customer request), `POST /api/v1/payments/{id}/refunds` (authorized provider initiation path), `GET /api/v1/payments/{id}/refunds`, `GET /api/v1/payments/{id}/refunds/document`, Admin approval, Admin payment reconciliation, and Admin refund reconciliation.
+- Webhook: `POST /api/v1/webhooks/razorpay`; a valid configured Razorpay signature and recognized event are required. Duplicate/invalid/mismatched events fail safely and do not authorize settlement.
+- Invoices: `GET/POST /api/v1/invoices`, `GET /api/v1/invoices/{id}`, status update, and technician payment view. Invoice generation is server-priced and association/ownership validated.
+- Admin finance: `GET /api/v1/admin/transactions`, `/transactions/{id}`, `/transactions.csv`, `/reports/{type}`, and `/reports/{type}.csv`.
+
+### Administration, staff, communication, and configuration
+
+- Admin customer/directory/staff/settings/security: `/api/v1/admin/customers`, `/admin/technicians`, `/admin/customers`, `/admin/users`, `/admin/settings`, `/admin/permissions`, `/admin/roles`, `/admin/audit-logs`, and the Admin dashboard summary.
+- Technician applications: public application routes under `/api/v1/technician-applications`; Admin review/status/document/meeting routes under `/api/v1/admin/technician-applications`.
+- Communication: Admin message/event listing/creation, manual message processing, retry processing, and preference GET/PUT under `/api/v1/admin/communications`; in-app notifications under `/api/v1/notifications`.
+- Asset configuration and parts: `/api/v1/config/asset-options`, Admin asset-option management, customer/technician/Admin parts and part-request routes as mapped by `AssetConfigurationController` and `PartsController`.
+
+### Compatibility routes
+
+The repository also contains older routes under `/api`: authentication aliases, `/api/customers`, `/api/buildings`, `/api/lifts`, `/api/service-requests`, `/api/amcs`, `/api/payments`, `/api/notifications`, `/api/inventory`, `/api/admin`, `/api/technicians`, and `/api/reports/summary`. They remain compatibility mappings and must still enforce the service-layer ownership and authorization checks. New clients should use the `/api/v1` contracts above.
+
+For database relationships, payment authority, refund behavior, and unresolved installation terms, see [`schema.md`](schema.md) and [`payments.md`](payments.md). The combined privacy/terms summary is [`privacy policy - terms conditions.md`](privacy%20policy%20-%20terms%20conditions.md).
 
 The existing `/api/v1/notifications` inbox stores in-app notifications only; email, SMS, push, and external delivery are not enabled by this contract. Successful building creation, lift registration, installation submission, inspection scheduling/rescheduling, and inspection review create customer-scoped notifications. Each system-generated lifecycle notification carries an internal `eventKey` with a unique database constraint so retries of the same persisted event do not create duplicates. Notification responses do not expose event keys or reviewer/private evidence data. Customer notification reads remain scoped to the authenticated recipient.
 Installation proposal revisions are immutable once presented or decided. Admin proposal saves create a new draft revision after a declined proposal; the existing declined row is never overwritten. `GET /admin/installations/{id}/proposals` returns the full revision history ordered newest first. `GET /customers/me/installations/{id}/proposal` returns the newest non-draft proposal, and `GET /customers/me/installations/{id}/proposals` returns the customer-safe non-draft history. Customer decisions must include the current proposal `id` and `version`; stale, unpresented, or already-decided revisions are rejected. Construction start remains gated by the installation request status `PROPOSAL_ACCEPTED`.

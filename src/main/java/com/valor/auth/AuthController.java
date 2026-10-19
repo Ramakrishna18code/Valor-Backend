@@ -13,8 +13,9 @@ import static com.valor.auth.AuthDtos.*;
 class AuthController {
     private final AuthService auth; private final AssetIdentityAccess identities;
     private final CustomerRepo customers; private final TechRepo technicians; private final Environment env;
-    AuthController(AuthService auth,AssetIdentityAccess identities,CustomerRepo customers,TechRepo technicians,Environment env) {
-        this.auth=auth;this.identities=identities;this.customers=customers;this.technicians=technicians;this.env=env;
+    private final EmailRegistrationService emailRegistrations;
+    AuthController(AuthService auth,AssetIdentityAccess identities,CustomerRepo customers,TechRepo technicians,Environment env,EmailRegistrationService emailRegistrations) {
+        this.auth=auth;this.identities=identities;this.customers=customers;this.technicians=technicians;this.env=env;this.emailRegistrations=emailRegistrations;
     }
     private ApiResponse<Authentication> ok(User user) {
         String[] tokens=auth.session(user);CurrentUser me=summary(user);
@@ -27,8 +28,11 @@ class AuthController {
     }
     @Operation(operationId="register")
     @PostMapping("/auth/register") ApiResponse<Authentication> register(@Valid @RequestBody Registration r) {
-        return ok(auth.registerProfile(r));
+        throw new IllegalArgumentException("Use email registration verification");
     }
+    @PostMapping("/auth/register/email/start") ApiResponse<EmailRegistrationDtos.Started> emailStart(@Valid @RequestBody EmailRegistrationDtos.Start r){return ApiResponse.success("Verification email accepted",emailRegistrations.start(r),200);}
+    @PostMapping("/auth/register/email/resend") ApiResponse<EmailRegistrationDtos.Started> emailResend(@Valid @RequestBody EmailRegistrationDtos.Resend r){return ApiResponse.success("Verification email accepted",emailRegistrations.resend(r.challengeId()),200);}
+    @PostMapping("/auth/register/email/verify") ApiResponse<Authentication> emailVerify(@Valid @RequestBody EmailRegistrationDtos.Verify r){return ok(auth.verifyEmailRegistration(emailRegistrations.verify(r.challengeId(),r.otp())));}
     @Operation(operationId="loginCustomer")
     @PostMapping("/auth/login/customer") ApiResponse<Authentication> loginCustomer(@Valid @RequestBody CustomerLogin r) {
         return ok(auth.login(r.identity(),r.password(),Set.of(Role.CUSTOMER)));

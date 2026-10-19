@@ -17,11 +17,16 @@ import org.springframework.web.multipart.MultipartFile;
 class ProfilePhotoController {
     private final AssetIdentityAccess identities;
     private final WorkflowIdentityAccess profiles;
+    private final CustomerRepo customers;
+    private final TechRepo technicians;
     private final Path root;
     ProfilePhotoController(AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
+            CustomerRepo customers, TechRepo technicians,
             @Value("${app.profile-photos.local-root:./data/profile-photos}") String root) {
         this.identities = identities;
         this.profiles = profiles;
+        this.customers = customers;
+        this.technicians = technicians;
         this.root = Paths.get(root).toAbsolutePath().normalize();
     }
     record Photo(String dataUri) {}
@@ -40,11 +45,36 @@ class ProfilePhotoController {
         else throw new org.springframework.security.access.AccessDeniedException("Access denied");
         return root.resolve(actor.getId() + ".jpg");
     }
+    private void requireAdmin() {
+        User actor = identities.actor();
+        if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN)
+            throw new org.springframework.security.access.AccessDeniedException("Access denied");
+    }
+    private Path customerTarget(Long customerProfileId) {
+        requireAdmin();
+        CustomerProfile profile = customers.findById(customerProfileId)
+                .orElseThrow(() -> new IllegalArgumentException("Customer not found"));
+        return root.resolve(profile.getUser().getId() + ".jpg");
+    }
+    private Path technicianTarget(Long technicianProfileId) {
+        requireAdmin();
+        TechnicianProfile profile = technicians.findById(technicianProfileId)
+                .orElseThrow(() -> new IllegalArgumentException("Technician not found"));
+        return root.resolve(profile.getUser().getId() + ".jpg");
+    }
     private Photo photo(Path target) throws IOException {
         return new Photo(Files.exists(target) ? "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(Files.readAllBytes(target)) : null);
     }
     @GetMapping
     ApiResponse<Photo> get() throws IOException { return ApiResponse.success("Profile photo", photo(target()), 200); }
+    @GetMapping("/admin/customers/{customerProfileId}")
+    ApiResponse<Photo> adminCustomer(@PathVariable Long customerProfileId) throws IOException {
+        return ApiResponse.success("Customer profile photo", photo(customerTarget(customerProfileId)), 200);
+    }
+    @GetMapping("/admin/technicians/{technicianProfileId}")
+    ApiResponse<Photo> adminTechnician(@PathVariable Long technicianProfileId) throws IOException {
+        return ApiResponse.success("Technician profile photo", photo(technicianTarget(technicianProfileId)), 200);
+    }
     @PostMapping(consumes = "multipart/form-data")
     ApiResponse<Photo> upload(@RequestParam("file") MultipartFile file) throws IOException {
         Path target = target();

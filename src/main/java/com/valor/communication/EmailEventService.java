@@ -28,6 +28,9 @@ public class EmailEventService {
         mandatory("CUSTOMER_ACCOUNT_CREATED", userId, "customer-account-created:" + userId,
                 vars("name", name, "setPasswordUrl", setPasswordUrl));
     }
+    public void customerWelcome(Long userId, String name) {
+        optional("CUSTOMER_WELCOME", userId, "customer-welcome:" + userId, vars("name", name));
+    }
     public void technicianAccountCreated(Long userId, String name, String setPasswordUrl) {
         mandatory("TECHNICIAN_ACCOUNT_CREATED", userId, "technician-account-created:" + userId,
                 vars("name", name, "setPasswordUrl", setPasswordUrl));
@@ -91,6 +94,10 @@ public class EmailEventService {
     public void paymentResult(Long userId, String name, Long paymentId, String status) {
         optional("PAYMENT_RESULT", userId, "payment-result:" + paymentId + ":" + status,
                 vars("name", name, "paymentId", paymentId, "status", status));
+    }
+    public void refundResult(Long userId, String name, Long refundId, String status, String amount, String currency) {
+        optional("REFUND_RESULT", userId, "refund-result:" + refundId + ":" + status,
+                vars("name", name, "refundId", refundId, "status", status, "amount", amount, "currency", currency));
     }
     public void adminAlert(Long adminUserId, String title, String message, String idempotencyKey) {
         optional("ADMIN_SYSTEM_ALERT", adminUserId, idempotencyKey, vars("title", title, "message", message));
