@@ -3,6 +3,7 @@ package com.valor.auth;
 import com.fasterxml.jackson.databind.*;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -21,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class Phase19To21CommunicationTest {
     @Autowired MockMvc mvc; @Autowired ObjectMapper json; @Autowired UserRepo users; @Autowired CustomerRepo customers;
-    @Autowired OtpRepo otps; @Autowired JwtService jwt; @Autowired PasswordEncoder encoder; @Autowired JdbcTemplate db;
+    @Autowired OtpRepo otps; @Autowired AuthService auth; @Autowired JwtService jwt; @Autowired PasswordEncoder encoder; @Autowired JdbcTemplate db;
 
     private User user(Role role, String email, String phone) {
         User u = new User(); u.setRole(role); u.setEmail(email); u.setPhone(phone); u.setPasswordHash(encoder.encode("Pass12345"));
@@ -55,6 +56,24 @@ class Phase19To21CommunicationTest {
         assertFalse(result.success());
         assertEquals("MSG91_OTP", result.provider());
         assertTrue(result.failureReason().contains("configuration missing"));
+    }
+
+    @Test void concurrentOtpIssuanceForOneIdentityLeavesOneActiveChallenge() throws Exception {
+        String phone = "+919888120099";
+        user(Role.CUSTOMER, UUID.randomUUID() + "@customer.test", phone);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2), go = new CountDownLatch(1);
+        try {
+            Callable<Object> send = () -> { ready.countDown(); go.await(5, TimeUnit.SECONDS); return auth.sendOtpRequest(phone); };
+            Future<Object> first = pool.submit(send), second = pool.submit(send);
+            assertTrue(ready.await(5, TimeUnit.SECONDS)); go.countDown();
+            int successes = 0;
+            for (Future<Object> result : List.of(first, second)) {
+                try { result.get(10, TimeUnit.SECONDS); successes++; } catch (ExecutionException expected) { }
+            }
+            assertEquals(1, successes);
+        } finally { pool.shutdownNow(); }
+        assertEquals(1, db.queryForObject("select count(*) from otp_verifications where phone=? and verified_at is null", Integer.class, phone));
     }
 
     @Test void whatsappMockDeliveryRetryAndCategoryPreferencesUseExistingCommunicationModel() throws Exception {

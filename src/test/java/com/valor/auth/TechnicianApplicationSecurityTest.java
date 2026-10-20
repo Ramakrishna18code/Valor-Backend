@@ -21,7 +21,7 @@ class TechnicianApplicationSecurityTest {
     @Test void productionAndDefaultProfilesRejectDevelopmentOtp() {
         for (String[] profiles : new String[][] {{"prod"}, {"dev", "prod"}, {}}) {
             var env = new MockEnvironment(); env.setActiveProfiles(profiles);
-            var guarded = new TechnicianApplicationService(null, null, null, null, null, null, null, env, null);
+            var guarded = new TechnicianApplicationService(null, null, null, null, null, null, null, env, null, null);
             assertThrows(IllegalArgumentException.class, () -> guarded.sendOtp(1L, "token"));
             assertThrows(IllegalArgumentException.class, () -> guarded.verifyOtp(1L, "token", "1111"));
         }

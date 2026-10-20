@@ -1,5 +1,6 @@
 package com.valor.auth;
 
+import com.valor.communication.EmailEventService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -32,13 +33,14 @@ class TechnicianApplicationService {
     private final AssetIdentityAccess identities;
     private final Environment environment;
     private final AuditService audit;
+    private final EmailEventService emails;
 
     TechnicianApplicationService(TechnicianApplicationRepository applications, TechnicianApplicationDocumentRepository documents,
             UserRepo users, TechRepo technicians, PasswordEncoder encoder, TechnicianApplicationStorage storage,
-            AssetIdentityAccess identities, Environment environment, AuditService audit) {
+            AssetIdentityAccess identities, Environment environment, AuditService audit, EmailEventService emails) {
         this.applications = applications; this.documents = documents; this.users = users; this.technicians = technicians;
         this.encoder = encoder; this.storage = storage; this.identities = identities;
-        this.environment = environment; this.audit = audit;
+        this.environment = environment; this.audit = audit; this.emails = emails;
     }
 
     Created create(TechnicianApplicationController.Create input) {
@@ -157,13 +159,13 @@ class TechnicianApplicationService {
 
     ApplicationView completeMeeting(Long id, String notes) { admin(); TechnicianApplication row=application(id); if (!"MEETING_SCHEDULED".equals(row.status) && !"MEETING_REQUIRED".equals(row.status)) throw new IllegalArgumentException("Meeting is not scheduled"); row.status="MEETING_COMPLETED"; row.meetingCompletedAt=LocalDateTime.now(); row.meetingCompletedByUserId=identities.actor().getId(); row.meetingNotes=notes; audit.record("TECHNICIAN_MEETING_COMPLETED","TECHNICIAN_APPLICATION",id,"Technician meeting completed"); return view(row); }
 
-    private void finalApprove(TechnicianApplication row) { if ("DOCUMENTS_VERIFIED".equals(row.status) && !row.meetingRequired) {} else if (!"MEETING_COMPLETED".equals(row.status)) throw new IllegalArgumentException("Required verification steps are incomplete"); row.status="APPROVED"; row.finalApprovedAt=LocalDateTime.now(); row.finalApprovedByUserId=identities.actor().getId(); row.reviewedAt=row.finalApprovedAt; row.reviewedBy=identities.actor(); provision(row); audit.record("TECHNICIAN_FINAL_APPROVED","TECHNICIAN_APPLICATION",row.id,"Technician application approved"); }
+    private void finalApprove(TechnicianApplication row) { if ("DOCUMENTS_VERIFIED".equals(row.status) && !row.meetingRequired) {} else if (!"MEETING_COMPLETED".equals(row.status)) throw new IllegalArgumentException("Required verification steps are incomplete"); row.status="APPROVED"; row.finalApprovedAt=LocalDateTime.now(); row.finalApprovedByUserId=identities.actor().getId(); row.reviewedAt=row.finalApprovedAt; row.reviewedBy=identities.actor(); User user=provision(row); emails.technicianRegistrationApproved(user.getId(), row.fullName); audit.record("TECHNICIAN_FINAL_APPROVED","TECHNICIAN_APPLICATION",row.id,"Technician application approved"); }
     private TechnicianApplication application(Long id) { return applications.lockById(id).orElseThrow(() -> new IllegalArgumentException("Application not found")); }
 
-    private void provision(TechnicianApplication application) {
+    private User provision(TechnicianApplication application) {
         if (users.findByEmail(application.email).isPresent()) throw new IllegalArgumentException("A user already exists for this email");
         User user = new User(); user.setEmail(application.email); user.setPhone(application.phone); user.setPasswordHash(application.passwordHash); user.setRole(Role.TECHNICIAN); users.saveAndFlush(user);
-        TechnicianProfile profile = new TechnicianProfile(); profile.user = user; profile.specialization = application.specialization; profile.assignedArea = application.preferredLocations; profile.availabilityStatus = "AVAILABLE"; technicians.saveAndFlush(profile);
+        TechnicianProfile profile = new TechnicianProfile(); profile.user = user; profile.specialization = application.specialization; profile.assignedArea = application.preferredLocations; profile.availabilityStatus = "AVAILABLE"; technicians.saveAndFlush(profile); return user;
     }
 
     private TechnicianApplication admin() { User actor = identities.actor(); if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw new AccessDeniedException("Access denied"); return null; }

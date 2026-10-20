@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 
 enum ChecklistInputType { CHECKBOX, TEXT, NUMBER, PHOTO_NOTE }
 enum JobChecklistStatus { IN_PROGRESS, COMPLETED }
+enum ChecklistSnapshotQuality { VERIFIED, RECONSTRUCTED }
 
 @Entity
 @Table(name = "checklist_templates")
@@ -68,12 +69,35 @@ class JobChecklist {
 }
 
 @Entity
+@Table(name = "job_checklist_items")
+class JobChecklistItem {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY) Long id;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "job_checklist_id", nullable = false)
+    JobChecklist checklist;
+    @Column(name = "source_item_id") Long sourceItemId;
+    @Column(nullable = false, length = 255) String label;
+    @Column(length = 1000) String description;
+    @Column(nullable = false) boolean required = true;
+    @Column(name = "sort_order", nullable = false) int sortOrder;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "input_type", nullable = false, length = 30)
+    ChecklistInputType inputType = ChecklistInputType.CHECKBOX;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "snapshot_quality", nullable = false, length = 20)
+    ChecklistSnapshotQuality snapshotQuality = ChecklistSnapshotQuality.RECONSTRUCTED;
+    @Column(name = "created_at", nullable = false) LocalDateTime createdAt;
+    @PrePersist void create() { createdAt = LocalDateTime.now(); }
+}
+
+@Entity
 @Table(name = "checklist_responses")
 class ChecklistResponse {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY) Long id;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "job_checklist_id") JobChecklist checklist;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "item_id") ChecklistItem item;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "technician_profile_id") TechnicianProfile technician;
+    @Column(name = "job_checklist_item_id") Long jobChecklistItemId;
     Boolean checked;
     @Column(name = "value_text", length = 2000) String valueText;
     @Column(name = "responded_at", nullable = false) LocalDateTime respondedAt;
@@ -97,4 +121,8 @@ interface JobChecklistRepository extends JpaRepository<JobChecklist, Long> {
 interface ChecklistResponseRepository extends JpaRepository<ChecklistResponse, Long> {
     List<ChecklistResponse> findByChecklistId(Long checklistId);
     Optional<ChecklistResponse> findByChecklistIdAndItemId(Long checklistId, Long itemId);
+}
+
+interface JobChecklistItemRepository extends JpaRepository<JobChecklistItem, Long> {
+    List<JobChecklistItem> findByChecklistIdOrderBySortOrderAscIdAsc(Long checklistId);
 }

@@ -60,18 +60,27 @@ class RazorpayGateway implements PaymentGateway {
     }
 
     public JsonNode createRefund(String razorpayPaymentId, BigDecimal amount, String notes) {
+        return createRefund(razorpayPaymentId, amount, notes, null);
+    }
+    public JsonNode createRefund(String razorpayPaymentId, BigDecimal amount, String notes, String idempotencyKey) {
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", "rfnd_test_" + razorpayPaymentId + "_" + paise(amount), "status", "pending"));
-        Map<String,Object> body = notes == null || notes.isBlank()
-                ? Map.of("amount", paise(amount))
-                : Map.of("amount", paise(amount), "notes", Map.of("reason", notes));
-        return post("/payments/" + razorpayPaymentId + "/refund", body);
+        Map<String,Object> body = new HashMap<>();
+        body.put("amount", paise(amount));
+        if (idempotencyKey != null) body.put("receipt", idempotencyKey);
+        if (notes != null && !notes.isBlank()) body.put("notes", Map.of("reason", notes));
+        return postRefund("/payments/" + razorpayPaymentId + "/refund", body, idempotencyKey);
     }
 
     public JsonNode lookupRefund(String razorpayRefundId) {
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", razorpayRefundId, "status", "pending"));
         return get("/refunds/" + razorpayRefundId);
+    }
+    public JsonNode listRefunds(String razorpayPaymentId) {
+        requireConfigured();
+        if (offlineTestMode) return mapper.valueToTree(Map.of("items", List.of()));
+        return get("/payments/" + razorpayPaymentId + "/refunds");
     }
 
     public boolean validWebhookSignature(String payload, String signature) {
@@ -81,6 +90,10 @@ class RazorpayGateway implements PaymentGateway {
 
     private JsonNode post(String path, Map<String,Object> body) {
         return rest.post().uri(path).headers(h -> h.setBasicAuth(keyId, keySecret, StandardCharsets.UTF_8))
+                .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
+    }
+    private JsonNode postRefund(String path, Map<String,Object> body, String idempotencyKey) {
+        return rest.post().uri(path).headers(h -> { h.setBasicAuth(keyId, keySecret, StandardCharsets.UTF_8); if (idempotencyKey != null) h.set("X-Refund-Idempotency", idempotencyKey); })
                 .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
     }
     private JsonNode get(String path) {

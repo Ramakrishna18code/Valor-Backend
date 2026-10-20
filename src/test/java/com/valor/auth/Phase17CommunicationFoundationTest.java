@@ -2,6 +2,7 @@ package com.valor.auth;
 
 import com.fasterxml.jackson.databind.*;
 import java.util.*;
+import java.util.concurrent.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -10,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import com.valor.communication.CommunicationService;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -18,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class Phase17CommunicationFoundationTest {
-    @Autowired MockMvc mvc; @Autowired ObjectMapper json; @Autowired UserRepo users; @Autowired JwtService jwt; @Autowired JdbcTemplate db;
+    @Autowired MockMvc mvc; @Autowired ObjectMapper json; @Autowired UserRepo users; @Autowired JwtService jwt; @Autowired JdbcTemplate db; @Autowired CommunicationService communication;
 
     private User user(Role role, String email, String phone) {
         User u = new User(); u.setRole(role); u.setEmail(email); u.setPhone(phone); return users.saveAndFlush(u);
@@ -80,5 +82,28 @@ class Phase17CommunicationFoundationTest {
         JsonNode page = call(get("/api/v1/admin/communications/messages").param("status", "FAILED"), admin, null, 200);
         assertTrue(page.get("totalElements").asInt() >= 1);
         assertEquals(0, call(post("/api/v1/admin/communications/retries/process").param("limit", "10"), admin, null, 200).asInt());
+    }
+
+    @Test void concurrentApplicationEmailCreationReturnsOneEventAndOneMessage() throws Exception {
+        User recipient = user(Role.CUSTOMER, UUID.randomUUID() + "@customer.test", "+919876543211");
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Callable<List<?>> enqueue = () -> {
+                start.await();
+                return communication.enqueueApplicationEmail("SERVICE_REQUEST_CREATED", recipient.getId(),
+                        Map.of("name", "Concurrent"), "concurrent-communication-1", true);
+            };
+            Future<List<?>> first = executor.submit(enqueue);
+            Future<List<?>> second = executor.submit(enqueue);
+            start.countDown();
+            var a = first.get(10, TimeUnit.SECONDS);
+            var b = second.get(10, TimeUnit.SECONDS);
+            assertEquals(1, a.size()); assertEquals(1, b.size());
+            assertEquals(1, db.queryForObject("select count(*) from communication_events where idempotency_key=?", Integer.class, "concurrent-communication-1"));
+            assertEquals(1, db.queryForObject("select count(*) from communication_messages m join communication_events e on e.id=m.event_id where e.idempotency_key=? and m.channel='EMAIL'", Integer.class, "concurrent-communication-1"));
+        } finally {
+            executor.shutdownNow();
+        }
     }
 }

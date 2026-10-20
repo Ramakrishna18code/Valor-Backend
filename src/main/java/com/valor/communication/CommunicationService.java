@@ -7,8 +7,12 @@ import java.util.*;
 import java.util.regex.Pattern;
 import org.slf4j.*;
 import org.springframework.data.domain.*;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import static com.valor.communication.CommunicationDtos.*;
 
@@ -20,13 +24,16 @@ public class CommunicationService {
     private final CommunicationEventRepository events; private final CommunicationMessageRepository messages; private final CommunicationUserRepository users;
     private final EmailProvider email; private final SmsProvider sms; private final WhatsAppProvider whatsapp; private final NotificationService notifications;
     private final AssetIdentityAccess identities; private final Clock clock; private final EmailProperties emailProperties;
+    private final TransactionTemplate idempotentWrite;
 
     public CommunicationService(CommunicationTemplateRepository templates, CommunicationPreferenceRepository preferences,
             CommunicationEventRepository events, CommunicationMessageRepository messages, CommunicationUserRepository users,
             EmailProvider email, SmsProvider sms, WhatsAppProvider whatsapp, NotificationService notifications,
-            AssetIdentityAccess identities, Clock clock, EmailProperties emailProperties) {
+            AssetIdentityAccess identities, Clock clock, EmailProperties emailProperties, PlatformTransactionManager transactionManager) {
         this.templates = templates; this.preferences = preferences; this.events = events; this.messages = messages; this.users = users;
         this.email = email; this.sms = sms; this.whatsapp = whatsapp; this.notifications = notifications; this.identities = identities; this.clock = clock; this.emailProperties = emailProperties;
+        this.idempotentWrite = new TransactionTemplate(transactionManager);
+        this.idempotentWrite.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     public List<MessageView> enqueue(SendRequest input) {
@@ -42,6 +49,18 @@ public class CommunicationService {
     }
 
     private List<MessageView> enqueueInternal(SendRequest input, boolean mandatory) {
+        try {
+            return idempotentWrite.execute(status -> enqueueInternalOnce(input, mandatory));
+        } catch (DataIntegrityViolationException ex) {
+            if (!isIdempotencyConflict(ex) || input.idempotencyKey() == null) throw ex;
+            CommunicationEvent event = events.findByIdempotencyKey(input.idempotencyKey()).orElseThrow(() -> ex);
+            return input.channels().stream().filter(channel -> mandatory || allowed(event.recipient, channel, input.eventType()))
+                    .map(channel -> messages.findByEventIdAndChannel(event.id, channel).map(this::view).orElse(null))
+                    .filter(Objects::nonNull).toList();
+        }
+    }
+
+    private List<MessageView> enqueueInternalOnce(SendRequest input, boolean mandatory) {
         User recipient = users.findById(input.recipientUserId()).orElseThrow(() -> new CommunicationException(404, "Recipient not found"));
         CommunicationEvent event = events.findByIdempotencyKey(input.idempotencyKey()).orElseGet(() -> {
             CommunicationEvent e = new CommunicationEvent(); e.eventType = input.eventType(); e.recipient = recipient;
@@ -69,6 +88,12 @@ public class CommunicationService {
         if (result.isEmpty()) result.addAll(messages.list(null, PageRequest.of(0, 100)).stream()
                 .filter(m -> m.event.id.equals(event.id)).map(this::view).toList());
         return result;
+    }
+
+    private static boolean isIdempotencyConflict(DataIntegrityViolationException ex) {
+        String text = ex.toString().toLowerCase(Locale.ROOT);
+        return text.contains("uk_comm_event_idempotency") || text.contains("uk_comm_message_channel")
+                || text.contains("idempotency_key") || text.contains("event_id") && text.contains("channel");
     }
 
     public MessageView process(Long id) {
@@ -170,8 +195,15 @@ public class CommunicationService {
     private static String html(String body) {
         String text = body == null ? "" : body;
         if (text.contains("<html") || text.contains("<p") || text.contains("<br")) return text;
-        return "<!doctype html><html><body><main style=\"font-family:Arial,sans-serif;line-height:1.5;color:#1f2937\">"
-                + escape(text).replace("\n", "<br>") + "</main></body></html>";
+        String content = escape(text).replace("\n", "<br>");
+        return "<!doctype html><html><body style=\"margin:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#172033;\">"
+                + "<div style=\"display:none;max-height:0;overflow:hidden;opacity:0;\">Valor notification</div>"
+                + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f4f7fb;padding:32px 16px;\"><tr><td align=\"center\">"
+                + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;background:#ffffff;border:1px solid #e4eaf2;border-radius:16px;overflow:hidden;\">"
+                + "<tr><td style=\"padding:24px 28px;background:#102a43;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:.2px;\">Valor</td></tr>"
+                + "<tr><td style=\"padding:32px 28px;font-size:15px;line-height:1.7;\">" + content + "</td></tr>"
+                + "<tr><td style=\"padding:18px 28px;border-top:1px solid #e4eaf2;color:#667085;font-size:12px;line-height:1.5;\">This is an automated message from Valor. Please do not reply unless the message provides a reply address.</td></tr>"
+                + "</table></td></tr></table></body></html>";
     }
     private static String textFallback(String body) { return (body == null ? "" : body).replaceAll("<[^>]+>", "").replace("&nbsp;", " ").trim(); }
     private static String escape(String value) { return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"); }

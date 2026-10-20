@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.http.HttpStatus;
@@ -151,6 +152,49 @@ class CommercePaymentIntegrityTest {
         payment.setStatus(PaymentStatus.FAILED);
         assertEquals(PaymentStatus.FAILED, service.payment(11L).status());
         assertEquals(InvoiceStatus.ISSUED, invoice.getStatus());
+    }
+
+    @Test
+    void invoiceBackedPaymentRejectsConflictingContextButUsesInvoiceContextWhenOmitted() {
+        ServiceRequest request = mock(ServiceRequest.class);
+        when(request.getId()).thenReturn(31L);
+        invoice.setServiceRequest(request);
+        when(invoices.findById(21L)).thenReturn(Optional.of(invoice));
+        when(identities.activeCustomer(7L)).thenReturn(customer);
+        when(payments.saveAndFlush(any(PaymentRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CommerceDtos.PaymentView created = service.createPayment(new CommerceDtos.PaymentCreate(
+                new BigDecimal("1000.00"), "INR", PaymentPurpose.INVOICE, 7L, null, null, 21L, null));
+        assertEquals(31L, created.serviceRequestId());
+
+        assertThrows(CommerceException.class, () -> service.createPayment(new CommerceDtos.PaymentCreate(
+                new BigDecimal("1000.00"), "INR", PaymentPurpose.INVOICE, 7L, 99L, null, 21L, null)));
+        verify(payments, times(1)).saveAndFlush(any(PaymentRecord.class));
+    }
+
+    @Test
+    void invoiceBackedPaymentRejectsConflictingCustomer() {
+        when(invoices.findById(21L)).thenReturn(Optional.of(invoice));
+        CustomerProfile other = mock(CustomerProfile.class);
+        when(other.getId()).thenReturn(99L);
+        when(identities.activeCustomer(99L)).thenReturn(other);
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class, () -> service.createPayment(new CommerceDtos.PaymentCreate(
+                new BigDecimal("1000.00"), "INR", PaymentPurpose.INVOICE, 99L, null, null, 21L, null)));
+        verify(payments, never()).saveAndFlush(any(PaymentRecord.class));
+    }
+
+    @Test
+    void invoiceBackedPaymentRejectsConflictingAmcContext() {
+        AmcContract contract = mock(AmcContract.class);
+        when(contract.getId()).thenReturn(41L);
+        invoice.setAmcContract(contract);
+        when(invoices.findById(21L)).thenReturn(Optional.of(invoice));
+        when(identities.activeCustomer(7L)).thenReturn(customer);
+
+        assertThrows(CommerceException.class, () -> service.createPayment(new CommerceDtos.PaymentCreate(
+                new BigDecimal("1000.00"), "INR", PaymentPurpose.INVOICE, 7L, null, 42L, 21L, null)));
+        verify(payments, never()).saveAndFlush(any(PaymentRecord.class));
     }
 
     @Test
@@ -367,12 +411,12 @@ class CommercePaymentIntegrityTest {
             when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
             when(payments.lockById(11L)).thenReturn(Optional.of(payment));
             when(refunds.saveAndFlush(any(PaymentRefund.class))).thenAnswer(inv -> inv.getArgument(0));
-            when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal(amount)), any()))
+            when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal(amount)), any(), anyString()))
                     .thenReturn(node("id", "rfnd_" + amount.replace('.', '_'), "status", "pending"));
 
             service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "within threshold"));
         }
-        verify(paymentGateway, times(2)).createRefund(any(), any(), any());
+        verify(paymentGateway, times(2)).createRefund(any(), any(), any(), any());
     }
 
     @Test
@@ -391,11 +435,11 @@ class CommercePaymentIntegrityTest {
         User secondAdmin = mock(User.class);
         when(secondAdmin.getId()).thenReturn(99L);
         when(identities.actor()).thenReturn(secondAdmin);
-        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("5000.01")), any()))
+        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("5000.01")), any(), anyString()))
                 .thenReturn(node("id", "rfnd_above", "status", "pending"));
 
         service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "second"));
-        verify(paymentGateway).createRefund(eq("pay_test"), eq(new BigDecimal("5000.01")), any());
+        verify(paymentGateway).createRefund(eq("pay_test"), eq(new BigDecimal("5000.01")), any(), anyString());
     }
 
     @Test
@@ -409,13 +453,29 @@ class CommercePaymentIntegrityTest {
     }
 
     @Test
+    void refundApprovalLocksPaymentBeforeRefund() throws Exception {
+        setThreshold("1000.00"); PaymentRefund refund = pendingRefund();
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(refunds.saveAndFlush(any(PaymentRefund.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any(), anyString()))
+                .thenReturn(node("id", "rfnd_ordered", "status", "pending"));
+
+        service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "ordered"));
+
+        var order = inOrder(payments, refunds);
+        order.verify(payments).lockById(11L);
+        order.verify(refunds).lockById(31L);
+    }
+
+    @Test
     void approvalPathCallsGatewayOnlyAfterWithinThresholdApproval() throws Exception {
         setThreshold("1000.00"); PaymentRefund refund = pendingRefund();
         when(refunds.lockById(31L)).thenReturn(Optional.of(refund)); when(payments.lockById(11L)).thenReturn(Optional.of(payment));
         when(refunds.saveAndFlush(any(PaymentRefund.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any())).thenReturn(node("id", "rfnd_test", "status", "pending"));
+        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any(), anyString())).thenReturn(node("id", "rfnd_test", "status", "pending"));
         service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "approve"));
-        verify(paymentGateway).createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any());
+        verify(paymentGateway).createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any(), anyString());
     }
 
     @Test
@@ -423,18 +483,117 @@ class CommercePaymentIntegrityTest {
         setThreshold("1000.00"); PaymentRefund refund = pendingRefund();
         when(refunds.lockById(31L)).thenReturn(Optional.of(refund)); when(payments.lockById(11L)).thenReturn(Optional.of(payment));
         when(refunds.saveAndFlush(any(PaymentRefund.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any())).thenThrow(new RuntimeException("timeout"));
+        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any(), anyString())).thenThrow(new RuntimeException("timeout"));
         assertThrows(CommerceException.class, () -> service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "approve")));
         assertEquals(RefundStatus.PROCESSING, refund.getStatus());
         assertEquals("outcome_unknown", refund.getGatewayStatus());
         assertThrows(CommerceException.class, () -> service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "retry")));
-        verify(paymentGateway, times(1)).createRefund(any(), any(), any());
+        verify(paymentGateway, times(1)).createRefund(any(), any(), any(), any());
+    }
+
+    @Test
+    void refundApprovalPersistsAndReusesStableProviderKey() throws Exception {
+        setThreshold("1000.00");
+        PaymentRefund refund = pendingRefund();
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(refunds.saveAndFlush(any(PaymentRefund.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any(), anyString()))
+                .thenThrow(new RuntimeException("timeout"));
+
+        assertThrows(CommerceException.class,
+                () -> service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "approve")));
+
+        String firstKey = refund.getProviderIdempotencyKey();
+        assertNotNull(firstKey);
+        assertTrue(firstKey.startsWith("refund-"));
+        verify(paymentGateway).createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any(), eq(firstKey));
+        verify(refunds, atLeastOnce()).saveAndFlush(same(refund));
+        assertThrows(CommerceException.class,
+                () -> service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "retry")));
+        verify(paymentGateway, times(1)).createRefund(any(), any(), any(), any());
+        assertEquals(firstKey, refund.getProviderIdempotencyKey());
+    }
+
+    @Test
+    void provider409LeavesRefundUnresolvedWithoutFreshInitiation() throws Exception {
+        setThreshold("1000.00");
+        PaymentRefund refund = pendingRefund();
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(refunds.saveAndFlush(any(PaymentRefund.class))).thenAnswer(inv -> inv.getArgument(0));
+        HttpClientErrorException conflict = HttpClientErrorException.create(HttpStatus.CONFLICT,
+                "Conflict", null, null, null);
+        when(paymentGateway.createRefund(eq("pay_test"), eq(new BigDecimal("100.00")), any(), anyString()))
+                .thenThrow(conflict);
+
+        CommerceException error = assertThrows(CommerceException.class,
+                () -> service.approveRefund(31L, new CommerceDtos.RefundApproval(31L, "approve")));
+
+        assertEquals(503, error.status);
+        assertEquals(RefundStatus.PROCESSING, refund.getStatus());
+        assertEquals("provider_idempotency_conflict", refund.getGatewayStatus());
+        verify(paymentGateway, times(1)).createRefund(any(), any(), any(), any());
+    }
+
+    @Test
+    void refundListRecoveryAcceptsExactlyOneConservativeMatch() {
+        PaymentRefund refund = reconciliationRefund();
+        refund.setRazorpayRefundId(null);
+        refund.setProviderIdempotencyKey("refund-stable");
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(refunds.findByPaymentIdOrderByCreatedAtAscIdAsc(11L)).thenReturn(List.of(refund));
+        when(paymentGateway.listRefunds("pay_test")).thenReturn(
+                new ObjectMapper().createObjectNode().set("items", new ObjectMapper().createArrayNode()
+                        .add(refundNodeWithReceipt("rfnd_recovered", "processed", "pay_test", 10000, "INR", "refund-stable"))));
+        when(paymentGateway.lookupRefund("rfnd_recovered"))
+                .thenReturn(refundNode("rfnd_recovered", "processed", "pay_test", 10000, "INR"));
+
+        CommerceDtos.RefundReconciliationResult result = service.reconcileRefund(31L);
+
+        assertEquals("REFUND_CONFIRMED", result.action());
+        assertEquals("rfnd_recovered", refund.getRazorpayRefundId());
+        assertEquals(RefundStatus.SUCCEEDED, refund.getStatus());
+        verify(paymentGateway).listRefunds("pay_test");
+        verify(paymentGateway).lookupRefund("rfnd_recovered");
+    }
+
+    @Test
+    void refundListRecoveryRejectsZeroMultipleAndMismatchedMatches() {
+        for (JsonNode items : List.of(
+                new ObjectMapper().createArrayNode(),
+                new ObjectMapper().createArrayNode()
+                        .add(refundNode("rfnd_a", "processed", "pay_test", 10000, "INR"))
+                        .add(refundNode("rfnd_b", "processed", "pay_test", 10000, "INR")),
+                new ObjectMapper().createArrayNode()
+                        .add(refundNode("rfnd_wrong", "processed", "pay_other", 10000, "INR")),
+                new ObjectMapper().createArrayNode()
+                        .add(refundNode("rfnd_wrong", "created", "pay_test", 9999, "USD")))) {
+            PaymentRefund refund = reconciliationRefund();
+            refund.setRazorpayRefundId(null);
+            refund.setProviderIdempotencyKey("refund-stable");
+            when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+            when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+            when(paymentGateway.listRefunds("pay_test"))
+                    .thenReturn(new ObjectMapper().createObjectNode().set("items", items));
+
+            CommerceDtos.RefundReconciliationResult result = service.reconcileRefund(31L);
+
+            assertEquals("NO_ACTION", result.action());
+            assertEquals(RefundStatus.PROCESSING, refund.getStatus());
+            assertNull(refund.getRazorpayRefundId());
+        }
+        verify(paymentGateway, times(4)).listRefunds("pay_test");
+        verify(paymentGateway, never()).lookupRefund(any());
     }
 
     private PaymentRefund pendingRefund() {
         payment.setStatus(PaymentStatus.SUCCEEDED); payment.setRazorpayPaymentId("pay_test");
         PaymentRefund refund = new PaymentRefund(); refund.setId(31L); refund.setPayment(payment); refund.setAmount(new BigDecimal("100.00"));
-        refund.setCurrency("INR"); refund.setStatus(RefundStatus.REQUESTED); refund.setRequestedBy(admin); return refund;
+        refund.setCurrency("INR"); refund.setStatus(RefundStatus.REQUESTED); refund.setRequestedBy(admin);
+        lenient().when(refunds.findById(31L)).thenReturn(Optional.of(refund));
+        return refund;
     }
 
     private void setThreshold(String value) throws Exception {
@@ -491,6 +650,9 @@ class CommercePaymentIntegrityTest {
         when(refunds.findByPaymentIdOrderByCreatedAtAscIdAsc(11L)).thenReturn(List.of(first, second));
 
         service.razorpayWebhook(refundEvent("evt_refund_1", "refund.processed", "rfnd_1"), "sig");
+        InOrder refundLockOrder = inOrder(payments, refunds);
+        refundLockOrder.verify(payments).lockById(11L);
+        refundLockOrder.verify(refunds).lockById(41L);
         assertEquals(RefundStatus.SUCCEEDED, first.getStatus());
         assertEquals(PaymentStatus.PARTIALLY_REFUNDED, payment.getStatus());
         assertEquals(InvoiceStatus.ISSUED, invoice.getStatus());
@@ -681,7 +843,7 @@ class CommercePaymentIntegrityTest {
         assertEquals(PaymentStatus.PARTIALLY_REFUNDED, payment.getStatus());
         assertEquals("NO_ACTION", repeated.action());
         verify(paymentGateway, times(1)).lookupRefund("rfnd_test");
-        verify(paymentGateway, never()).createRefund(any(), any(), any());
+        verify(paymentGateway, never()).createRefund(any(), any(), any(), any());
     }
 
     @Test
@@ -791,6 +953,12 @@ class CommercePaymentIntegrityTest {
                 .put("payment_id", paymentId).put("amount", amount).put("currency", currency);
     }
 
+    private JsonNode refundNodeWithReceipt(String id, String status, String paymentId, int amount,
+                                           String currency, String receipt) {
+        return ((com.fasterxml.jackson.databind.node.ObjectNode) refundNode(id, status, paymentId, amount, currency))
+                .put("receipt", receipt);
+    }
+
     @Test
     void authorizedCashOtpVerificationStillSucceedsAndPaysInvoice() {
         User technician = mock(User.class);
@@ -801,7 +969,7 @@ class CommercePaymentIntegrityTest {
         when(request.getId()).thenReturn(31L);
         payment.setServiceRequest(request);
         CashPaymentOtp otp = new CashPaymentOtp();
-        otp.id = 55L; otp.payment = payment; otp.invoice = invoice; otp.customer = customer;
+        otp.id = 55L; otp.payment = payment; otp.invoice = invoice; otp.customer = customer; otp.serviceRequest = request;
         otp.otpHash = "hash"; otp.attemptsRemaining = 3; otp.expiresAt = java.time.LocalDateTime.now().plusMinutes(5);
         when(payments.lockById(11L)).thenReturn(Optional.of(payment));
         when(cashOtps.lockById(55L)).thenReturn(Optional.of(otp));
@@ -814,6 +982,30 @@ class CommercePaymentIntegrityTest {
         assertEquals("cash_verified", payment.getGatewayStatus());
         assertEquals(InvoiceStatus.PAID, invoice.getStatus());
         assertEquals(technician, otp.verifiedBy);
+    }
+
+    @Test
+    void cashOtpVerificationRejectsConflictingPersistedContext() {
+        User technician = mock(User.class);
+        when(technician.getRole()).thenReturn(Role.TECHNICIAN);
+        when(technician.getId()).thenReturn(44L);
+        when(identities.actor()).thenReturn(technician);
+        ServiceRequest request = mock(ServiceRequest.class);
+        when(request.getId()).thenReturn(31L);
+        payment.setServiceRequest(request);
+        Invoice otherInvoice = new Invoice(); otherInvoice.setId(22L); otherInvoice.setCustomer(customer);
+        CashPaymentOtp otp = new CashPaymentOtp();
+        otp.id = 56L; otp.payment = payment; otp.invoice = otherInvoice; otp.customer = customer;
+        otp.serviceRequest = request; otp.otpHash = "hash"; otp.attemptsRemaining = 3;
+        otp.expiresAt = java.time.LocalDateTime.now().plusMinutes(5);
+        when(cashOtps.lockById(56L)).thenReturn(Optional.of(otp));
+        when(assignments.existsByRequestIdAndTechnicianUserId(31L, 44L)).thenReturn(true);
+
+        assertThrows(CommerceException.class, () -> service.verifyCashPaymentOtp(
+                new CommerceDtos.CashPaymentOtpVerify(11L, 56L, "123456")));
+        assertEquals(PaymentStatus.PROCESSING, payment.getStatus());
+        assertNull(otp.verifiedAt);
+        verify(encoder, never()).matches(anyString(), anyString());
     }
 
     @Test

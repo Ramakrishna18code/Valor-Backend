@@ -36,6 +36,8 @@ class PaymentRefund {
     private RefundStatus status = RefundStatus.REQUESTED;
     @Column(name = "razorpay_refund_id", length = 80)
     private String razorpayRefundId;
+    @Column(name = "provider_idempotency_key", length = 80, unique = true)
+    private String providerIdempotencyKey;
     @Column(name = "gateway_status", length = 60)
     private String gatewayStatus;
     @Column(name = "reason", length = 500)

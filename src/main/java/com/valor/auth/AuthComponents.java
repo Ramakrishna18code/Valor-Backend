@@ -36,6 +36,9 @@ interface OnboardingTokenRepo extends JpaRepository<OnboardingToken,Long>{@Lock(
 
  @Transactional AuthDtos.OtpSent sendOtpRequest(String phone) {
   phone=normPhone(phone);var now=LocalDateTime.now();
+  // Serialize issuance for an existing identity so the active-challenge and
+  // hourly-rate checks cannot both pass concurrently.
+  users.lockPhone(phone);
   var recent=otps.findTopByPhoneAndVerifiedAtIsNullOrderByCreatedAtDesc(phone);
   if(recent.isPresent() && (recent.get().lastSentAt!=null&&recent.get().lastSentAt.isAfter(now.minusSeconds(10)) || recent.get().lockedUntil!=null&&recent.get().lockedUntil.isAfter(now)))throw new IllegalArgumentException("OTP unavailable");
   if(otps.countByPhoneAndCreatedAtAfter(phone,now.minusHours(1))>=20)throw new IllegalArgumentException("OTP unavailable");

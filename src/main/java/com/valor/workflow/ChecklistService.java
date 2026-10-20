@@ -17,6 +17,7 @@ class ChecklistService {
     private final ChecklistItemRepository items;
     private final JobChecklistRepository jobs;
     private final ChecklistResponseRepository responses;
+    private final JobChecklistItemRepository snapshotItems;
     private final RequestRepository requests;
     private final AssignmentRepository assignments;
     private final ServiceVisitRepository visits;
@@ -25,9 +26,11 @@ class ChecklistService {
 
     ChecklistService(ChecklistTemplateRepository templates, ChecklistItemRepository items, JobChecklistRepository jobs,
             ChecklistResponseRepository responses, RequestRepository requests, AssignmentRepository assignments,
-            ServiceVisitRepository visits, AssetIdentityAccess identities, WorkflowIdentityAccess profiles) {
+            ServiceVisitRepository visits, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
+            JobChecklistItemRepository snapshotItems) {
         this.templates = templates; this.items = items; this.jobs = jobs; this.responses = responses; this.requests = requests;
         this.assignments = assignments; this.visits = visits; this.identities = identities; this.profiles = profiles;
+        this.snapshotItems = snapshotItems;
     }
 
     List<TemplateView> templates() { admin(); return templates.findAll().stream().sorted(Comparator.comparing(t -> t.id)).map(this::view).toList(); }
@@ -56,13 +59,18 @@ class ChecklistService {
         User actor = identities.actor(); TechnicianProfile technician = profiles.technician(actor);
         technicianRequest(requestId, technician);
         JobChecklist job = jobs.findByRequestId(requestId).orElseThrow(ChecklistService::missing);
-        Map<Long, ChecklistItem> allowed = new HashMap<>();
-        for (ChecklistItem item : items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId())) allowed.put(item.id, item);
+        List<JobChecklistItem> snapshots = snapshotItems.findByChecklistIdOrderBySortOrderAscIdAsc(job.id);
+        Map<Long, JobChecklistItem> allowedSnapshots = new HashMap<>();
+        if (!snapshots.isEmpty()) for (JobChecklistItem item : snapshots) if (item.sourceItemId != null) allowedSnapshots.put(item.sourceItemId, item);
+        Map<Long, ChecklistItem> allowedLegacy = new HashMap<>();
+        if (snapshots.isEmpty()) for (ChecklistItem item : items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId())) allowedLegacy.put(item.id, item);
         for (ResponseWrite write : Optional.ofNullable(input.responses()).orElse(List.of())) {
-            ChecklistItem item = allowed.get(write.itemId());
+            JobChecklistItem snapshot = allowedSnapshots.get(write.itemId());
+            ChecklistItem item = snapshots.isEmpty() ? allowedLegacy.get(write.itemId()) : items.findById(write.itemId()).orElse(null);
             if (item == null) throw new WorkflowException(400, "Invalid checklist item");
             ChecklistResponse response = responses.findByChecklistIdAndItemId(job.id, item.id).orElseGet(ChecklistResponse::new);
             response.checklist = job; response.item = item; response.technician = technician;
+            response.jobChecklistItemId = snapshot == null ? null : snapshot.id;
             response.checked = write.checked(); response.valueText = clean(write.valueText(), 2000); response.respondedAt = LocalDateTime.now();
             responses.save(response);
         }
@@ -91,20 +99,32 @@ class ChecklistService {
         if (matches.isEmpty()) return Optional.empty();
         JobChecklist job = new JobChecklist(); job.request = request; job.template = matches.get(0); job.templateVersion = job.template.getVersion();
         visits.activeForRequest(request.getId(), List.of(VisitStatus.SCHEDULED, VisitStatus.IN_PROGRESS)).stream().findFirst().ifPresent(v -> job.visit = v);
-        return Optional.of(jobs.saveAndFlush(job));
+        JobChecklist saved = jobs.saveAndFlush(job);
+        List<JobChecklistItem> snapshots = items.findByTemplateIdOrderBySortOrderAscIdAsc(saved.template.getId()).stream().map(item -> {
+            JobChecklistItem snapshot = new JobChecklistItem();
+            snapshot.checklist = saved; snapshot.sourceItemId = item.id; snapshot.label = item.label; snapshot.description = item.description;
+            snapshot.required = item.required; snapshot.sortOrder = item.sortOrder; snapshot.inputType = item.inputType;
+            snapshot.snapshotQuality = ChecklistSnapshotQuality.VERIFIED;
+            return snapshot;
+        }).toList();
+        snapshotItems.saveAllAndFlush(snapshots);
+        return Optional.of(saved);
     }
     private void refreshStatus(JobChecklist job) {
-        List<ChecklistItem> required = items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId()).stream().filter(i -> i.required).toList();
+        List<JobChecklistItem> snapshots = snapshotItems.findByChecklistIdOrderBySortOrderAscIdAsc(job.id);
         Map<Long, ChecklistResponse> byItem = new HashMap<>();
-        for (ChecklistResponse r : responses.findByChecklistId(job.id)) byItem.put(r.item.getId(), r);
-        boolean complete = required.stream().allMatch(i -> {
-            ChecklistResponse r = byItem.get(i.id);
+        for (ChecklistResponse r : responses.findByChecklistId(job.id)) byItem.put(r.jobChecklistItemId != null ? r.jobChecklistItemId : r.item.getId(), r);
+        if (snapshots.isEmpty()) snapshots = items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId()).stream().map(i -> {
+            JobChecklistItem s = new JobChecklistItem(); s.sourceItemId = i.id; s.required = i.required; return s;
+        }).toList();
+        boolean complete = snapshots.stream().filter(i -> i.required).allMatch(i -> {
+            ChecklistResponse r = byItem.get(i.id != null ? i.id : i.sourceItemId);
             return r != null && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank());
         });
         job.status = complete ? JobChecklistStatus.COMPLETED : JobChecklistStatus.IN_PROGRESS;
     }
     private ServiceRequest technicianRequest(Long requestId, TechnicianProfile technician) {
-        ServiceRequest request = requests.findById(requestId).orElseThrow(ChecklistService::missing);
+        ServiceRequest request = requests.lockById(requestId).orElseThrow(ChecklistService::missing);
         if (!assignments.existsByRequestIdAndTechnicianId(requestId, technician.getId())) throw denied();
         return request;
     }
@@ -125,19 +145,22 @@ class ChecklistService {
     private TemplateView view(ChecklistTemplate t) { return new TemplateView(t.id, t.name, t.description, t.active, t.serviceTypes, t.version, items.findByTemplateIdOrderBySortOrderAscIdAsc(t.id).stream().map(this::itemView).toList(), t.createdAt, t.updatedAt); }
     private ItemView itemView(ChecklistItem i) { return new ItemView(i.id, i.template.getId(), i.label, i.description, i.required, i.sortOrder, i.inputType); }
     private JobChecklistView jobView(JobChecklist job) {
-        List<ChecklistItem> itemRows = items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId());
+        List<JobChecklistItem> snapshots = snapshotItems.findByChecklistIdOrderBySortOrderAscIdAsc(job.id);
+        List<ChecklistItem> itemRows = snapshots.isEmpty() ? items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId()) : List.of();
         List<ChecklistResponse> responseRows = responses.findByChecklistId(job.id);
-        int required = (int)itemRows.stream().filter(i -> i.required).count();
-        int done = (int)itemRows.stream().filter(i -> i.required).filter(i -> responseRows.stream().anyMatch(r -> r.item.getId().equals(i.id) && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank()))).count();
+        int required = snapshots.isEmpty() ? (int)itemRows.stream().filter(i -> i.required).count() : (int)snapshots.stream().filter(i -> i.required).count();
+        int done = snapshots.isEmpty() ? (int)itemRows.stream().filter(i -> i.required).filter(i -> responseRows.stream().anyMatch(r -> r.item.getId().equals(i.id) && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank()))).count() : (int)snapshots.stream().filter(i -> i.required).filter(i -> responseRows.stream().anyMatch(r -> Objects.equals(r.jobChecklistItemId, i.id) && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank()))).count();
+        List<ItemView> views = snapshots.isEmpty() ? itemRows.stream().map(this::itemView).toList() : snapshots.stream().map(i -> new ItemView(i.sourceItemId, job.template.getId(), i.label, i.description, i.required, i.sortOrder, i.inputType)).toList();
         return new JobChecklistView(job.id, job.request.getId(), job.visit == null ? null : job.visit.getId(), job.template.getId(), job.template.getName(),
-                job.templateVersion, job.status, required, done, itemRows.stream().map(this::itemView).toList(),
+                job.templateVersion, job.status, required, done, views,
                 responseRows.stream().map(r -> new ResponseView(r.item.getId(), r.checked, r.valueText, r.technician.getId(), r.respondedAt)).toList(), job.updatedAt);
     }
     private AdminChecklistSummary summaryView(JobChecklist job) {
-        List<ChecklistItem> itemRows = items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId());
+        List<JobChecklistItem> snapshots = snapshotItems.findByChecklistIdOrderBySortOrderAscIdAsc(job.id);
+        List<ChecklistItem> itemRows = snapshots.isEmpty() ? items.findByTemplateIdOrderBySortOrderAscIdAsc(job.template.getId()) : List.of();
         List<ChecklistResponse> responseRows = responses.findByChecklistId(job.id);
-        int required = (int)itemRows.stream().filter(i -> i.required).count();
-        int done = (int)itemRows.stream().filter(i -> i.required).filter(i -> responseRows.stream().anyMatch(r -> r.item.getId().equals(i.id) && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank()))).count();
+        int required = snapshots.isEmpty() ? (int)itemRows.stream().filter(i -> i.required).count() : (int)snapshots.stream().filter(i -> i.required).count();
+        int done = snapshots.isEmpty() ? (int)itemRows.stream().filter(i -> i.required).filter(i -> responseRows.stream().anyMatch(r -> r.item.getId().equals(i.id) && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank()))).count() : (int)snapshots.stream().filter(i -> i.required).filter(i -> responseRows.stream().anyMatch(r -> Objects.equals(r.jobChecklistItemId, i.id) && (Boolean.TRUE.equals(r.checked) || r.valueText != null && !r.valueText.isBlank()))).count();
         return new AdminChecklistSummary(job.id, job.request.getId(), job.template.getId(), job.template.getName(), job.templateVersion, job.status, required, done, job.updatedAt);
     }
     private void admin() { User actor = identities.actor(); if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied(); }

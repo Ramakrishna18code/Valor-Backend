@@ -3,6 +3,7 @@ package com.valor.installation;
 import com.valor.assets.Building;
 import com.valor.auth.CustomerProfile;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Page;
@@ -10,6 +11,9 @@ import org.springframework.data.domain.Pageable;
 import java.util.*;
 
 interface InstallationRequestRepository extends JpaRepository<InstallationRequest, Long> {
+    @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from InstallationRequest r where r.id=:id")
+    Optional<InstallationRequest> lockById(@Param("id") Long id);
     Optional<InstallationRequest> findByIdAndCustomerId(Long id, Long customerId);
     Optional<InstallationRequest> findByCustomerIdAndClientRequestKey(Long customerId, String key);
     Optional<InstallationRequest> findByCustomerIdAndSubmissionKey(Long customerId, String key);

@@ -3,6 +3,7 @@ package com.valor.auth;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.valor.notifications.Notification;
+import com.valor.notifications.NotificationDtos;
 import com.valor.notifications.NotificationService;
 import jakarta.persistence.EntityManager;
 import org.flywaydb.core.Flyway;
@@ -141,6 +142,27 @@ class Stage4NotificationsTest {
         var second = notificationService.createSystem(recipient.getId(), "Legacy", "Legacy message");
         assertNotEquals(first.id(), second.id());
         assertEquals(2, db.queryForObject("select count(*) from notifications where recipient_user_id=? and event_key is null", Integer.class, recipient.getId()));
+    }
+
+    @Test void concurrentSystemEventKeyCreationReturnsOneLogicalNotification() throws Exception {
+        User recipient = user(Role.CUSTOMER);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Callable<NotificationDtos.View> create = () -> {
+                start.await();
+                return notificationService.createSystemOnce(recipient.getId(), "CONCURRENT:42", "Title", "Message");
+            };
+            Future<NotificationDtos.View> first = executor.submit(create);
+            Future<NotificationDtos.View> second = executor.submit(create);
+            start.countDown();
+            NotificationDtos.View a = first.get(10, TimeUnit.SECONDS);
+            NotificationDtos.View b = second.get(10, TimeUnit.SECONDS);
+            assertEquals(a.id(), b.id());
+            assertEquals(1, db.queryForObject("select count(*) from notifications where event_key=?", Integer.class, "CONCURRENT:42"));
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test void customerAndTechnicianCannotCreateNotifications() throws Exception {

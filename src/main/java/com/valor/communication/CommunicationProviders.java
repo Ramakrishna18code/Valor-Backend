@@ -5,6 +5,7 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.internet.InternetAddress;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -67,6 +68,7 @@ class SmtpEmailProvider implements EmailProvider {
     private final EmailProperties properties;
     private final JavaMailSender testSender;
 
+    @Autowired
     SmtpEmailProvider(EmailProperties properties) { this(properties, null); }
     SmtpEmailProvider(EmailProperties properties, JavaMailSender testSender) { this.properties = properties; this.testSender = testSender; }
 

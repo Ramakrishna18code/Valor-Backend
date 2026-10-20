@@ -25,7 +25,10 @@ class InstallationMilestoneInvoiceService {
     View generate(Long milestoneId){
         access.requireAdmin();
         var m=milestones.lockById(milestoneId).orElseThrow(()->new IllegalArgumentException("Milestone not found"));
-        if(m.getInvoiceId()!=null)return existing(m);
+        if(m.getInvoiceId()!=null) {
+            validateLinkedInvoice(m, m.getInvoiceId());
+            return existing(m);
+        }
         var schedule=m.getSchedule();
         if(schedule==null)throw blocked("Milestone has no approved schedule");
         JsonNode definition=definition(schedule,m.getMilestoneCode());
@@ -36,14 +39,20 @@ class InstallationMilestoneInvoiceService {
         if(amount==null||tax==null||tax.signum()<0||amount.signum()<=0)throw blocked("Approved amount and tax terms are required");
         if(m.getAmount().compareTo(amount)!=0)throw blocked("Milestone amount differs from approved schedule");
         BigDecimal total=amount.add(tax);
-        Number existingNumber=(Number)em.createNativeQuery("select id from invoices where installation_milestone_id=? and status not in ('VOID','CANCELLED') order by id desc limit 1").setParameter(1,milestoneId).getResultStream().findFirst().orElse(null);
+        Long customerId=m.getRequest().getCustomer().getId();
+        Number existingNumber=(Number)em.createNativeQuery("select i.id from invoices i join installation_milestones linked on linked.id=i.installation_milestone_id join installation_requests ir on ir.id=linked.installation_request_id where i.installation_milestone_id=? and i.customer_id=ir.customer_id and ir.customer_id=? and i.status not in ('VOID','CANCELLED') order by i.id desc limit 1")
+                .setParameter(1,milestoneId).setParameter(2,customerId).getResultStream().findFirst().orElse(null);
         Long existing=existingNumber==null?null:existingNumber.longValue();
         if(existing!=null){m.setInvoiceId(existing);m.setStatus(InstallationMilestoneStatus.INVOICED);return existing(m);}
-        Long customerId=m.getRequest().getCustomer().getId();
         em.createNativeQuery("insert into invoices(invoice_number,customer_id,created_by_user_id,description,subtotal,tax_amount,total_amount,currency,status,issued_date,installation_milestone_id) values (?,?,?,?,?,?,?,?,?,?,?)")
           .setParameter(1,"INST-"+UUID.randomUUID().toString().substring(0,12).toUpperCase()).setParameter(2,customerId).setParameter(3,access.actor().getId()).setParameter(4,"Installation milestone "+m.getMilestoneCode()).setParameter(5,amount).setParameter(6,tax).setParameter(7,total).setParameter(8,schedule.getCurrency()).setParameter(9,"ISSUED").setParameter(10,LocalDate.now()).setParameter(11,milestoneId).executeUpdate();
         Long invoiceId=((Number)em.createNativeQuery("select id from invoices where installation_milestone_id=? order by id desc limit 1").setParameter(1,milestoneId).getSingleResult()).longValue();
         m.setInvoiceId(invoiceId);m.setStatus(InstallationMilestoneStatus.INVOICED);milestones.saveAndFlush(m);audit.record("INSTALLATION_MILESTONE_INVOICE_CREATE","INSTALLATION_MILESTONE",milestoneId,"Milestone invoice created");return new View(milestoneId,invoiceId,m.getRequest().getId(),amount,tax,total,schedule.getCurrency(),"ISSUED",LocalDate.now());
+    }
+    private void validateLinkedInvoice(InstallationMilestone milestone, Long invoiceId) {
+        Number valid=(Number)em.createNativeQuery("select count(*) from invoices i join installation_milestones linked on linked.id=i.installation_milestone_id join installation_requests ir on ir.id=linked.installation_request_id where i.id=? and i.installation_milestone_id=? and ir.id=? and i.customer_id=ir.customer_id")
+                .setParameter(1,invoiceId).setParameter(2,milestone.getId()).setParameter(3,milestone.getRequest().getId()).getSingleResult();
+        if(valid.longValue()!=1L) throw blocked("Milestone invoice relationship is inconsistent");
     }
     private View existing(InstallationMilestone m){return new View(m.getId(),m.getInvoiceId(),m.getRequest().getId(),m.getAmount(),null,null,m.getCurrency(),"ISSUED",null);}
     private JsonNode definition(InstallationSchedule s,String code){try{JsonNode a=json.readTree(s.getMilestoneDefinitions());for(JsonNode n:a)if(code.equals(n.path("code").asText()))return n;throw blocked("Milestone is not defined by approved schedule");}catch(InstallationMilestoneEligibilityService.InstallationEligibilityException e){throw e;}catch(Exception e){throw blocked("Schedule terms are invalid");}}

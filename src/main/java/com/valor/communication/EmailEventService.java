@@ -19,6 +19,9 @@ public class EmailEventService {
     private final CommunicationUserRepository users;
     private final ApplicationEventPublisher events;
     private static final Set<CommunicationChannel> STANDARD = Set.of(CommunicationChannel.EMAIL, CommunicationChannel.SMS, CommunicationChannel.WHATSAPP);
+    private static final Set<String> ENABLED_EMAIL_EVENTS = Set.of(
+            "CUSTOMER_ACCOUNT_CREATED", "CUSTOMER_WELCOME", "INVOICE_CREATED", "PAYMENT_RESULT", "REFUND_RESULT",
+            "TECHNICIAN_ACCOUNT_CREATED", "TECHNICIAN_REGISTRATION_APPROVED", "TECHNICIAN_REGISTRATION_REJECTED");
 
     public EmailEventService(CommunicationService communication, CommunicationUserRepository users, ApplicationEventPublisher events) {
         this.communication = communication; this.users = users; this.events = events;
@@ -34,6 +37,10 @@ public class EmailEventService {
     public void technicianAccountCreated(Long userId, String name, String setPasswordUrl) {
         mandatory("TECHNICIAN_ACCOUNT_CREATED", userId, "technician-account-created:" + userId,
                 vars("name", name, "setPasswordUrl", setPasswordUrl));
+    }
+    public void technicianRegistrationApproved(Long userId, String name) {
+        optional("TECHNICIAN_REGISTRATION_APPROVED", userId, "technician-registration-approved:" + userId,
+                vars("name", name));
     }
     public void serviceRequestCreated(Long userId, String name, Long requestId, String serviceId, String title, String status) {
         optional("SERVICE_REQUEST_CREATED", userId, "service-request-created:" + requestId,
@@ -116,7 +123,7 @@ public class EmailEventService {
         publish(new CommunicationAutomationEvent(eventType, null, true, false, key, variables, false));
     }
     private void publish(CommunicationAutomationEvent event) {
-        events.publishEvent(event);
+        if (ENABLED_EMAIL_EVENTS.contains(event.eventType())) events.publishEvent(event);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)

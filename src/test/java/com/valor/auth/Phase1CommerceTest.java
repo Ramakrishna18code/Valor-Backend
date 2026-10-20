@@ -24,7 +24,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"spring.datasource.url=jdbc:h2:mem:phase1_commerce;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE",
         "app.asset-documents.local-root=target/test-asset-documents",
         "razorpay.key-id=rzp_test_key", "razorpay.key-secret=rzp_test_secret",
-        "razorpay.webhook-secret=test_webhook_secret", "razorpay.offline-test-mode=true"})
+        "razorpay.webhook-secret=test_webhook_secret", "razorpay.offline-test-mode=true",
+        "valor.refunds.same-admin-threshold=5000.00"})
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class Phase1CommerceTest {

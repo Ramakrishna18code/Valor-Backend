@@ -5,8 +5,12 @@ import com.valor.auth.AuditService;
 import java.time.*;
 import java.time.temporal.ChronoUnit;
 import org.springframework.data.domain.*;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import static com.valor.notifications.NotificationDtos.*;
 
@@ -18,9 +22,12 @@ public class NotificationService {
     private final AssetIdentityAccess identities;
     private final AuditService audit;
     private final Clock clock;
+    private final TransactionTemplate idempotentWrite;
     public NotificationService(NotificationRepository notifications, NotificationRecipientRepository recipients,
-            AssetIdentityAccess identities, AuditService audit, Clock clock) {
+            AssetIdentityAccess identities, AuditService audit, Clock clock, PlatformTransactionManager transactionManager) {
         this.notifications = notifications; this.recipients = recipients; this.identities = identities; this.audit = audit; this.clock = clock;
+        this.idempotentWrite = new TransactionTemplate(transactionManager);
+        this.idempotentWrite.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     public View create(Create input) {
@@ -47,21 +54,35 @@ public class NotificationService {
     }
 
     public View createSystemOnce(Long recipientUserId, String eventKey, String title, String message) {
-        if (eventKey != null && !eventKey.isBlank()) {
-            var existing = notifications.findByEventKey(eventKey);
+        String normalizedEventKey = eventKey == null || eventKey.isBlank() ? null : eventKey.trim();
+        if (normalizedEventKey != null) {
+            var existing = notifications.findByEventKey(normalizedEventKey);
             if (existing.isPresent()) return view(existing.get());
         }
-        var recipient = recipients.findById(recipientUserId)
-                .orElseThrow(() -> new NotificationException(404, "Recipient not found"));
-        Notification notification = new Notification();
-        notification.setRecipient(recipient);
-        notification.setTitle(title == null || title.isBlank() ? "Valor update" : title);
-        notification.setMessage(message == null || message.isBlank() ? "You have a new Valor update." : message);
-        notification.setChannel(NotificationChannel.IN_APP);
-        notification.setStatus(NotificationStatus.PENDING);
-        notification.setEventKey(eventKey == null || eventKey.isBlank() ? null : eventKey.trim());
-        notifications.save(notification); notifications.flush();
-        return view(notification);
+        try {
+            return idempotentWrite.execute(status -> {
+                var recipient = recipients.findById(recipientUserId)
+                        .orElseThrow(() -> new NotificationException(404, "Recipient not found"));
+                Notification notification = new Notification();
+                notification.setRecipient(recipient);
+                notification.setTitle(title == null || title.isBlank() ? "Valor update" : title);
+                notification.setMessage(message == null || message.isBlank() ? "You have a new Valor update." : message);
+                notification.setChannel(NotificationChannel.IN_APP);
+                notification.setStatus(NotificationStatus.PENDING);
+                notification.setEventKey(normalizedEventKey);
+                notifications.save(notification); notifications.flush();
+                return view(notification);
+            });
+        } catch (DataIntegrityViolationException ex) {
+            if (normalizedEventKey == null || !isEventKeyConflict(ex)) throw ex;
+            return notifications.findByEventKey(normalizedEventKey).map(this::view)
+                    .orElseThrow(() -> ex);
+        }
+    }
+
+    private static boolean isEventKeyConflict(DataIntegrityViolationException ex) {
+        String text = ex.toString().toLowerCase(java.util.Locale.ROOT);
+        return text.contains("event_key") || text.contains("ux_notifications_event_key");
     }
 
     @Transactional(readOnly = true)

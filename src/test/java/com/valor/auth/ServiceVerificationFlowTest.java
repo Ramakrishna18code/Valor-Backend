@@ -11,6 +11,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -88,6 +89,40 @@ class ServiceVerificationFlowTest {
         call(put(checklistPath+"/responses"),f.technician(),Map.of("responses",List.of(Map.of("itemId",item,"checked",true))),200);
         JsonNode saved=call(get(checklistPath),f.technician(),null,200);
         assertEquals("COMPLETED",saved.get("status").asText());assertEquals(1,saved.get("requiredCompleted").asInt());assertEquals(item,saved.get("responses").get(0).get("itemId").asLong());
+    }
+    @Test void newChecklistSnapshotsTemplateItemsAndLinksResponses() throws Exception {
+        Fixture f=fixture();assign(f);
+        long template=call(post("/api/v1/admin/checklist-templates"),f.admin(),Map.of("name","Snapshot checks","active",true,"serviceTypes",List.of("BREAKDOWN")),200).get("id").asLong();
+        long item=call(post("/api/v1/admin/checklist-templates/"+template+"/items"),f.admin(),Map.of("label","Snapshot item","required",true,"inputType","CHECKBOX"),200).get("id").asLong();
+        long itemTwo=call(post("/api/v1/admin/checklist-templates/"+template+"/items"),f.admin(),Map.of("label","Snapshot item two","required",false,"inputType","TEXT"),200).get("id").asLong();
+        String path="/api/v1/technician/me/jobs/"+f.requestId()+"/checklist";
+        call(get(path),f.technician(),null,200);
+        long job= db.queryForObject("select id from job_checklists where service_request_id=?",Long.class,f.requestId());
+        assertEquals(2,db.queryForObject("select count(*) from job_checklist_items where job_checklist_id=?",Integer.class,job));
+        assertEquals("VERIFIED",db.queryForObject("select snapshot_quality from job_checklist_items where job_checklist_id=? and source_item_id=?",String.class,job,item));
+        assertEquals("Snapshot item",db.queryForObject("select label from job_checklist_items where job_checklist_id=? and source_item_id=?",String.class,job,item));
+        call(put(path+"/responses"),f.technician(),Map.of("responses",List.of(Map.of("itemId",item,"checked",true))),200);
+        Long snapshotId=db.queryForObject("select id from job_checklist_items where job_checklist_id=? and source_item_id=?",Long.class,job,item);
+        assertEquals(snapshotId,db.queryForObject("select job_checklist_item_id from checklist_responses where job_checklist_id=? and item_id=?",Long.class,job,item));
+        assertThrows(DataIntegrityViolationException.class, () -> db.update("insert into job_checklist_items(job_checklist_id,source_item_id,label,required,sort_order,input_type,snapshot_quality) values (?,?,?,?,?,?,?)",
+                job,item,"Duplicate",true,2,"CHECKBOX","VERIFIED"));
+        assertEquals(2,db.queryForObject("select count(*) from job_checklist_items where job_checklist_id=?",Integer.class,job));
+        call(put("/api/v1/admin/checklist-templates/"+template),f.admin(),Map.of("name","Snapshot checks","active",false,"serviceTypes",List.of("BREAKDOWN")),200);
+    }
+    @Test void snapshotDefinitionsSurviveTemplateItemEditAndDeletion() throws Exception {
+        Fixture f=fixture(); assign(f);
+        long template=call(post("/api/v1/admin/checklist-templates"),f.admin(),Map.of("name","Immutable checks","active",true,"serviceTypes",List.of("BREAKDOWN")),200).get("id").asLong();
+        long item=call(post("/api/v1/admin/checklist-templates/"+template+"/items"),f.admin(),Map.of("label","Original label","required",true,"inputType","CHECKBOX"),200).get("id").asLong();
+        String path="/api/v1/technician/me/jobs/"+f.requestId()+"/checklist";
+        call(get(path),f.technician(),null,200);
+        call(put("/api/v1/admin/checklist-templates/"+template+"/items/"+item),f.admin(),Map.of("label","Changed label","required",false,"inputType","TEXT"),200);
+        call(delete("/api/v1/admin/checklist-templates/"+template+"/items/"+item),f.admin(),null,200);
+        JsonNode reloaded=call(get(path),f.technician(),null,200);
+        assertEquals(1,reloaded.get("items").size());
+        assertEquals("Original label",reloaded.get("items").get(0).get("label").asText());
+        assertTrue(reloaded.get("items").get(0).get("required").asBoolean());
+        assertEquals(item,reloaded.get("items").get(0).get("id").asLong());
+        call(put("/api/v1/admin/checklist-templates/"+template),f.admin(),Map.of("name","Immutable checks","active",false,"serviceTypes",List.of("BREAKDOWN")),200);
     }
     @Test void adminChecklistAuditIsAuthorizedAndReadOnly() throws Exception {
         Fixture f=fixture(); assign(f);

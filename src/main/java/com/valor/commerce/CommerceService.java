@@ -88,15 +88,24 @@ class CommerceService {
     PaymentView createPayment(PaymentCreate input) {
         User actor = identities.actor();
         if (!isCustomer(actor) && !isAdmin(actor)) throw denied();
-        CustomerProfile customer = isCustomer(actor) ? customer(actor) : customer(input.customerProfileId());
+        Invoice invoice = input.invoiceId() == null ? null : authorized(invoices.findById(input.invoiceId()).orElseThrow(() -> missing("Invoice")));
+        CustomerProfile customer = isCustomer(actor) ? customer(actor)
+                : input.customerProfileId() != null ? customer(input.customerProfileId())
+                : invoice == null ? null : invoice.getCustomer();
+        if (invoice != null && !invoice.getCustomer().getId().equals(customer.getId())) throw denied();
         PaymentRecord row = new PaymentRecord();
         row.setCustomer(customer); row.setCreatedBy(actor); row.setAmount(input.amount()); row.setCurrency(currency(input.currency()));
         row.setPurpose(input.purpose() == null ? PaymentPurpose.OTHER : input.purpose());
         row.setProviderReference(clean(input.providerReference(), 120));
-        row.setServiceRequest(input.serviceRequestId() == null ? null : request(input.serviceRequestId(), customer));
-        row.setAmcContract(input.amcContractId() == null ? null : amc(input.amcContractId(), customer));
-        if (input.invoiceId() != null) {
-            Invoice invoice = authorized(invoices.findById(input.invoiceId()).orElseThrow(() -> missing("Invoice")));
+        if (invoice != null) {
+            if (input.serviceRequestId() != null && (invoice.getServiceRequest() == null || !input.serviceRequestId().equals(invoice.getServiceRequest().getId()))) {
+                throw new CommerceException(409, "Payment service request does not match invoice");
+            }
+            if (input.amcContractId() != null && (invoice.getAmcContract() == null || !input.amcContractId().equals(invoice.getAmcContract().getId()))) {
+                throw new CommerceException(409, "Payment AMC contract does not match invoice");
+            }
+            row.setServiceRequest(invoice.getServiceRequest());
+            row.setAmcContract(invoice.getAmcContract());
             if (!invoice.getCustomer().getId().equals(customer.getId())) throw denied();
             if (input.amount().compareTo(invoice.getTotalAmount()) != 0 || !currency(input.currency()).equals(invoice.getCurrency())) {
                 throw new CommerceException(400, "Payment amount must match invoice total");
@@ -105,6 +114,9 @@ class CommerceService {
                 throw new CommerceException(409, "Invoice is not eligible for payment");
             }
             row.setInvoice(invoice);
+        } else {
+            row.setServiceRequest(input.serviceRequestId() == null ? null : request(input.serviceRequestId(), customer));
+            row.setAmcContract(input.amcContractId() == null ? null : amc(input.amcContractId(), customer));
         }
         return view(payments.saveAndFlush(row));
     }
@@ -197,7 +209,7 @@ class CommerceService {
         if (!canVerifyCash(payment, actor)) throw denied();
         CashPaymentOtp otp = cashOtps.lockById(input.otpId()).orElseThrow(CommerceService::invalidCashOtp);
         LocalDateTime now = LocalDateTime.now(clock);
-        if (!otp.payment.getId().equals(payment.getId()) || otp.verifiedAt != null || payment.getStatus() != PaymentStatus.PROCESSING
+        if (!otp.payment.getId().equals(payment.getId()) || !cashContextMatches(otp, payment) || otp.verifiedAt != null || payment.getStatus() != PaymentStatus.PROCESSING
                 || !otp.expiresAt.isAfter(now) || otp.attemptsRemaining <= 0 || otp.lockedUntil != null && otp.lockedUntil.isAfter(now)) throw invalidCashOtp();
         if (input.otp() == null || !encoder.matches(input.otp(), otp.otpHash)) {
             otp.attemptsRemaining--;
@@ -248,6 +260,7 @@ class CommerceService {
         PaymentRefund refund = new PaymentRefund();
         refund.setPayment(payment); refund.setRequestedBy(requester); refund.setAmount(input.amount()); refund.setCurrency(payment.getCurrency());
         refund.setReason(clean(input.reason(), 500)); refund.setStatus(RefundStatus.REQUESTED);
+        refund.setProviderIdempotencyKey("refund-" + UUID.randomUUID());
         refunds.saveAndFlush(refund);
         return refund;
     }
@@ -257,9 +270,16 @@ class CommerceService {
         requireAdmin();
         if (input.refundId() == null || !refundId.equals(input.refundId())) throw new CommerceException(400, "Refund reference mismatch");
         User actor = identities.actor();
+        // Every path that needs both rows locks the payment first, then the refund.
+        // This matches requestRefund(), which already owns the payment lock.
+        PaymentRefund reference = refunds.findById(refundId).orElseThrow(() -> missing("Refund"));
+        PaymentRecord payment = payments.lockById(reference.getPayment().getId()).orElseThrow(() -> missing("Payment"));
         PaymentRefund refund = refunds.lockById(refundId).orElseThrow(() -> missing("Refund"));
-        PaymentRecord payment = payments.lockById(refund.getPayment().getId()).orElseThrow(() -> missing("Payment"));
         if (refund.getStatus() != RefundStatus.REQUESTED) throw new CommerceException(409, "Refund is not awaiting approval");
+        if (refund.getProviderIdempotencyKey() == null || refund.getProviderIdempotencyKey().isBlank()) {
+            refund.setProviderIdempotencyKey("refund-" + UUID.randomUUID());
+            refunds.saveAndFlush(refund);
+        }
         if (!thresholdConfigured()) throw new CommerceException(503, "Refund approval threshold is not configured");
         if (refund.getApprovedBy() == null) {
             refund.setApprovedBy(actor); refund.setApprovedAt(LocalDateTime.now()); refund.setApprovalReason(clean(input.reason(), 500));
@@ -275,8 +295,15 @@ class CommerceService {
         refunds.saveAndFlush(refund);
         final JsonNode node;
         try {
-            node = paymentGateway.createRefund(payment.getRazorpayPaymentId(), refund.getAmount(), refund.getReason());
+            node = paymentGateway.createRefund(payment.getRazorpayPaymentId(), refund.getAmount(), refund.getReason(), refund.getProviderIdempotencyKey());
         } catch (HttpClientErrorException ex) {
+            if (ex.getStatusCode().value() == 409) {
+                refund.setGatewayStatus("provider_idempotency_conflict");
+                audit.record("PAYMENT_REFUND_OUTCOME_UNKNOWN", "PAYMENT", payment.getId(),
+                        "Refund provider reported an idempotency conflict amount=" + refund.getAmount(),
+                        "status=" + payment.getStatus(), "refundStatus=" + refund.getStatus(), "FAILURE");
+                throw new CommerceException(503, "Refund is already processing or requires reconciliation");
+            }
             // A provider rejection is definitive. Keep the audit trail, but do not count
             // the attempt as a successful refund and allow a later reviewed request.
             refund.setStatus(RefundStatus.FAILED);
@@ -433,6 +460,14 @@ class CommerceService {
     }
 
     private boolean claimWebhookEvent(String eventId, String event, String orderId, String paymentId, String refundId) {
+        if (entityManager != null) {
+            String sql = "insert into razorpay_webhook_events(event_id,event_type,razorpay_order_id,razorpay_payment_id,razorpay_refund_id,processed_at) "
+                    + "values (?,?,?,?,?,CURRENT_TIMESTAMP) on duplicate key update event_id=values(event_id)";
+            int inserted = entityManager.createNativeQuery(sql)
+                    .setParameter(1, eventId).setParameter(2, event).setParameter(3, orderId)
+                    .setParameter(4, paymentId).setParameter(5, refundId).executeUpdate();
+            return inserted > 0;
+        }
         RazorpayWebhookEvent claimed = new RazorpayWebhookEvent();
         claimed.setEventId(eventId); claimed.setEventType(event); claimed.setRazorpayOrderId(orderId);
         claimed.setRazorpayPaymentId(paymentId); claimed.setRazorpayRefundId(refundId);
@@ -516,18 +551,26 @@ class CommerceService {
     @Transactional
     RefundReconciliationResult reconcileRefund(Long refundId) {
         requireAdmin();
+        PaymentRefund reference = refunds.findById(refundId).orElseThrow(() -> missing("Refund"));
+        PaymentRecord payment = payments.lockById(reference.getPayment().getId()).orElseThrow(() -> missing("Payment"));
         PaymentRefund refund = refunds.lockById(refundId).orElseThrow(() -> missing("Refund"));
-        PaymentRecord payment = payments.lockById(refund.getPayment().getId()).orElseThrow(() -> missing("Payment"));
         String localStatus = refund.getStatus().name();
         if (refund.getStatus() != RefundStatus.PROCESSING) {
             return refundReconciliationResult(refund, payment, false, refund.getGatewayStatus(), true,
                     "NO_ACTION", "Refund is not awaiting provider reconciliation");
         }
         if (refund.getRazorpayRefundId() == null || refund.getRazorpayRefundId().isBlank()) {
-            audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
-                    "Refund provider reference is missing; manual investigation required");
-            return refundReconciliationResult(refund, payment, false, null, false,
-                    "NO_ACTION", "Provider refund reference is missing");
+            JsonNode candidates;
+            try { candidates = paymentGateway.listRefunds(payment.getRazorpayPaymentId()); }
+            catch (RuntimeException ex) { candidates = null; }
+            JsonNode match = uniqueRefundCandidate(candidates, payment, refund);
+            if (match == null) {
+                audit.record("PAYMENT_REFUND_RECONCILIATION", "PAYMENT_REFUND", refundId,
+                        "Refund provider reference is missing or ambiguous; manual investigation required");
+                return refundReconciliationResult(refund, payment, false, null, false,
+                        "NO_ACTION", "Provider refund reference is missing or ambiguous");
+            }
+            refund.setRazorpayRefundId(text(match, "id"));
         }
         if (!"INR".equalsIgnoreCase(payment.getCurrency())
                 || !payment.getCurrency().equalsIgnoreCase(refund.getCurrency())) {
@@ -590,6 +633,22 @@ class CommerceService {
             boolean evidence, String providerStatus, boolean referencesMatch, String action, String reason) {
         return new RefundReconciliationResult(refund.getId(), payment.getId(), refund.getStatus().name(),
                 refund.getAmount(), refund.getCurrency(), evidence, providerStatus, referencesMatch, action, reason);
+    }
+
+    private JsonNode uniqueRefundCandidate(JsonNode candidates, PaymentRecord payment, PaymentRefund refund) {
+        if (candidates == null || !candidates.path("items").isArray()) return null;
+        List<JsonNode> matches = new ArrayList<>();
+        for (JsonNode item : candidates.path("items")) {
+            if (!refund.getCurrency().equalsIgnoreCase(text(item, "currency"))) continue;
+            if (!item.has("amount") || !item.get("amount").isNumber()) continue;
+            if (!providerAmountMatches(refund.getAmount(), item)) continue;
+            if (!payment.getRazorpayPaymentId().equals(text(item, "payment_id"))) continue;
+            String receipt = text(item, "receipt");
+            if (receipt != null && refund.getProviderIdempotencyKey() != null && !refund.getProviderIdempotencyKey().equals(receipt)) continue;
+            if (!Set.of("pending", "processed").contains(Optional.ofNullable(text(item, "status")).orElse(""))) continue;
+            matches.add(item);
+        }
+        return matches.size() == 1 ? matches.get(0) : null;
     }
 
     private boolean providerAmountMatches(BigDecimal expected, JsonNode provider) {
@@ -884,8 +943,10 @@ class CommerceService {
             }
         } else if (event.startsWith("refund.") && refundId != null) {
             PaymentRefund located = refunds.findByRazorpayRefundId(refundId).orElse(null);
-            PaymentRefund refund = located == null ? null : refunds.lockById(located.getId()).orElse(null);
-            if (refund == null) return;
+            if (located == null) return;
+            PaymentRecord payment = payments.lockById(located.getPayment().getId()).orElse(null);
+            PaymentRefund refund = refunds.lockById(located.getId()).orElse(null);
+            if (refund == null || payment == null) return;
             refund.setGatewayStatus(text(refundNode, "status"));
             // A later failed delivery must not undo a confirmed refund. A processed
             // event may still resolve a previously failed/processing local record.
@@ -898,7 +959,7 @@ class CommerceService {
                 refund.setStatus(RefundStatus.FAILED);
                 emails.refundResult(refund.getPayment().getCustomer().getUser().getId(), refund.getPayment().getCustomer().getFullName(), refund.getId(), refund.getStatus().name(), refund.getAmount().toPlainString(), refund.getCurrency());
             }
-            updateRefundedPayment(refund.getPayment());
+            updateRefundedPayment(payment);
             audit.record(event.equals("refund.processed") ? "PAYMENT_REFUND_SETTLED" : "PAYMENT_REFUND_FAILED",
                     "PAYMENT_REFUND", refund.getId(), "Gateway refund event applied: " + event);
         }
@@ -937,7 +998,7 @@ class CommerceService {
 
     private void settleInstallationMilestone(PaymentRecord payment) {
         if (entityManager == null || payment.getInvoice() == null || payment.getInvoice().getId() == null) return;
-        entityManager.createNativeQuery("update installation_milestones set status='PAID' where invoice_id=? and status='INVOICED'")
+        entityManager.createNativeQuery("update installation_milestones m join invoices i on i.id=m.invoice_id and i.installation_milestone_id=m.id join installation_requests r on r.id=m.installation_request_id set m.status='PAID' where i.id=? and i.customer_id=r.customer_id and m.status='INVOICED'")
                 .setParameter(1, payment.getInvoice().getId()).executeUpdate();
     }
 
@@ -1024,6 +1085,13 @@ class CommerceService {
         if (isAdmin(actor)) return true;
         return actor.getRole() == Role.TECHNICIAN && payment.getServiceRequest() != null
                 && assignments.existsByRequestIdAndTechnicianUserId(payment.getServiceRequest().getId(), actor.getId());
+    }
+    private boolean cashContextMatches(CashPaymentOtp otp, PaymentRecord payment) {
+        return otp.invoice != null && payment.getInvoice() != null
+                && otp.invoice.getId().equals(payment.getInvoice().getId())
+                && otp.customer != null && payment.getCustomer() != null
+                && otp.customer.getId().equals(payment.getCustomer().getId())
+                && Objects.equals(id(otp.serviceRequest), id(payment.getServiceRequest()));
     }
     private CashPaymentOtpView cashOtpView(CashPaymentOtp otp, boolean verified, boolean exposeCode) {
         LocalDateTime now = LocalDateTime.now(clock);
