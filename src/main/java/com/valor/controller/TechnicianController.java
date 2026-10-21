@@ -19,7 +19,9 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -77,7 +79,9 @@ public class TechnicianController {
     @Operation(summary = "List assignments for a technician")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN', 'TECHNICIAN')")
     @GetMapping("/{id}/assignments")
-    public ResponseEntity<ApiResponse<List<ServiceRequestResponse>>> getAssignments(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<List<ServiceRequestResponse>>> getAssignments(@PathVariable Long id,
+                                                                                     Authentication authentication) {
+        requireTechnicianAccess(id, authentication);
         if (!technicianRepository.existsById(id)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(ApiResponse.error("Technician not found", HttpStatus.NOT_FOUND.value()));
@@ -88,5 +92,20 @@ public class TechnicianController {
                 .map(ServiceRequestMapper::toResponse)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(ApiResponse.success("Assignments fetched", response, HttpStatus.OK.value()));
+    }
+
+    private void requireTechnicianAccess(Long technicianId, Authentication authentication) {
+        boolean administrator = authentication.getAuthorities().stream()
+                .anyMatch(authority -> authority.getAuthority().equals("ROLE_ADMIN")
+                        || authority.getAuthority().equals("ROLE_SUPER_ADMIN"));
+        if (administrator) {
+            return;
+        }
+
+        Technician authenticatedTechnician = technicianRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new AccessDeniedException("Technician access is not available"));
+        if (!technicianId.equals(authenticatedTechnician.getId())) {
+            throw new AccessDeniedException("You cannot access another technician's assignments");
+        }
     }
 }

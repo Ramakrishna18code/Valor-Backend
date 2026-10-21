@@ -23,6 +23,8 @@ import com.valor.mapper.ServiceRequestMapper;
 import com.valor.response.BuildingResponse;
 import com.valor.response.ServiceRequestResponse;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/customers")
@@ -51,6 +53,7 @@ public class CustomerController {
     }
 
     @Operation(summary = "Create customer from the admin portal")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     @PostMapping
     public ResponseEntity<ApiResponse<CustomerProfileResponse>> createCustomer(
             @Valid @RequestBody CustomerDto request) {
@@ -60,6 +63,7 @@ public class CustomerController {
     }
 
     @Operation(summary = "List customers for the admin portal")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     @GetMapping
     public ResponseEntity<ApiResponse<List<CustomerProfileResponse>>> getAllCustomers() {
         List<CustomerProfileResponse> response = customerService.getAllCustomers().stream()
@@ -69,8 +73,11 @@ public class CustomerController {
     }
 
     @Operation(summary = "Get buildings owned by a customer")
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'ADMIN', 'SUPER_ADMIN')")
     @GetMapping("/{id}/buildings")
-    public ResponseEntity<ApiResponse<List<BuildingResponse>>> getCustomerBuildings(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<List<BuildingResponse>>> getCustomerBuildings(@PathVariable Long id,
+                                                                                      Authentication authentication) {
+        requireCustomerAccess(id, authentication);
         List<BuildingResponse> response = buildingService.getBuildingsByCustomerId(id).stream()
                 .map(BuildingMapper::toResponse)
                 .collect(Collectors.toList());
@@ -78,8 +85,11 @@ public class CustomerController {
     }
 
     @Operation(summary = "Get service requests created by a customer")
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'ADMIN', 'SUPER_ADMIN')")
     @GetMapping("/{id}/service-requests")
-    public ResponseEntity<ApiResponse<List<ServiceRequestResponse>>> getCustomerServiceRequests(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<List<ServiceRequestResponse>>> getCustomerServiceRequests(@PathVariable Long id,
+                                                                                                 Authentication authentication) {
+        requireCustomerAccess(id, authentication);
         List<ServiceRequestResponse> response = serviceRequestService.getServiceRequestsByCustomerId(id).stream()
                 .map(ServiceRequestMapper::toResponse)
                 .collect(Collectors.toList());
@@ -87,24 +97,50 @@ public class CustomerController {
     }
 
     @Operation(summary = "Get customer profile")
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'ADMIN', 'SUPER_ADMIN')")
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<CustomerProfileResponse>> getCustomer(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<CustomerProfileResponse>> getCustomer(@PathVariable Long id,
+                                                                             Authentication authentication) {
+        requireCustomerAccess(id, authentication);
         Customer customer = customerService.getCustomerById(id)
                 .orElseThrow(() -> new com.valor.exception.ResourceNotFoundException("Customer not found"));
         return ResponseEntity.ok(ApiResponse.success("Customer fetched successfully", CustomerProfileResponse.from(customer), HttpStatus.OK.value()));
     }
 
     @Operation(summary = "Update profile")
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'ADMIN', 'SUPER_ADMIN')")
     @PutMapping("/{id}")
-    public ResponseEntity<ApiResponse<CustomerProfileResponse>> updateCustomer(@PathVariable Long id, @Valid @RequestBody CustomerProfileUpdateDto request) {
+    public ResponseEntity<ApiResponse<CustomerProfileResponse>> updateCustomer(@PathVariable Long id,
+                                                                                 @Valid @RequestBody CustomerProfileUpdateDto request,
+                                                                                 Authentication authentication) {
+        requireCustomerAccess(id, authentication);
         Customer customer = customerService.updateProfile(id, request);
         return ResponseEntity.ok(ApiResponse.success("Customer updated successfully", CustomerProfileResponse.from(customer), HttpStatus.OK.value()));
     }
 
     @Operation(summary = "Delete account")
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'ADMIN', 'SUPER_ADMIN')")
     @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<Void>> deleteCustomer(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<Void>> deleteCustomer(@PathVariable Long id,
+                                                             Authentication authentication) {
+        requireCustomerAccess(id, authentication);
         customerService.deleteAccount(id);
         return ResponseEntity.ok(ApiResponse.success("Customer deleted successfully", null, HttpStatus.OK.value()));
+    }
+
+    private void requireCustomerAccess(Long customerId, Authentication authentication) {
+        boolean administrator = authentication.getAuthorities().stream()
+                .anyMatch(authority -> authority.getAuthority().equals("ROLE_ADMIN")
+                        || authority.getAuthority().equals("ROLE_SUPER_ADMIN"));
+        if (administrator) {
+            return;
+        }
+
+        Customer authenticatedCustomer = customerService.getCustomerByEmail(authentication.getName())
+                .or(() -> customerService.getCustomerByPhone(authentication.getName()))
+                .orElseThrow(() -> new AccessDeniedException("Customer access is not available"));
+        if (!customerId.equals(authenticatedCustomer.getId())) {
+            throw new AccessDeniedException("You cannot access another customer's account");
+        }
     }
 }

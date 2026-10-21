@@ -42,18 +42,21 @@ public class ServiceRequestController {
     }
 
     @Operation(summary = "Get service request")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<ServiceRequestResponse>> getServiceRequest(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success("Service request fetched", ServiceRequestMapper.toResponse(serviceRequestService.getServiceRequest(id)), HttpStatus.OK.value()));
     }
 
     @Operation(summary = "List service requests")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     @GetMapping
     public ResponseEntity<ApiResponse<List<ServiceRequestResponse>>> getAllServiceRequests() {
         return ResponseEntity.ok(ApiResponse.success("Service requests fetched", serviceRequestService.getAllServiceRequests().stream().map(ServiceRequestMapper::toResponse).collect(Collectors.toList()), HttpStatus.OK.value()));
     }
 
     @Operation(summary = "Search service requests")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     @GetMapping("/search")
     public ResponseEntity<ApiResponse<Page<ServiceRequestResponse>>> searchServiceRequests(
             @RequestParam String term,
