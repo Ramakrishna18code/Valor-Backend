@@ -126,7 +126,7 @@ Related tables are `technician_latest_locations`, `technician_location_history`,
 
 ## Customer Commerce And Support APIs
 
-- Payments: `POST /api/v1/payments`, `GET /api/v1/payments/{id}`, `POST /api/v1/payments/{id}/status`, `POST /api/v1/payments/razorpay/checkout`, `POST /api/v1/payments/{id}/refunds`
+- Payments: `POST /api/v1/payments`, `GET /api/v1/payments/{id}`, `POST /api/v1/payments/razorpay/checkout`, `POST /api/v1/payments/{id}/refund-requests`, and customer-authorized payment/refund reads. `PUT /api/v1/payments/{id}/status` is an Admin/SuperAdmin mutation and is not a customer operation. See [PAYMENTS.md](PAYMENTS.md).
 - Invoices: `POST /api/v1/invoices`, `GET /api/v1/invoices/{id}`, `POST /api/v1/invoices/{id}/status`
 - Support tickets: `POST /api/v1/support-tickets`, `GET /api/v1/support-tickets/{id}`, `POST /api/v1/support-tickets/{id}/status`
 - AMC renewal requests: `GET /api/v1/amc-renewal-requests`, `POST /api/v1/customers/me/amc-contracts/{id}/renewal-requests`, `POST /api/v1/amc-renewal-requests/{id}/quote`, `POST /api/v1/amc-renewal-requests/{id}/status`

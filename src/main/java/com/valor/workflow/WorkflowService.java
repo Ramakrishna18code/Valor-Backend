@@ -2,6 +2,7 @@ package com.valor.workflow;
 
 import com.valor.auth.*;
 import com.valor.communication.EmailEventService;
+import com.valor.realtime.RealtimeEventService;
 import com.valor.notifications.NotificationService;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -31,14 +32,15 @@ public class WorkflowService {
     private final ServiceCodeService serviceCodes;
     private final EmailEventService emails;
     private final NotificationService notifications;
+    private final RealtimeEventService realtime;
     @Value("${app.location.estimate-speed-kmh:25}") private double estimateSpeedKmh;
 
     public WorkflowService(RequestRepository requests, AssignmentRepository assignments, AutoAssignTechnicianRepository autoAssignTechnicians, HistoryRepository history,
             ReportRepository reports, WorkflowLiftRepository lifts, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
-            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps, ArrivalOtpService arrivalOtps, ServiceCodeService serviceCodes, EmailEventService emails, NotificationService notifications) {
+            ServiceVisitService visits, AuditService audit, ChecklistService checklists, CompletionOtpService completionOtps, ArrivalOtpService arrivalOtps, ServiceCodeService serviceCodes, EmailEventService emails, NotificationService notifications, RealtimeEventService realtime) {
         this.requests = requests; this.assignments = assignments; this.autoAssignTechnicians = autoAssignTechnicians; this.history = history;
         this.reports = reports; this.lifts = lifts; this.identities = identities; this.profiles = profiles; this.visits = visits; this.audit = audit;
-        this.checklists = checklists; this.completionOtps = completionOtps; this.arrivalOtps = arrivalOtps; this.serviceCodes = serviceCodes; this.emails = emails; this.notifications = notifications;
+        this.checklists = checklists; this.completionOtps = completionOtps; this.arrivalOtps = arrivalOtps; this.serviceCodes = serviceCodes; this.emails = emails; this.notifications = notifications; this.realtime = realtime;
     }
 
     @Transactional(readOnly=true)
@@ -94,6 +96,7 @@ public class WorkflowService {
         audit.record("SERVICE_REQUEST_CREATE", "SERVICE_REQUEST", request.getId(), "Created service request customer=" + owner.getId() + ",lift=" + (lift == null ? null : lift.getId()),
                 null, requestSummary(request, null), "SUCCESS");
         emails.serviceRequestCreated(owner.getUser().getId(), owner.getFullName(), request.getId(), request.getServiceId(), request.getTitle(), request.getStatus().name());
+        realtime.publish("SERVICE_REQUEST_CREATED", "SERVICE_REQUEST", request.getId(), request.getStatus().name(), Set.of(owner.getUser().getId()));
         return detail(request, actor);
     }
 
@@ -145,6 +148,10 @@ public class WorkflowService {
         emails.technicianAssignment(technician.getUser().getId(), technician.getEmployeeId(), request.getId(), request.getServiceId(), request.getTitle());
         notifications.createSystem(technician.getUser().getId(), "New job assigned",
                 "Request #" + request.getId() + " (" + request.getServiceId() + ") was assigned to you. Open Jobs to review and accept it.");
+        Set<Long> assignmentRecipients = new HashSet<>(); assignmentRecipients.add(technician.getUser().getId());
+        if (previous != null) assignmentRecipients.add(previous.getTechnician().getUser().getId());
+        assignmentRecipients.add(request.getCustomer().getUser().getId());
+        realtime.publish("JOB_ASSIGNMENT_CHANGED", "SERVICE_REQUEST", request.getId(), request.getStatus().name(), assignmentRecipients);
         return detail(request, actor);
     }
 
@@ -258,6 +265,7 @@ public class WorkflowService {
                     "status=" + from + ",technician=" + assignmentTechnician(id),
                     "status=" + request.getStatus() + ",technician=" + assignmentTechnician(id), "SUCCESS");
             emails.serviceRequestStatusChanged(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(), request.getId(), request.getServiceId(), from.name(), request.getStatus().name());
+            realtime.publish("SERVICE_REQUEST_STATUS_CHANGED", "SERVICE_REQUEST", request.getId(), request.getStatus().name(), Set.of(request.getCustomer().getUser().getId()));
             return detail(request, actor);
         }
         TechnicianAssignment assignment;
@@ -302,6 +310,9 @@ public class WorkflowService {
         emails.serviceRequestStatusChanged(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(), request.getId(), request.getServiceId(), from.name(), request.getStatus().name());
         if (assignment != null) emails.technicianJobStatusChanged(assignment.getTechnician().getUser().getId(), assignment.getTechnician().getEmployeeId(), request.getId(), request.getServiceId(), from.name(), request.getStatus().name());
         if (to == RequestStatus.COMPLETED) emails.serviceCompleted(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(), request.getId(), request.getServiceId());
+        Set<Long> statusRecipients = new HashSet<>(); statusRecipients.add(request.getCustomer().getUser().getId());
+        if (assignment != null) statusRecipients.add(assignment.getTechnician().getUser().getId());
+        realtime.publish("SERVICE_REQUEST_STATUS_CHANGED", "SERVICE_REQUEST", request.getId(), request.getStatus().name(), statusRecipients);
         return detail(request, actor);
     }
 

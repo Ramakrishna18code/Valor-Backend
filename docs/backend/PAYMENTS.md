@@ -19,6 +19,12 @@ The configured currency is INR. Refunds are INR-only in the current commerce ser
 
 Gateway mode is explicit. `RAZORPAY_MODE` must be `test` or `live`; the configured key ID must match the recognized Razorpay test/live prefix. A missing, invalid, or mismatched mode is rejected before an external request. `razorpay.offline-test-mode` is an internal mock path and is not Razorpay Test Mode.
 
+### Checkout state sequence
+
+`POST /api/v1/payments/razorpay/checkout` locks the eligible invoice, rejects an existing successful payment, and returns an existing order when a resumable local order ID is present. Otherwise it saves a local `PROCESSING` payment and flushes it before calling `PaymentGateway.createOrder`. A successful response stores the provider order ID, gateway status, and synchronization time. A definitive provider 4xx marks the payment `FAILED`; a timeout, transport error, malformed/empty response, or other non-definitive exception leaves local `PROCESSING` with review required. The transaction intentionally permits that state to be persisted while returning an error.
+
+Local `PROCESSING` state and blocking blind retries reduce duplicate-order risk. The current `PaymentGateway` supports `lookupOrder(String razorpayOrderId)` only; `RazorpayGateway` calls `GET /orders/{id}` and has no receipt-to-order recovery operation. A receipt is a tracking field, not an assumed order-creation idempotency key. If the provider order succeeds before the local order ID commits, automatic recovery is not implemented; manual review or a separately approved provider-supported recovery design is required.
+
 ## 3. Refund policy
 
 1. A customer refund request creates a persisted refund request; it does not initiate a gateway refund.
@@ -62,6 +68,14 @@ No authoritative salary, earnings, commission, payout cadence, or payroll policy
 | `razorpay.offline-test-mode` | Internal mock/test switch; it is not external Razorpay Test Mode. |
 
 Pending/uncertain payments and refunds require safe operational reconciliation. Reconciliation must inspect persisted references and may leave an outcome unresolved; no blind retry is allowed. No live gateway calls are part of automated tests.
+
+Webhook processing verifies the `X-Razorpay-Signature`, requires an event identifier, claims it under a MySQL advisory lock, reads current state after lock acquisition, and releases the lock in Spring transaction completion. Duplicate event IDs are ignored. Normal commit, rollback, timeout/retry, duplicate, and distinct-event paths are historically covered by `WebhookMysqlSpringLifecycleTest` (6); controlled release-failure/eviction branches are test-seam evidence only. Physical Hikari retirement after a real failed `RELEASE_LOCK()` remains unproven.
+
+The admin reconciliation endpoint now reads payment records in ascending-ID keyset batches of 200 using `findByIdGreaterThanOrderByIdAsc`. It is a diagnostic scan: it does not call the provider or mutate payment/invoice/refund state. Each batch advances from the last ID; records inserted before a later batch query are eligible in that run, and records inserted after the scan boundary remain eligible for a later run. This removes the previous whole-table `payments.findAll()` load, but does not claim production-scale performance or exactly-once processing. Provider reconciliation remains an explicit per-payment operation with locking and unresolved-outcome handling.
+
+If a batch query or issue evaluation throws, the exception propagates; the method does not report a successful scan and does not persist a cursor. A later invocation starts at ID 0, so an earlier failed run cannot permanently skip records. Concurrent invocations have no reconciliation-run lock, but this diagnostic scan has no financial side effects; they may repeat issue reads. State changes observed after a batch has been read are evaluated on the next run if they were not included in a later batch query.
+
+Checkout response signatures are not processed by a Valor callback endpoint. Settlement uses the server-side signed webhook path or authorized reconciliation, while the checkout endpoint only creates/returns the server-created order. Webhook signature verification must not be described as client checkout-response signature verification.
 
 ## 8. Decision register
 

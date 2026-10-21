@@ -9,6 +9,7 @@ import com.valor.workflow.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.*;
 import java.math.BigDecimal;
+import java.sql.Connection;
 import java.security.SecureRandom;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -22,19 +23,31 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.dao.DataIntegrityViolationException;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import javax.sql.DataSource;
+import org.hibernate.Session;
+import com.zaxxer.hikari.HikariDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import static com.valor.commerce.CommerceDtos.*;
 
 @Service
 @Transactional
 class CommerceService {
+    private static final int RECONCILIATION_BATCH_SIZE = 200;
+    private static final Logger log = LoggerFactory.getLogger(CommerceService.class);
     @PersistenceContext
     private EntityManager entityManager;
+    @Autowired(required = false)
+    private DataSource dataSource;
     private static final long MAX_BYTES = 10L * 1024L * 1024L;
     private static final Set<String> TYPES = Set.of("image/jpeg", "image/png", "image/webp", "application/pdf");
     private final AssetIdentityAccess identities;
@@ -461,12 +474,47 @@ class CommerceService {
 
     private boolean claimWebhookEvent(String eventId, String event, String orderId, String paymentId, String refundId) {
         if (entityManager != null) {
-            String sql = "insert into razorpay_webhook_events(event_id,event_type,razorpay_order_id,razorpay_payment_id,razorpay_refund_id,processed_at) "
-                    + "values (?,?,?,?,?,CURRENT_TIMESTAMP) on duplicate key update event_id=values(event_id)";
-            int inserted = entityManager.createNativeQuery(sql)
-                    .setParameter(1, eventId).setParameter(2, event).setParameter(3, orderId)
-                    .setParameter(4, paymentId).setParameter(5, refundId).executeUpdate();
-            return inserted > 0;
+            String lockName = webhookClaimLockName(eventId);
+            boolean acquired = false;
+            boolean synchronizedRelease = false;
+            Connection lockConnection = null;
+            try {
+                Connection[] connectionHolder = new Connection[1];
+                entityManager.unwrap(Session.class).doWork(connection -> connectionHolder[0] = connection);
+                lockConnection = connectionHolder[0];
+                Number lockResult = (Number) entityManager.createNativeQuery("select get_lock(?, 10)")
+                        .setParameter(1, lockName).getSingleResult();
+                acquired = lockResult != null && lockResult.intValue() == 1;
+                if (!acquired) throw new CommerceException(503, "Webhook processing is busy; retry later");
+                if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+                    throw new CommerceException(503, "Webhook processing requires an active transaction");
+                }
+                Connection capturedLockConnection = lockConnection;
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override public void afterCompletion(int status) {
+                        releaseWebhookClaimLock(eventId, capturedLockConnection);
+                    }
+                });
+                synchronizedRelease = true;
+                // The transaction may have performed the fast pre-check before waiting
+                // for this advisory lock. Under MySQL REPEATABLE READ that ordinary
+                // read can retain a stale snapshot, so use a locking/current read
+                // after acquiring the lock.
+                List<?> committedEvent = entityManager.createNativeQuery(
+                                "select id from razorpay_webhook_events where event_id=? for update")
+                        .setParameter(1, eventId).getResultList();
+                if (!committedEvent.isEmpty()) {
+                    return false;
+                }
+                String sql = "insert into razorpay_webhook_events(event_id,event_type,razorpay_order_id,razorpay_payment_id,razorpay_refund_id,processed_at) values (?,?,?,?,?,CURRENT_TIMESTAMP)";
+                entityManager.createNativeQuery(sql)
+                        .setParameter(1, eventId).setParameter(2, event).setParameter(3, orderId)
+                        .setParameter(4, paymentId).setParameter(5, refundId).executeUpdate();
+                return true;
+            } catch (RuntimeException ex) {
+                if (acquired && !synchronizedRelease) releaseWebhookClaimLock(eventId, lockConnection);
+                throw ex;
+            }
         }
         RazorpayWebhookEvent claimed = new RazorpayWebhookEvent();
         claimed.setEventId(eventId); claimed.setEventType(event); claimed.setRazorpayOrderId(orderId);
@@ -479,14 +527,60 @@ class CommerceService {
         }
     }
 
+    private void releaseWebhookClaimLock(String eventId, Connection lockConnection) {
+        if (entityManager != null) {
+            try {
+                Number released = (Number) entityManager.createNativeQuery("select release_lock(?)")
+                        .setParameter(1, webhookClaimLockName(eventId)).getSingleResult();
+                if (released == null || released.intValue() != 1) {
+                    log.error("Webhook advisory lock release failed for event {}", eventId);
+                    retireWebhookLockConnection(eventId, lockConnection);
+                }
+            } catch (RuntimeException ex) {
+                log.error("Webhook advisory lock release raised an error for event {}", eventId, ex);
+                retireWebhookLockConnection(eventId, lockConnection);
+            }
+        }
+    }
+
+    private void retireWebhookLockConnection(String eventId, Connection lockConnection) {
+        if (lockConnection == null) {
+            log.error("Cannot retire webhook lock connection for event {}: connection was not captured", eventId);
+            return;
+        }
+        if (!(dataSource instanceof HikariDataSource hikari)) {
+            log.error("Cannot retire webhook lock connection for event {}: datasource is not Hikari", eventId);
+            return;
+        }
+        try {
+            hikari.evictConnection(lockConnection);
+        } catch (RuntimeException ex) {
+            log.error("Failed to retire webhook lock connection for event {}", eventId, ex);
+        }
+    }
+
+    private String webhookClaimLockName(String eventId) {
+        return "valor-webhook-" + UUID.nameUUIDFromBytes(eventId.getBytes(StandardCharsets.UTF_8));
+    }
+
     List<ReconciliationIssue> reconciliation() {
         requireAdmin();
         List<ReconciliationIssue> issues = new ArrayList<>();
-        for (PaymentRecord p : payments.findAll()) {
-            if (p.getRazorpayOrderId() != null && p.getGatewaySyncedAt() == null) issues.add(issue(p, "LOCAL_NOT_GATEWAY_CONFIRMED", "Gateway order exists but no synchronization timestamp"));
-            if (p.getStatus() == PaymentStatus.SUCCEEDED && p.getRazorpayPaymentId() == null) issues.add(issue(p, "MISSING_GATEWAY_PAYMENT", "Successful local payment has no Razorpay payment id"));
-            if (p.getInvoice() != null && p.getAmount().compareTo(p.getInvoice().getTotalAmount()) != 0) issues.add(issue(p, "AMOUNT_MISMATCH", "Payment amount differs from invoice total"));
-            if (p.getGatewayStatus() != null && p.getStatus() == PaymentStatus.PROCESSING && Set.of("captured", "paid").contains(p.getGatewayStatus())) issues.add(issue(p, "STATUS_MISMATCH", "Gateway status appears paid while local status is processing"));
+        long lastId = 0L;
+        while (true) {
+            List<PaymentRecord> batch = payments.findByIdGreaterThanOrderByIdAsc(lastId,
+                    org.springframework.data.domain.PageRequest.of(0, RECONCILIATION_BATCH_SIZE));
+            if (batch.isEmpty()) break;
+            for (PaymentRecord p : batch) {
+                if (p.getRazorpayOrderId() != null && p.getGatewaySyncedAt() == null) issues.add(issue(p, "LOCAL_NOT_GATEWAY_CONFIRMED", "Gateway order exists but no synchronization timestamp"));
+                if (p.getStatus() == PaymentStatus.SUCCEEDED && p.getRazorpayPaymentId() == null) issues.add(issue(p, "MISSING_GATEWAY_PAYMENT", "Successful local payment has no Razorpay payment id"));
+                if (p.getInvoice() != null && p.getAmount().compareTo(p.getInvoice().getTotalAmount()) != 0) issues.add(issue(p, "AMOUNT_MISMATCH", "Payment amount differs from invoice total"));
+                if (p.getGatewayStatus() != null && p.getStatus() == PaymentStatus.PROCESSING && Set.of("captured", "paid").contains(p.getGatewayStatus())) issues.add(issue(p, "STATUS_MISMATCH", "Gateway status appears paid while local status is processing"));
+            }
+            long nextId = batch.get(batch.size() - 1).getId();
+            if (nextId <= lastId) throw new IllegalStateException("Payment reconciliation query did not advance");
+            lastId = nextId;
+            if (batch.size() < RECONCILIATION_BATCH_SIZE) break;
         }
         return issues;
     }
@@ -998,7 +1092,10 @@ class CommerceService {
 
     private void settleInstallationMilestone(PaymentRecord payment) {
         if (entityManager == null || payment.getInvoice() == null || payment.getInvoice().getId() == null) return;
-        entityManager.createNativeQuery("update installation_milestones m join invoices i on i.id=m.invoice_id and i.installation_milestone_id=m.id join installation_requests r on r.id=m.installation_request_id set m.status='PAID' where i.id=? and i.customer_id=r.customer_id and m.status='INVOICED'")
+        Number valid = (Number) entityManager.createNativeQuery("select count(*) from invoices i join installation_milestones m on m.id=i.installation_milestone_id and m.invoice_id=i.id join installation_requests r on r.id=m.installation_request_id where i.id=? and i.customer_id=r.customer_id and m.status='INVOICED'")
+                .setParameter(1, payment.getInvoice().getId()).getSingleResult();
+        if (valid.longValue() != 1L) return;
+        entityManager.createNativeQuery("update installation_milestones set status='PAID' where invoice_id=? and status='INVOICED'")
                 .setParameter(1, payment.getInvoice().getId()).executeUpdate();
     }
 
@@ -1084,7 +1181,8 @@ class CommerceService {
     private boolean canVerifyCash(PaymentRecord payment, User actor) {
         if (isAdmin(actor)) return true;
         return actor.getRole() == Role.TECHNICIAN && payment.getServiceRequest() != null
-                && assignments.existsByRequestIdAndTechnicianUserId(payment.getServiceRequest().getId(), actor.getId());
+                && assignments.existsByRequestIdAndTechnicianUserIdAndStatusIn(payment.getServiceRequest().getId(), actor.getId(),
+                        List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED));
     }
     private boolean cashContextMatches(CashPaymentOtp otp, PaymentRecord payment) {
         return otp.invoice != null && payment.getInvoice() != null

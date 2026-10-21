@@ -30,4 +30,8 @@ public interface ServiceRequestRepository extends JpaRepository<ServiceRequest, 
 	Page<ServiceRequest> search(String term, Pageable pageable);
 
 	Page<ServiceRequest> findByStatus(com.valor.enums.JobStatus status, Pageable pageable);
+
+	long countByStatus(com.valor.enums.JobStatus status);
+
+	long countByPriority(com.valor.enums.PriorityLevel priority);
 }

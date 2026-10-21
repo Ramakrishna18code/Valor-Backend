@@ -42,10 +42,11 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     public ReportSummaryResponse getSummary() {
-        long pendingJobs = serviceRequestRepository.findAll().stream().filter(request -> request.getStatus() == JobStatus.PENDING || request.getStatus() == JobStatus.ASSIGNED).count();
-        long completedJobs = serviceRequestRepository.findAll().stream().filter(request -> request.getStatus() == JobStatus.COMPLETED).count();
-        long emergencyJobs = serviceRequestRepository.findAll().stream().filter(request -> request.getPriority() != null && "EMERGENCY".equals(request.getPriority().name())).count();
-        long lowStockItems = inventoryRepository.findByStockQuantityLessThanEqual(0).size();
+        long pendingJobs = serviceRequestRepository.countByStatus(JobStatus.PENDING)
+                + serviceRequestRepository.countByStatus(JobStatus.ASSIGNED);
+        long completedJobs = serviceRequestRepository.countByStatus(JobStatus.COMPLETED);
+        long emergencyJobs = serviceRequestRepository.countByPriority(com.valor.enums.PriorityLevel.EMERGENCY);
+        long lowStockItems = inventoryRepository.countByStockQuantityLessThanEqual(0);
         long totalNotifications = notificationRepository.count();
         long totalPayments = paymentRepository.count();
         long totalAttendanceRecords = attendanceRepository.count();

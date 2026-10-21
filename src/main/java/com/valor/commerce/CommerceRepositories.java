@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 
 interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Long> {
     Page<PaymentRecord> findByCustomerId(Long customerId, Pageable pageable);
+    List<PaymentRecord> findByIdGreaterThanOrderByIdAsc(Long id, Pageable pageable);
     Optional<PaymentRecord> findByInvoiceIdAndStatusIn(Long invoiceId, Collection<PaymentStatus> statuses);
     List<PaymentRecord> findByInvoiceIdOrderByCreatedAtDescIdDesc(Long invoiceId);
     Optional<PaymentRecord> findFirstByServiceRequestIdOrderByCreatedAtDesc(Long serviceRequestId);
@@ -80,6 +81,7 @@ interface CommerceRequestRepository extends JpaRepository<ServiceRequest, Long> 
 }
 interface CommerceAssignmentRepository extends JpaRepository<TechnicianAssignment, Long> {
     boolean existsByRequestIdAndTechnicianUserId(Long requestId, Long userId);
+    boolean existsByRequestIdAndTechnicianUserIdAndStatusIn(Long requestId, Long userId, Collection<AssignmentStatus> statuses);
 }
 interface CommerceReportRepository extends JpaRepository<ServiceReport, Long> {
     Optional<ServiceReport> findByRequestId(Long requestId);

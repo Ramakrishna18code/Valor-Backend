@@ -43,6 +43,10 @@ flowchart LR
 - Security components handle JWT authentication and protected routes.
 - OpenAPI config exposes interactive API docs through Swagger UI.
 
+### Real-time updates
+
+The backend exposes an authenticated STOMP WebSocket endpoint at `/ws`. Clients authenticate with the existing JWT in the STOMP `CONNECT` `Authorization: Bearer ...` header, then subscribe to `/user/queue/valor-events`; ADMIN and SUPER_ADMIN clients may additionally subscribe to `/topic/admin`. Events are minimal invalidation notices, and clients must refetch the authoritative REST resource after receipt. The current simple broker is process-local, so multi-instance deployments require a shared STOMP broker/relay before claiming cross-instance delivery.
+
 ## Requirements
 - Java 21
 - Maven 3.9+
@@ -150,7 +154,7 @@ Flyway/dev seed recreate it.
 
 ## Main API groups
 
-The canonical API contract lives in `BACKEND_API_CONTRACT.md`. All active
+The canonical API contract lives in `docs/backend/BACKEND_API_CONTRACT.md`. All active
 client-facing endpoints use the `/api/v1` prefix and the standard
 `{ success, message, data, status, timestamp }` response envelope.
 
@@ -184,8 +188,8 @@ client-facing endpoints use the `/api/v1` prefix and the standard
 
 ### Technician app backend quick reference
 
-The dedicated Technician backend reference is `technician-backend.md`; the
-canonical full contract is `BACKEND_API_CONTRACT.md`. The active Technician app
+The dedicated Technician backend reference is `docs/backend/TECHNICIAN_BACKEND.md`; the
+canonical full contract is `docs/backend/BACKEND_API_CONTRACT.md`. The active Technician app
 uses the following backend groups:
 
 - Auth/session: `POST /api/v1/auth/login/technician`,

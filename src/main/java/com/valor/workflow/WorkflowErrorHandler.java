@@ -1,5 +1,6 @@
 package com.valor.workflow;
 
+import com.valor.workflow.ChecklistDtos.JobChecklistView;
 import com.valor.response.ApiResponse;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -14,6 +15,19 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 @RestControllerAdvice(basePackages = "com.valor.workflow")
 class WorkflowErrorHandler {
+    private final ChecklistInitializationRecovery checklistRecovery;
+
+    WorkflowErrorHandler(ChecklistInitializationRecovery checklistRecovery) {
+        this.checklistRecovery = checklistRecovery;
+    }
+
+    @ExceptionHandler(ChecklistInitializationRace.class)
+    ResponseEntity<ApiResponse<JobChecklistView>> checklistInitializationRace(ChecklistInitializationRace error) {
+        JobChecklistView recovered = checklistRecovery.recover(error.requestId);
+        if (recovered == null) return ResponseEntity.status(409).body(ApiResponse.error("Workflow conflict", 409));
+        return ResponseEntity.ok(ApiResponse.success("Success", recovered, 200));
+    }
+
     @ExceptionHandler(WorkflowException.class)
     ResponseEntity<ApiResponse<Object>> workflow(WorkflowException error) { return response(error.status, error.getMessage()); }
     @ExceptionHandler({IllegalArgumentException.class, MethodArgumentNotValidException.class,

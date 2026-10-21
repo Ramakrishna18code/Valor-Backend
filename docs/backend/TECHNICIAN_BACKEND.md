@@ -228,7 +228,7 @@ Admin review:
 - `GET /api/v1/admin/technician-applications`
 - `PUT /api/v1/admin/technician-applications/{id}/status`
 
-Development technician application OTP is currently the documented temporary `1111` path until the external SMS/OTP provider is activated.
+Technician application OTP is explicitly development/test-only: `TechnicianApplicationService.requireDevelopmentOtp()` rejects profiles outside `dev` or `test` and rejects `prod`. The endpoint returns `developmentOnly=true` and a generated four-digit code; `1111` is a documented fixture/test value, not a production fallback. Provider-backed production delivery is not implemented and requires an authorized security change. See [PAYMENTS.md](PAYMENTS.md) for payment workflows rather than duplicating them here.
 
 ## Local Technician Demo Seed
 

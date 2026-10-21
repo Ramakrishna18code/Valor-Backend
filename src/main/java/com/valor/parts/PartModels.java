@@ -41,6 +41,7 @@ class PartItem {
     @Column(nullable = false) LocalDateTime updatedAt;
     @PrePersist void create() { createdAt = updatedAt = LocalDateTime.now(); }
     @PreUpdate void update() { updatedAt = LocalDateTime.now(); }
+    Long getId() { return id; }
 }
 
 enum StockMovementType { RESTOCK, ADJUSTMENT, RESERVE, RELEASE, ISSUE, RETURN, CONSUME }
@@ -113,7 +114,10 @@ interface PartRequestRepository extends JpaRepository<ServiceRequestPartRequest,
     List<ServiceRequestPartRequest> findByServiceRequestIdOrderByCreatedAtDesc(Long serviceRequestId);
     @Lock(LockModeType.PESSIMISTIC_WRITE) @org.springframework.data.jpa.repository.Query("select r from ServiceRequestPartRequest r where r.id=:id") Optional<ServiceRequestPartRequest> lockById(@Param("id") Long id);
 }
-interface PartLineRepository extends JpaRepository<ServiceRequestPartLine, Long> { List<ServiceRequestPartLine> findByRequestId(Long id); }
+interface PartLineRepository extends JpaRepository<ServiceRequestPartLine, Long> {
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"item", "item.category"})
+    List<ServiceRequestPartLine> findByRequestId(Long id);
+}
 interface PartEventRepository extends JpaRepository<PartRequestEvent, Long> { List<PartRequestEvent> findByRequestIdOrderByCreatedAtAsc(Long id); }
 interface PartsTechnicianRepository extends JpaRepository<TechnicianProfile, Long> { Optional<TechnicianProfile> findByUserId(Long userId); }
 interface PartsServiceRequestRepository extends JpaRepository<ServiceRequest, Long> {}

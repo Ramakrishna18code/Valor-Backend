@@ -84,4 +84,3 @@ interface OnboardingTokenRepo extends JpaRepository<OnboardingToken,Long>{@Lock(
  }
  static String hash(String s){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
 }
-@Component class JwtService {private final javax.crypto.SecretKey key; @Value("${jwt.expiration:86400000}") long exp; JwtService(@Value("${jwt.secret}") String s){if(s==null||s.length()<32)throw new IllegalStateException("JWT_SECRET must be configured");key=Keys.hmacShaKeyFor(s.getBytes(StandardCharsets.UTF_8));} String issue(User u){return Jwts.builder().subject(String.valueOf(u.getId())).claim("role",u.getRole().name()).issuedAt(new Date()).expiration(new Date(System.currentTimeMillis()+exp)).signWith(key).compact();} Long subject(String token){return Long.valueOf(Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload().getSubject());}}

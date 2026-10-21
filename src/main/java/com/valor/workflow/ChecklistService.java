@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,12 +53,21 @@ class ChecklistService {
     }
     JobChecklistView technicianChecklist(Long requestId) {
         User actor = identities.actor(); TechnicianProfile technician = profiles.technician(actor);
-        ServiceRequest request = technicianRequest(requestId, technician);
-        return jobs.findByRequestId(requestId).or(() -> createJobChecklist(request)).map(job -> { refreshStatus(job); return jobView(job); }).orElse(null);
+        ServiceRequest request = technicianRequest(requestId, technician, false);
+        try {
+            return jobs.findByRequestId(requestId).or(() -> createJobChecklist(request)).map(job -> { refreshStatus(job); return jobView(job); }).orElse(null);
+        } catch (DataIntegrityViolationException error) {
+            if (isChecklistInitializationDuplicate(error)) throw new ChecklistInitializationRace(requestId);
+            throw error;
+        }
+    }
+
+    JobChecklistView committedView(Long requestId) {
+        return jobs.findByRequestId(requestId).map(this::jobView).orElse(null);
     }
     JobChecklistView saveResponses(Long requestId, ResponseBatch input) {
         User actor = identities.actor(); TechnicianProfile technician = profiles.technician(actor);
-        technicianRequest(requestId, technician);
+        technicianRequest(requestId, technician, true);
         JobChecklist job = jobs.findByRequestId(requestId).orElseThrow(ChecklistService::missing);
         List<JobChecklistItem> snapshots = snapshotItems.findByChecklistIdOrderBySortOrderAscIdAsc(job.id);
         Map<Long, JobChecklistItem> allowedSnapshots = new HashMap<>();
@@ -123,10 +133,13 @@ class ChecklistService {
         });
         job.status = complete ? JobChecklistStatus.COMPLETED : JobChecklistStatus.IN_PROGRESS;
     }
-    private ServiceRequest technicianRequest(Long requestId, TechnicianProfile technician) {
+    private ServiceRequest technicianRequest(Long requestId, TechnicianProfile technician, boolean write) {
         ServiceRequest request = requests.lockById(requestId).orElseThrow(ChecklistService::missing);
-        if (!assignments.existsByRequestIdAndTechnicianId(requestId, technician.getId())) throw denied();
-        return request;
+        var active = assignments.active(requestId).orElse(null);
+        if (active != null && active.getTechnician().getId().equals(technician.getId())) return request;
+        if (!write && (request.getStatus() == RequestStatus.COMPLETED || request.getStatus() == RequestStatus.CANCELLED)
+                && assignments.existsByRequestIdAndTechnicianId(requestId, technician.getId())) return request;
+        throw denied();
     }
     private void apply(ChecklistTemplate t, TemplateWrite input) {
         t.name = input.name().trim(); t.description = clean(input.description(), 1000);
@@ -167,4 +180,17 @@ class ChecklistService {
     private static String clean(String value, int max) { if (value == null || value.isBlank()) return null; String v = value.trim(); return v.length() > max ? v.substring(0, max) : v; }
     private static WorkflowException missing() { return new WorkflowException(404, "Checklist not found"); }
     private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+
+    static boolean isChecklistInitializationDuplicate(Throwable error) {
+        for (Throwable current = error; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message != null && message.toLowerCase(Locale.ROOT).contains("uk_job_checklist_request")) return true;
+        }
+        return false;
+    }
+}
+
+final class ChecklistInitializationRace extends RuntimeException {
+    final Long requestId;
+    ChecklistInitializationRace(Long requestId) { this.requestId = requestId; }
 }

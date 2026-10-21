@@ -12,6 +12,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.lang.reflect.Field;
@@ -24,6 +25,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import jakarta.persistence.EntityManager;
+import java.sql.Connection;
+import org.hibernate.Session;
+import org.hibernate.jdbc.Work;
+import com.zaxxer.hikari.HikariDataSource;
+import java.lang.reflect.Method;
+import jakarta.persistence.Query;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -52,6 +62,11 @@ class CommercePaymentIntegrityTest {
     @Mock EmailEventService emails;
     @Mock PricingService pricing;
     @Mock PasswordEncoder encoder;
+    @Mock EntityManager entityManager;
+    @Mock Session hibernateSession;
+    @Mock Connection lockConnection;
+    @Mock HikariDataSource hikariDataSource;
+    @Mock Query nativeQuery;
 
     private CommerceService service;
     private User admin;
@@ -736,6 +751,89 @@ class CommercePaymentIntegrityTest {
     }
 
     @Test
+    void nativeMysqlClaimRechecksAfterSerializedLockAndProcessesOnlyNewEvent() throws Exception {
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+        Field field = CommerceService.class.getDeclaredField("entityManager");
+        field.setAccessible(true);
+        field.set(service, entityManager);
+        when(entityManager.unwrap(Session.class)).thenReturn(hibernateSession);
+        doAnswer(invocation -> { ((Work) invocation.getArgument(0)).execute(lockConnection); return null; })
+                .when(hibernateSession).doWork(any(Work.class));
+        when(entityManager.createNativeQuery(anyString())).thenReturn(nativeQuery);
+        when(nativeQuery.setParameter(anyInt(), any())).thenReturn(nativeQuery);
+        when(nativeQuery.getSingleResult()).thenReturn(1);
+        when(nativeQuery.getResultList()).thenReturn(List.of(), List.of(1L));
+        when(webhookEvents.existsByEventId("evt_native")).thenReturn(false, false, true);
+        when(payments.findByRazorpayOrderId("order_test")).thenReturn(Optional.of(payment));
+        payment.setRazorpayOrderId("order_test");
+        when(paymentGateway.validWebhookSignature(anyString(), any())).thenReturn(true);
+
+        service.razorpayWebhook(event("evt_native", "payment.authorized", "order_test", "pay_native", null), "sig");
+        service.razorpayWebhook(event("evt_native", "payment.authorized", "order_test", "pay_native", null), "sig");
+
+        verify(nativeQuery, times(1)).executeUpdate();
+        verify(payments, times(1)).lockById(11L);
+        verify(entityManager, atLeastOnce()).createNativeQuery(contains("get_lock"));
+        verify(entityManager, never()).createNativeQuery(contains("release_lock"));
+        for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+            synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+        }
+        verify(entityManager, atLeastOnce()).createNativeQuery(contains("release_lock"));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void successfulWebhookLockReleaseDoesNotRetireConnection() throws Exception {
+        setWebhookReleaseDependencies();
+        when(nativeQuery.getSingleResult()).thenReturn(1);
+
+        invokeWebhookRelease();
+
+        verify(hikariDataSource, never()).evictConnection(any());
+    }
+
+    @Test
+    void failedWebhookLockReleaseRetiresExactConnection() throws Exception {
+        setWebhookReleaseDependencies();
+        when(nativeQuery.getSingleResult()).thenReturn(0);
+
+        invokeWebhookRelease();
+
+        verify(hikariDataSource).evictConnection(lockConnection);
+    }
+
+    @Test
+    void webhookLockReleaseExceptionRetiresConnectionWithoutEscaping() throws Exception {
+        setWebhookReleaseDependencies();
+        when(nativeQuery.getSingleResult()).thenThrow(new RuntimeException("synthetic release failure"));
+        doThrow(new RuntimeException("synthetic eviction failure")).when(hikariDataSource).evictConnection(lockConnection);
+
+        invokeWebhookRelease();
+
+        verify(hikariDataSource).evictConnection(lockConnection);
+    }
+
+    private void setWebhookReleaseDependencies() throws Exception {
+        Field entityManagerField = CommerceService.class.getDeclaredField("entityManager");
+        entityManagerField.setAccessible(true);
+        entityManagerField.set(service, entityManager);
+        Field dataSourceField = CommerceService.class.getDeclaredField("dataSource");
+        dataSourceField.setAccessible(true);
+        dataSourceField.set(service, hikariDataSource);
+        when(entityManager.createNativeQuery("select release_lock(?)")).thenReturn(nativeQuery);
+        when(nativeQuery.setParameter(anyInt(), any())).thenReturn(nativeQuery);
+    }
+
+    private void invokeWebhookRelease() throws Exception {
+        Method method = CommerceService.class.getDeclaredMethod("releaseWebhookClaimLock", String.class, Connection.class);
+        method.setAccessible(true);
+        method.invoke(service, "evt_release_test", lockConnection);
+    }
+
+    @Test
     void mismatchedGatewayPaymentReferenceCannotPayInvoice() {
         when(paymentGateway.validWebhookSignature(anyString(), any())).thenReturn(true);
         when(webhookEvents.existsByEventId(anyString())).thenReturn(false);
@@ -758,6 +856,77 @@ class CommercePaymentIntegrityTest {
         assertFalse(result.gatewayEvidence());
         assertEquals("NO_ACTION", result.action());
         assertEquals(PaymentStatus.PROCESSING, payment.getStatus());
+        verifyNoInteractions(paymentGateway);
+    }
+
+    @Test
+    void reconciliationTraversesPaymentBatchesByStableIdWithoutWholeTableLoad() {
+        List<PaymentRecord> first = new ArrayList<>();
+        for (long id = 1; id <= 200; id++) {
+            PaymentRecord row = new PaymentRecord();
+            row.setId(id);
+            row.setStatus(PaymentStatus.PROCESSING);
+            first.add(row);
+        }
+        PaymentRecord last = new PaymentRecord();
+        last.setId(201L);
+        last.setStatus(PaymentStatus.PROCESSING);
+
+        when(payments.findByIdGreaterThanOrderByIdAsc(eq(0L), any())).thenReturn(first);
+        when(payments.findByIdGreaterThanOrderByIdAsc(eq(200L), any())).thenReturn(List.of(last));
+
+        assertTrue(service.reconciliation().isEmpty());
+
+        verify(payments).findByIdGreaterThanOrderByIdAsc(eq(0L), any());
+        verify(payments).findByIdGreaterThanOrderByIdAsc(eq(200L), any());
+        verify(payments, never()).findAll();
+    }
+
+    @Test
+    void reconciliationFailureDoesNotPersistCursorAndReentryStartsAtZero() {
+        PaymentRecord valid = new PaymentRecord();
+        valid.setId(1L);
+        valid.setStatus(PaymentStatus.PROCESSING);
+        PaymentRecord malformed = new PaymentRecord();
+        malformed.setId(2L);
+        malformed.setStatus(PaymentStatus.PROCESSING);
+        Invoice malformedInvoice = new Invoice();
+        malformedInvoice.setTotalAmount(new BigDecimal("10.00"));
+        malformed.setInvoice(malformedInvoice);
+
+        AtomicInteger calls = new AtomicInteger();
+        when(payments.findByIdGreaterThanOrderByIdAsc(anyLong(), any())).thenAnswer(invocation ->
+                calls.getAndIncrement() == 0 ? List.of(valid, malformed) : List.of(valid));
+
+        assertThrows(NullPointerException.class, () -> service.reconciliation());
+        assertTrue(service.reconciliation().isEmpty());
+        verify(payments, times(2)).findByIdGreaterThanOrderByIdAsc(eq(0L), any());
+        verifyNoInteractions(paymentGateway);
+    }
+
+    @Test
+    void repeatedReconciliationProducesOnlyDiagnosticReadsWithoutFinancialSideEffects() {
+        PaymentRecord issue = new PaymentRecord();
+        issue.setId(1L);
+        issue.setStatus(PaymentStatus.PROCESSING);
+        issue.setRazorpayOrderId("order_pending");
+        List<PaymentRecord> batch = new ArrayList<>();
+        batch.add(issue);
+        for (long id = 2; id <= 200; id++) {
+            PaymentRecord row = new PaymentRecord();
+            row.setId(id);
+            row.setStatus(PaymentStatus.PROCESSING);
+            batch.add(row);
+        }
+
+        when(payments.findByIdGreaterThanOrderByIdAsc(anyLong(), any()))
+                .thenReturn(batch, List.of(), batch, List.of());
+
+        assertEquals(1, service.reconciliation().size());
+        assertEquals(1, service.reconciliation().size());
+
+        verify(payments, times(4)).findByIdGreaterThanOrderByIdAsc(anyLong(), any());
+        verify(payments, never()).lockById(anyLong());
         verifyNoInteractions(paymentGateway);
     }
 
@@ -973,7 +1142,8 @@ class CommercePaymentIntegrityTest {
         otp.otpHash = "hash"; otp.attemptsRemaining = 3; otp.expiresAt = java.time.LocalDateTime.now().plusMinutes(5);
         when(payments.lockById(11L)).thenReturn(Optional.of(payment));
         when(cashOtps.lockById(55L)).thenReturn(Optional.of(otp));
-        when(assignments.existsByRequestIdAndTechnicianUserId(31L, 44L)).thenReturn(true);
+        when(assignments.existsByRequestIdAndTechnicianUserIdAndStatusIn(31L, 44L,
+                List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED))).thenReturn(true);
         when(encoder.matches("123456", "hash")).thenReturn(true);
 
         service.verifyCashPaymentOtp(new CommerceDtos.CashPaymentOtpVerify(11L, 55L, "123456"));
@@ -999,13 +1169,32 @@ class CommercePaymentIntegrityTest {
         otp.serviceRequest = request; otp.otpHash = "hash"; otp.attemptsRemaining = 3;
         otp.expiresAt = java.time.LocalDateTime.now().plusMinutes(5);
         when(cashOtps.lockById(56L)).thenReturn(Optional.of(otp));
-        when(assignments.existsByRequestIdAndTechnicianUserId(31L, 44L)).thenReturn(true);
+        when(assignments.existsByRequestIdAndTechnicianUserIdAndStatusIn(31L, 44L,
+                List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED))).thenReturn(true);
 
         assertThrows(CommerceException.class, () -> service.verifyCashPaymentOtp(
                 new CommerceDtos.CashPaymentOtpVerify(11L, 56L, "123456")));
         assertEquals(PaymentStatus.PROCESSING, payment.getStatus());
         assertNull(otp.verifiedAt);
         verify(encoder, never()).matches(anyString(), anyString());
+    }
+
+    @Test
+    void formerTechnicianCannotVerifyCashOtpAfterReassignment() {
+        User technician = mock(User.class);
+        when(technician.getRole()).thenReturn(Role.TECHNICIAN);
+        when(technician.getId()).thenReturn(44L);
+        when(identities.actor()).thenReturn(technician);
+        ServiceRequest request = mock(ServiceRequest.class);
+        when(request.getId()).thenReturn(31L);
+        payment.setServiceRequest(request);
+        when(assignments.existsByRequestIdAndTechnicianUserIdAndStatusIn(31L, 44L,
+                List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED))).thenReturn(false);
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class, () -> service.verifyCashPaymentOtp(
+                new CommerceDtos.CashPaymentOtpVerify(11L, 55L, "123456")));
+        verify(cashOtps, never()).lockById(anyLong());
+        assertEquals(PaymentStatus.PROCESSING, payment.getStatus());
     }
 
     @Test
@@ -1047,6 +1236,31 @@ class CommercePaymentIntegrityTest {
         uncertain.setRazorpayOrderId(null);
         when(payments.findByInvoiceIdAndStatusIn(21L, List.of(PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED)))
                 .thenReturn(Optional.of(uncertain));
+        assertThrows(CommerceException.class, () -> service.createRazorpayCheckout(new CommerceDtos.RazorpayCheckoutCreate(21L)));
+        verify(paymentGateway, times(1)).createOrder(any(), any(), any());
+    }
+
+    @Test
+    void missingProviderOrderIdAfterAmbiguousCreationStaysBlockedWithoutBlindRetry() {
+        prepareCheckout();
+        when(payments.findByInvoiceIdAndStatusIn(21L, List.of(PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED)))
+                .thenReturn(Optional.empty());
+        when(payments.saveAndFlush(any(PaymentRecord.class))).thenAnswer(invocation -> {
+            PaymentRecord saved = invocation.getArgument(0);
+            saved.setId(15L);
+            payment = saved;
+            return saved;
+        });
+        // Represents a provider-side success whose response body was lost/invalid.
+        when(paymentGateway.createOrder(any(), any(), any())).thenReturn(new ObjectMapper().createObjectNode());
+
+        assertThrows(CommerceException.class, () -> service.createRazorpayCheckout(new CommerceDtos.RazorpayCheckoutCreate(21L)));
+        assertEquals(PaymentStatus.PROCESSING, payment.getStatus());
+        assertNull(payment.getRazorpayOrderId());
+        assertTrue(payment.getFailureReason().contains("unknown"));
+
+        when(payments.findByInvoiceIdAndStatusIn(21L, List.of(PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED)))
+                .thenReturn(Optional.of(payment));
         assertThrows(CommerceException.class, () -> service.createRazorpayCheckout(new CommerceDtos.RazorpayCheckoutCreate(21L)));
         verify(paymentGateway, times(1)).createOrder(any(), any(), any());
     }

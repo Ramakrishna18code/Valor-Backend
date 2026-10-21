@@ -90,6 +90,43 @@ class ServiceVerificationFlowTest {
         JsonNode saved=call(get(checklistPath),f.technician(),null,200);
         assertEquals("COMPLETED",saved.get("status").asText());assertEquals(1,saved.get("requiredCompleted").asInt());assertEquals(item,saved.get("responses").get(0).get("itemId").asLong());
     }
+
+    @Test void concurrentChecklistInitializationReturnsOneCommittedChecklistToBothCallers() throws Exception {
+        Fixture f=fixture(); assign(f);
+        long template=call(post("/api/v1/admin/checklist-templates"),f.admin(),Map.of("name","Concurrent checks","active",true,"serviceTypes",List.of("BREAKDOWN")),200).get("id").asLong();
+        call(post("/api/v1/admin/checklist-templates/"+template+"/items"),f.admin(),Map.of("label","Concurrent item","required",true,"inputType","CHECKBOX"),200);
+        String path="/api/v1/technician/me/jobs/"+f.requestId()+"/checklist";
+        CyclicBarrier barrier=new CyclicBarrier(2); ExecutorService executor=Executors.newFixedThreadPool(2);
+        Callable<JsonNode> request=()->{ barrier.await(10,TimeUnit.SECONDS); String text=mvc.perform(get(path).header("Authorization","Bearer "+jwt.issue(f.technician()))).andReturn().getResponse().getContentAsString(); return json.readTree(text); };
+        try {
+            Future<JsonNode> first=executor.submit(request), second=executor.submit(request);
+            JsonNode firstResponse=first.get(20,TimeUnit.SECONDS), secondResponse=second.get(20,TimeUnit.SECONDS);
+            assertEquals(200,firstResponse.get("status").asInt()); assertEquals(200,secondResponse.get("status").asInt());
+            assertEquals(firstResponse.at("/data/id").asLong(),secondResponse.at("/data/id").asLong());
+            assertEquals(1,db.queryForObject("select count(*) from job_checklists where service_request_id=?",Integer.class,f.requestId()));
+            assertEquals(1,db.queryForObject("select count(*) from job_checklist_items where job_checklist_id=?",Integer.class,firstResponse.at("/data/id").asLong()));
+        } finally { executor.shutdownNow(); }
+    }
+
+    @Test void reassignedTechnicianCannotWriteThePreviousTechniciansChecklist() throws Exception {
+        Fixture f = fixture();
+        TechnicianProfile replacement = technician();
+        String requestPath = "/api/v1/service-requests/" + f.requestId();
+        long firstAssignment = call(post(requestPath + "/assignments"), f.admin(), Map.of("technicianProfileId", f.technicianId()), 200).at("/activeAssignment/id").asLong();
+        call(post(requestPath + "/assignments/" + firstAssignment + "/accept"), f.technician(), null, 200);
+
+        long template = call(post("/api/v1/admin/checklist-templates"), f.admin(),
+                Map.of("name", "Reassignment checks", "active", true, "serviceTypes", List.of("BREAKDOWN")), 200).get("id").asLong();
+        long item = call(post("/api/v1/admin/checklist-templates/" + template + "/items"), f.admin(),
+                Map.of("label", "Reassignment item", "required", true, "inputType", "CHECKBOX"), 200).get("id").asLong();
+        String checklistPath = "/api/v1/technician/me/jobs/" + f.requestId() + "/checklist";
+        call(get(checklistPath), f.technician(), null, 200);
+
+        call(post(requestPath + "/assignments"), f.admin(), Map.of("technicianProfileId", replacement.getId()), 200);
+        call(put(checklistPath + "/responses"), f.technician(),
+                Map.of("responses", List.of(Map.of("itemId", item, "checked", true))), 403);
+        call(get(checklistPath), replacement.getUser(), null, 200);
+    }
     @Test void newChecklistSnapshotsTemplateItemsAndLinksResponses() throws Exception {
         Fixture f=fixture();assign(f);
         long template=call(post("/api/v1/admin/checklist-templates"),f.admin(),Map.of("name","Snapshot checks","active",true,"serviceTypes",List.of("BREAKDOWN")),200).get("id").asLong();

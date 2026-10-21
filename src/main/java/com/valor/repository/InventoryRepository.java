@@ -22,4 +22,6 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     Page<Inventory> search(String term, Pageable pageable);
 
     List<Inventory> findByStockQuantityLessThanEqual(Integer threshold);
+
+    long countByStockQuantityLessThanEqual(Integer threshold);
 }

@@ -1,10 +1,10 @@
 # Valor database schema
 
-This is a migration-grounded reference for the backend. It summarizes the tables that participate in identity, assets, workflow, finance, installation, communication, and audit. Exact historical migrations under `src/main/resources/db/migration` are authoritative.
+This is a migration-grounded reference for the backend. It summarizes the tables that participate in identity, assets, workflow, finance, installation, communication, and audit. Exact migrations under `src/main/resources/db/migration` and entity mappings are authoritative. For migration lifecycle, concurrency invariants, and audit evidence, use [DB_BACKEND_STRUCTURE.md](DB_BACKEND_STRUCTURE.md).
 
 ## A. Database overview
 
-- Schema changes use Flyway SQL migrations named `V<version>__<description>.sql`; the current repository baseline is V54. Version numbers are not contiguous because earlier versions were not all retained in this checkout.
+- Schema changes use Flyway SQL migrations named `V<version>__<description>.sql`; the recorded clean baseline is 48 migrations through V57. Version numbers are not assumed to be contiguous.
 - Hibernate schema validation is used alongside Flyway. A schema change must be additive where possible, include matching entity/repository updates, and be verified with migration/schema tests.
 - The configured application database dialect/credentials are deployment concerns and are not reproduced here.
 
@@ -35,7 +35,7 @@ Column types below are database types from migrations. `id BIGINT` primary keys 
 | `service_visits` / `visit_change_requests` / `service_visit_history` | Visit date/time/status (`SCHEDULED`,`IN_PROGRESS`,`COMPLETED`,`CANCELLED`); change request type/status and reviewer; immutable history fields | Active visit per request is unique through generated key; request, technician, actor and reviewer FKs are restricted |
 | `service_request_attachments` / `service_request_feedback` | Stored file metadata and unique storage key; feedback rating 1–5 and one row per request | Request/user/customer FKs restricted |
 | `lift_service_codes` / `service_code_verifications` | Lift-linked stored code hash/state; verification request, technician, action (`START`,`COMPLETE`), attempts/lock/verified fields; unique `(service_request_id, technician_id, action)` | Lift/request/technician relationships enforce service-code ownership; raw codes are not schema data |
-| `job_checklists`, `checklist_templates`, `checklist_items`, `checklist_responses`, `completion_otps` | Templates/items, one checklist per request, responses, and completion OTP hashes/state | Foreign keys and unique request/item combinations preserve one logical checklist/response |
+| `job_checklists`, `checklist_templates`, `checklist_items`, `job_checklist_items`, `checklist_responses`, `completion_otps` | Templates/items, one checklist per request, V57 snapshot rows in `job_checklist_items`, responses, and completion OTP hashes/state | `job_checklist_items.job_checklist_id` is required and cascades on checklist delete; `source_item_id` is nullable and unique with checklist ID; `input_type` is limited to `CHECKBOX`, `TEXT`, `NUMBER`, `PHOTO_NOTE`; `snapshot_quality` is `VERIFIED` or `RECONSTRUCTED`; `checklist_responses.job_checklist_item_id` is nullable |
 
 ### Payments, invoices, and refunds
 
@@ -43,7 +43,7 @@ Column types below are database types from migrations. `id BIGINT` primary keys 
 |---|---|---|
 | `invoices` | `invoice_number VARCHAR(40)` unique nullable; customer, optional service request/AMC, creator; description; `subtotal`, `tax_amount`, `total_amount DECIMAL(12,2)`; `currency VARCHAR(3)` default INR; status (`DRAFT`,`ISSUED`,`PAID`,`VOID`,`CANCELLED`); issue/due/created/updated dates | Customer/request/AMC/creator FKs `RESTRICT`; amount checks nonnegative; payment does not rewrite original values |
 | `payment_records` | Customer, optional request/AMC/invoice, creator; amount `DECIMAL(12,2)` positive; currency; purpose (`SERVICE_REQUEST`,`AMC_RENEWAL`,`INVOICE`,`OTHER`); status (`PENDING`,`PROCESSING`,`SUCCEEDED`,`FAILED`,`CANCELLED`,`REFUNDED`,`PARTIALLY_REFUNDED`); provider refs, failure/gateway status/sync timestamps | All FKs restricted; Razorpay order/payment IDs unique; indexed by customer/request/invoice |
-| `payment_refunds` | Payment, requester, positive amount `DECIMAL(12,2)`, currency, status (`REQUESTED`,`PROCESSING`,`SUCCEEDED`,`FAILED`), provider refund ID unique, gateway status/reason, timestamps; V49 approval actor/timestamp/reason fields | Payment/requester/approval actor FKs restricted; refund amount/accounting is derived from persisted successful records |
+| `payment_refunds` | Payment, requester, positive amount `DECIMAL(12,2)`, currency, status (`REQUESTED`,`PROCESSING`,`SUCCEEDED`,`FAILED`), provider refund ID unique, nullable `provider_idempotency_key` (V56), gateway status/reason, timestamps; V49 approval actor/timestamp/reason fields | Payment/requester/approval actor FKs restricted; unique index `uk_payment_refunds_provider_idempotency` covers the provider idempotency key; refund amount/accounting is derived from persisted successful records |
 | `razorpay_webhook_events` | Unique provider `event_id`, type, optional order/payment/refund IDs, processed time | Indexed by provider order/payment; duplicate event IDs cannot be recorded twice |
 | `financial_adjustments` (where present in later migrations) | Adjustment identity, payment/invoice/refund linkage, amount/currency/status/reason/audit fields as defined by its migration | Preserve original records; use migration/entity definition as exact authority if extended |
 

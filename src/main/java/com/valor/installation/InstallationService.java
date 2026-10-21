@@ -2,6 +2,7 @@ package com.valor.installation;
 
 import com.valor.auth.*;
 import com.valor.notifications.NotificationService;
+import com.valor.realtime.RealtimeEventService;
 import com.valor.response.ApiResponse;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
@@ -25,12 +26,13 @@ public class InstallationService {
     private final AssetIdentityAccess access;
     private final AuditService audit;
     private final NotificationService notifications;
+    private final RealtimeEventService realtime;
 
     public InstallationService(InstallationRequestRepository requests, InstallationHistoryRepository history,
             InstallationDocumentRepository documents, InstallationAuthorizationRepository authorizations,
-            InstallationBuildingRepository buildings, WorkflowIdentityAccess identities, AssetIdentityAccess access, AuditService audit, NotificationService notifications) {
+            InstallationBuildingRepository buildings, WorkflowIdentityAccess identities, AssetIdentityAccess access, AuditService audit, NotificationService notifications, RealtimeEventService realtime) {
         this.requests = requests; this.history = history; this.documents = documents; this.authorizations = authorizations;
-        this.buildings = buildings; this.identities = identities; this.access = access; this.audit = audit; this.notifications = notifications;
+        this.buildings = buildings; this.identities = identities; this.access = access; this.audit = audit; this.notifications = notifications; this.realtime = realtime;
     }
 
     @Transactional(readOnly = true)
@@ -100,6 +102,7 @@ public class InstallationService {
         requests.saveAndFlush(row);
         audit.record("INSTALLATION_REQUEST_SUBMIT", "INSTALLATION_REQUEST", row.getId(), "Installation request submitted");
         notifications.createSystemOnce(row.getCustomer().getUser().getId(), "INSTALLATION_SUBMITTED:" + row.getId() + ":" + row.getVersion(), "Installation request submitted", "Your installation service request was submitted for review.");
+        realtime.publish("INSTALLATION_STATUS_CHANGED", "INSTALLATION_REQUEST", row.getId(), row.getStatus().name(), java.util.Set.of(row.getCustomer().getUser().getId()));
         return view(row);
     }
 
@@ -111,6 +114,7 @@ public class InstallationService {
         transition(row, from, InstallationStatus.CANCELLED, input.reason().trim());
         requests.saveAndFlush(row);
         audit.record("INSTALLATION_REQUEST_CANCEL", "INSTALLATION_REQUEST", row.getId(), "Installation request cancelled", "status=" + from, "status=CANCELLED", "SUCCESS");
+        realtime.publish("INSTALLATION_STATUS_CHANGED", "INSTALLATION_REQUEST", row.getId(), row.getStatus().name(), java.util.Set.of(row.getCustomer().getUser().getId()));
         return view(row);
     }
 
