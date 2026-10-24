@@ -11,7 +11,7 @@ import static com.valor.installation.InstallationDtos.*;
 public class InstallationController {
     private final InstallationService service;
     public InstallationController(InstallationService service) { this.service = service; }
-    @GetMapping ApiResponse<List<View>> list() { return ok(service.list()); }
+    @GetMapping ApiResponse<List<View>> list(@RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="20") int size) { return ok(service.list(page, size)); }
     @PostMapping ApiResponse<View> create(@Valid @RequestBody WriteRequest input) { return ok(service.create(input)); }
     @GetMapping("/{id}") ApiResponse<View> read(@PathVariable Long id) { return ok(service.read(id)); }
     @PutMapping("/{id}") ApiResponse<View> update(@PathVariable Long id, @Valid @RequestBody WriteRequest input) { return ok(service.update(id, input)); }

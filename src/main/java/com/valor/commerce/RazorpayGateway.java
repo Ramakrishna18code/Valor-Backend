@@ -53,6 +53,15 @@ class RazorpayGateway implements PaymentGateway {
         return get("/orders/" + razorpayOrderId);
     }
 
+    public JsonNode listOrders(String receipt, long from, long to, int count, int skip) {
+        requireConfigured();
+        if (offlineTestMode) return mapper.valueToTree(Map.of("entity", "collection", "count", 0, "items", List.of()));
+        return rest.get().uri(uri -> uri.path("/orders")
+                .queryParam("receipt", receipt).queryParam("from", from).queryParam("to", to)
+                .queryParam("count", count).queryParam("skip", skip).build())
+                .headers(h -> h.setBasicAuth(keyId, keySecret, StandardCharsets.UTF_8)).retrieve().body(JsonNode.class);
+    }
+
     public JsonNode lookupPayment(String razorpayPaymentId) {
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", razorpayPaymentId, "status", "authorized"));

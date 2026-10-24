@@ -10,6 +10,8 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import static com.valor.assets.AssetDtos.*;
@@ -17,6 +19,8 @@ import static com.valor.assets.AssetDtos.*;
 @Service
 @Transactional
 public class AssetService {
+    public static final int DEFAULT_LIST_SIZE = 20;
+    public static final int MAX_LIST_SIZE = 100;
     private static final List<String> LIFT_TYPES = List.of(
             "Hydraulic Lifts",
             "Geared Traction Lifts",
@@ -76,11 +80,12 @@ public class AssetService {
     }
 
     @Transactional(readOnly = true)
-    public List<BuildingView> buildings() {
+    public List<BuildingView> buildings(String status, int page, int size) {
         identities.requireAdmin();
+        PageRequest request = pageRequest(page, size);
         Map<Long, Long> counts = lifts.activeCounts().stream()
                 .collect(Collectors.toMap(LiftRepository.BuildingCount::getBuildingId, LiftRepository.BuildingCount::getTotal));
-        return buildings.listAssets().stream().map(b -> buildingView(b, counts.getOrDefault(b.getId(), 0L))).toList();
+        return buildings.listAssets(status, request).stream().map(b -> buildingView(b, counts.getOrDefault(b.getId(), 0L))).toList();
     }
 
     public BuildingView createBuilding(BuildingWrite input) {
@@ -117,11 +122,12 @@ public class AssetService {
     }
 
     @Transactional(readOnly = true)
-    public List<LiftView> lifts() {
+    public List<LiftView> lifts(LiftStatus status, int page, int size) {
         identities.requireAdmin();
+        PageRequest request = pageRequest(page, size);
         LocalDate asOf = LocalDate.now(clock);
         Set<Long> covered = new HashSet<>(contracts.coveredLiftIds(asOf));
-        return lifts.listAssets().stream().map(l -> liftView(l, covered.contains(l.getId()), asOf)).toList();
+        return lifts.listAssets(status, request).stream().map(l -> liftView(l, covered.contains(l.getId()), asOf)).toList();
     }
 
     public LiftView createLift(LiftWrite input) {
@@ -160,17 +166,18 @@ public class AssetService {
     }
 
     @Transactional(readOnly = true)
-    public List<AmcView> contracts() {
+    public List<AmcView> contracts(AmcStatus status, int page, int size) {
         var actor = identities.actor();
+        PageRequest request = pageRequest(page, size);
         List<AmcContract> rows;
         if (actor.getRole() == Role.CUSTOMER) {
             identities.requireActiveCustomerUser(actor);
-            rows = contracts.findOwned(actor.getId());
+            rows = contracts.findOwned(actor.getId(), status, request).getContent();
         } else {
             if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) {
                 throw new AccessDeniedException("Access denied");
             }
-            rows = contracts.listAssets();
+            rows = contracts.listAssets(status, request).getContent();
         }
         LocalDate asOf = LocalDate.now(clock);
         return rows.stream().map(a -> amcView(a, asOf)).toList();
@@ -230,18 +237,19 @@ public class AssetService {
         var user=identities.actor();if(user.getRole()!=Role.CUSTOMER)throw new AccessDeniedException("Access denied");
         identities.requireActiveCustomerUser(user);return user;
     }
-    public List<BuildingView> customerBuildings() {
+    public List<BuildingView> customerBuildings(int page, int size) {
         Long id=customerActor().getId();
-        return buildings.findOwned(id).stream()
+        PageRequest request = pageRequest(page, size);
+        return buildings.findOwned(id, request).stream()
             .map(b->buildingView(b,lifts.countByBuildingIdAndActiveTrue(b.getId()))).toList();
     }
     public BuildingView customerBuilding(Long id) {
         Building building = ownedActiveBuilding(id, customerActor().getId());
         return buildingView(building, lifts.countByBuildingIdAndActiveTrue(id));
     }
-    public List<LiftView> customerLifts() {
-        Long id=customerActor().getId();LocalDate date=LocalDate.now(clock);Set<Long> covered=new HashSet<>(contracts.coveredLiftIds(date));
-        return lifts.findOwned(id).stream()
+    public List<LiftView> customerLifts(int page, int size) {
+        Long id=customerActor().getId(); PageRequest request = pageRequest(page, size); LocalDate date=LocalDate.now(clock);Set<Long> covered=new HashSet<>(contracts.coveredLiftIds(date));
+        return lifts.findOwned(id, request).stream()
             .map(l->liftView(l,covered.contains(l.getId()),date)).toList();
     }
     public BuildingView createCustomerBuilding(CustomerBuildingWrite input) {
@@ -305,6 +313,11 @@ public class AssetService {
         String before = liftSummary(lift);
         lift.setActive(false);
         audit.record("LIFT_DEACTIVATE", "LIFT", id, "Deactivated lift", before, liftSummary(lift), "SUCCESS");
+    }
+
+    private PageRequest pageRequest(int page, int size) {
+        if (page < 0 || size < 1 || size > MAX_LIST_SIZE) throw new AssetException(400, "Invalid page");
+        return PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "id"));
     }
 
     private Building activeBuilding(Long id) {

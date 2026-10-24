@@ -1,6 +1,7 @@
 package com.valor.realtime;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -39,7 +40,8 @@ class RealtimeChannelInterceptorTest {
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
         accessor.addNativeHeader("Authorization", "Bearer token");
 
-        assertDoesNotThrow(() -> interceptor.preSend(message(accessor), channel));
+        Message<?> authenticated = interceptor.preSend(message(accessor), channel);
+        assertEquals("42", StompHeaderAccessor.wrap(authenticated).getUser().getName());
         verify(jwt).subject("token");
         verify(users).loadUserByUsername("42");
     }
@@ -61,6 +63,37 @@ class RealtimeChannelInterceptorTest {
     }
 
     @Test
+    void permitsExactAdminTopicOnlyToAdminRoles() {
+        UserDetails details = User.withUsername("42").password("unused").roles("ADMIN").build();
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+        accessor.setDestination("/topic/admin");
+        accessor.setUser(new UsernamePasswordAuthenticationToken(details, null, details.getAuthorities()));
+        assertDoesNotThrow(() -> interceptor.preSend(message(accessor), channel));
+    }
+
+    @Test
+    void rejectsAdminPrefixedButNonExactDestinations() {
+        UserDetails details = User.withUsername("42").password("unused").roles("ADMIN").build();
+        for (String destination : new String[]{"/topic/admin-extra", "/topic/admin/private"}) {
+            StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+            accessor.setDestination(destination);
+            accessor.setUser(new UsernamePasswordAuthenticationToken(details, null, details.getAuthorities()));
+            assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(message(accessor), channel));
+        }
+    }
+
+    @Test
+    void rejectsSubscriptionsWithoutMeaningfulDestinations() {
+        UserDetails details = User.withUsername("42").password("unused").roles("CUSTOMER").build();
+        for (String destination : new String[]{null, "", "   "}) {
+            StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+            accessor.setDestination(destination);
+            accessor.setUser(new UsernamePasswordAuthenticationToken(details, null, details.getAuthorities()));
+            assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(message(accessor), channel));
+        }
+    }
+
+    @Test
     void permitsOnlyTheUserQueueForNonAdminSubscriptions() {
         UserDetails details = User.withUsername("42").password("unused").roles("CUSTOMER").build();
         StompHeaderAccessor allowed = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
@@ -72,6 +105,33 @@ class RealtimeChannelInterceptorTest {
         forbidden.setDestination("/user/queue/another-user");
         forbidden.setUser(allowed.getUser());
         assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(message(forbidden), channel));
+    }
+
+    @Test
+    void rejectsClientSendToServerOwnedAdminTopic() {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SEND);
+        accessor.setDestination("/topic/admin");
+        assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(message(accessor), channel));
+    }
+
+    @Test
+    void rejectsClientSendToServerOwnedUserQueue() {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SEND);
+        accessor.setDestination("/user/queue/valor-events");
+        assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(message(accessor), channel));
+    }
+
+    @Test
+    void rejectsClientSendToApplicationDestinationBecauseNoClientHandlersExist() {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SEND);
+        accessor.setDestination("/app/example");
+        assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(message(accessor), channel));
+    }
+
+    @Test
+    void rejectsClientSendWithoutDestination() {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SEND);
+        assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(message(accessor), channel));
     }
 
     private Message<byte[]> message(StompHeaderAccessor accessor) {

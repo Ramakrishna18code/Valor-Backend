@@ -590,8 +590,21 @@ class CommerceService {
         requireAdmin();
         PaymentRecord payment = payments.lockById(paymentId).orElseThrow(() -> missing("Payment"));
         if (payment.getRazorpayOrderId() == null) {
-            return reconciliationResult(payment, false, null, false, "NO_ACTION",
-                    "No Razorpay order reference exists; gateway outcome cannot be inferred safely");
+            if (payment.getStatus() != PaymentStatus.PROCESSING) {
+                return reconciliationResult(payment, false, null, false, "NO_ACTION",
+                        "Only an unresolved PROCESSING payment can be discovered safely");
+            }
+            Discovery discovery;
+            try {
+                discovery = discoverOrder(payment);
+            } catch (RuntimeException ex) {
+                return reconciliationResult(payment, false, null, false, "NO_ACTION",
+                        "Gateway order discovery unavailable; payment remains unresolved");
+            }
+            if (discovery.orderId() == null) return reconciliationResult(payment, false, null, false, "NO_ACTION", discovery.reason());
+            payment.setRazorpayOrderId(discovery.orderId());
+            payment.setGatewayStatus(discovery.status());
+            payment.setGatewaySyncedAt(LocalDateTime.now(clock));
         }
         try {
             JsonNode order = paymentGateway.lookupOrder(payment.getRazorpayOrderId());
@@ -641,6 +654,44 @@ class CommerceService {
                     "Gateway lookup unavailable; payment remains unresolved");
         }
     }
+
+    private Discovery discoverOrder(PaymentRecord payment) {
+        if (payment.getId() == null || payment.getCreatedAt() == null) return new Discovery(null, null, "Order discovery requires a persisted payment timestamp");
+        String receipt = "valor-payment-" + payment.getId();
+        long from = payment.getCreatedAt().minusHours(1).toEpochSecond(java.time.ZoneOffset.UTC);
+        long to = LocalDateTime.now(clock).plusHours(1).toEpochSecond(java.time.ZoneOffset.UTC);
+        int count = 100, skip = 0, pages = 0, maxPages = 10;
+        JsonNode candidate = null;
+        boolean complete = false;
+        while (pages++ < maxPages) {
+            JsonNode response = paymentGateway.listOrders(receipt, from, to, count, skip);
+            JsonNode items = response == null ? null : response.get("items");
+            if (items == null || !items.isArray()) return new Discovery(null, null, "Order discovery returned an invalid provider response");
+            for (JsonNode item : items) if (matchesDiscoveredOrder(item, payment, receipt, from, to)) {
+                if (candidate != null) return new Discovery(null, null, "Multiple validated Razorpay orders matched this payment; manual review is required");
+                candidate = item;
+            }
+            int returned = items.size();
+            if (returned < count) {
+                complete = true;
+                break;
+            }
+            skip += returned;
+        }
+        if (!complete) return new Discovery(null, null, "Order discovery was incomplete within the provider scan budget");
+        if (candidate == null) return new Discovery(null, null, "No exact Razorpay order match was found; payment remains unresolved");
+        return new Discovery(text(candidate, "id"), text(candidate, "status"), "Razorpay order associated; payment evidence still requires verification");
+    }
+
+    private boolean matchesDiscoveredOrder(JsonNode item, PaymentRecord payment, String receipt, long from, long to) {
+        if (item == null || !receipt.equals(text(item, "receipt")) || text(item, "id") == null) return false;
+        if (!payment.getCurrency().equalsIgnoreCase(text(item, "currency"))) return false;
+        if (item.path("amount").asLong(-1) != payment.getAmount().movePointRight(2).longValueExact()) return false;
+        long created = item.path("created_at").asLong(-1);
+        return created >= from && created <= to;
+    }
+
+    private record Discovery(String orderId, String status, String reason) {}
 
     @Transactional
     RefundReconciliationResult reconcileRefund(Long refundId) {

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.valor.assets.*;
 import jakarta.persistence.EntityManager;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -17,9 +18,12 @@ import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.AfterTransaction;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import java.time.*;
 import java.util.*;
@@ -48,6 +52,8 @@ class Stage2AssetsTest {
     @Autowired Flyway flyway;
     @Autowired Environment environment;
     @Autowired RequestMappingHandlerMapping mappings;
+    @Autowired PlatformTransactionManager transactionManager;
+    private final List<Long> committedFixtureUsers = new ArrayList<>();
 
     private User user(Role role) {
         User user = new User();
@@ -56,10 +62,30 @@ class Stage2AssetsTest {
         return users.saveAndFlush(user);
     }
     private CustomerProfile customer() {
-        CustomerProfile profile = new CustomerProfile();
-        profile.setUser(user(Role.CUSTOMER));
-        profile.setFullName("Asset test customer");
-        return customers.saveAndFlush(profile);
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setPropagationBehaviorName("PROPAGATION_REQUIRES_NEW");
+        return template.execute(status -> {
+            User owner = user(Role.CUSTOMER);
+            committedFixtureUsers.add(owner.getId());
+            CustomerProfile profile = new CustomerProfile();
+            profile.setUser(owner);
+            profile.setFullName("Asset test customer");
+            return customers.saveAndFlush(profile);
+        });
+    }
+    @AfterTransaction
+    void removeCommittedFixtureUsers() {
+        if (committedFixtureUsers.isEmpty()) return;
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setPropagationBehaviorName("PROPAGATION_REQUIRES_NEW");
+        template.executeWithoutResult(status -> {
+            for (Long userId : committedFixtureUsers) {
+                db.update("delete from notifications where recipient_user_id=?", userId);
+                db.update("delete from customer_profiles where user_id=?", userId);
+                db.update("delete from users where id=?", userId);
+            }
+        });
+        committedFixtureUsers.clear();
     }
     private JsonNode request(MockHttpServletRequestBuilder request, User actor, Object body, int status) throws Exception {
         if (actor != null) request.header("Authorization", "Bearer " + jwt.issue(actor));
@@ -377,6 +403,43 @@ class Stage2AssetsTest {
         request(post("/api/v1/lifts"), admin, Map.of("buildingId", b, "name", "Invalid", "warrantyStartDate", "2030-02-01", "warrantyEndDate", "2030-01-01"), 400);
         request(post("/api/v1/lifts"), admin, Map.of("buildingId", Long.MAX_VALUE, "name", "Missing"), 404);
         assertEquals(0, db.queryForObject("select count(*) from lifts where building_id=?", Integer.class, b));
+    }
+
+    @Test void assetListsAreBoundedPagedFilteredAndOwnerScoped() throws Exception {
+        User admin = user(Role.ADMIN);
+        CustomerProfile owner = customer();
+        CustomerProfile other = customer();
+        long first = building(admin, owner);
+        long second = building(admin, owner);
+        long foreign = building(admin, other);
+        long firstLift = lift(admin, first);
+        long secondLift = lift(admin, second);
+        long foreignLift = lift(admin, foreign);
+        amc(admin, firstLift);
+        amc(admin, secondLift);
+
+        assertEquals(3, request(get("/api/v1/buildings"), admin, null, 200).size());
+        assertEquals(3, request(get("/api/v1/buildings").param("size", "100"), admin, null, 200).size());
+        assertEquals(second, request(get("/api/v1/buildings").param("page", "1").param("size", "1"), admin, null, 200).get(0).get("id").asLong());
+        assertEquals(3, request(get("/api/v1/buildings").param("status", "ACTIVE"), admin, null, 200).size());
+        for (String query : List.of("size=101", "size=0", "size=-1", "page=-1")) request(get("/api/v1/buildings?" + query), admin, null, 400);
+        assertEquals(0, request(get("/api/v1/buildings").param("page", "99").param("size", "1"), admin, null, 200).size());
+        assertEquals(2, request(get("/api/v1/customers/me/buildings"), owner.getUser(), null, 200).size());
+        assertEquals(2, request(get("/api/v1/customers/me/buildings").param("size", "100"), owner.getUser(), null, 200).size());
+        assertEquals(2, request(get("/api/v1/customers/me/lifts"), owner.getUser(), null, 200).size());
+        assertEquals(2, request(get("/api/v1/customers/me/lifts").param("size", "100"), owner.getUser(), null, 200).size());
+        assertEquals(2, request(get("/api/v1/amc-contracts"), owner.getUser(), null, 200).size());
+        assertEquals(2, request(get("/api/v1/amc-contracts").param("size", "100"), owner.getUser(), null, 200).size());
+        assertEquals(3, request(get("/api/v1/lifts"), admin, null, 200).size());
+        assertEquals(3, request(get("/api/v1/lifts").param("size", "100"), admin, null, 200).size());
+        assertEquals(1, request(get("/api/v1/amc-contracts").param("page", "1").param("size", "1"), owner.getUser(), null, 200).size());
+        assertNotEquals(foreignLift, request(get("/api/v1/customers/me/lifts"), owner.getUser(), null, 200).get(0).get("id").asLong());
+        for (String path : List.of("/api/v1/lifts", "/api/v1/amc-contracts")) {
+            for (String query : List.of("size=101", "size=0", "size=-1", "page=-1")) request(get(path + "?" + query), admin, null, 400);
+        }
+        for (String path : List.of("/api/v1/customers/me/buildings", "/api/v1/customers/me/lifts", "/api/v1/amc-contracts")) {
+            for (String query : List.of("size=101", "size=0", "size=-1", "page=-1")) request(get(path + "?" + query), owner.getUser(), null, 400);
+        }
     }
 
     @Test void canonicalAssetRoutesHaveNoUnversionedAliases() {

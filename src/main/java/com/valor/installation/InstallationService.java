@@ -11,12 +11,15 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import com.valor.workflow.WorkflowDtos.PageView;
 import static com.valor.installation.InstallationDtos.*;
 
 @Service
 @Transactional
 public class InstallationService {
+    public static final int DEFAULT_LIST_SIZE = 20;
+    public static final int MAX_LIST_SIZE = 100;
     private final InstallationRequestRepository requests;
     private final InstallationHistoryRepository history;
     private final InstallationDocumentRepository documents;
@@ -36,9 +39,11 @@ public class InstallationService {
     }
 
     @Transactional(readOnly = true)
-    public List<View> list() {
+    public List<View> list(int page, int size) {
         CustomerProfile customer = customer();
-        return requests.findByCustomerIdOrderByCreatedAtDescIdDesc(customer.getId()).stream().map(this::view).toList();
+        if (page < 0 || size < 1 || size > MAX_LIST_SIZE) throw new IllegalArgumentException("Invalid page");
+        return requests.findByCustomerId(customer.getId(), PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")))
+                .stream().map(this::view).toList();
     }
 
     @Transactional(readOnly = true)
@@ -47,9 +52,9 @@ public class InstallationService {
     @Transactional(readOnly = true)
     public PageView<View> adminList(InstallationStatus status, String query, int page, int size) {
         access.requireAdmin();
-        int safeSize = Math.min(Math.max(size, 1), 100); int safePage = Math.max(page, 0);
-        var result = requests.adminSearch(status, clean(query), PageRequest.of(safePage, safeSize));
-        return new PageView<>(result.getContent().stream().map(this::view).toList(), safePage, safeSize, result.getTotalElements(), result.getTotalPages());
+        if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Invalid paging");
+        var result = requests.adminSearch(status, clean(query), PageRequest.of(page, size));
+        return new PageView<>(result.getContent().stream().map(this::view).toList(), page, size, result.getTotalElements(), result.getTotalPages());
     }
 
     @Transactional(readOnly = true)

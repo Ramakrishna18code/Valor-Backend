@@ -26,25 +26,46 @@ class PartsService {
         this.technicians=technicians; this.serviceRequests=serviceRequests; this.identities=identities; this.audit=audit;
     }
 
-    List<CategoryView> categories(boolean admin) { if (!admin) return categories.findAll().stream().filter(c -> c.active).map(this::category).toList(); return categories.findAll().stream().map(this::category).toList(); }
+    List<CategoryView> categories(boolean admin) {
+        Role role = identities.actor().getRole();
+        if (admin) requireAdmin();
+        else if (role != Role.CUSTOMER && role != Role.TECHNICIAN) throw denied();
+        return (admin ? categories.findAll() : categories.findAll().stream().filter(c -> c.active).toList())
+                .stream().map(this::category).toList();
+    }
     CategoryView saveCategory(Long id, CategoryWrite input) {
         requireAdmin(); PartCategory row = id == null ? new PartCategory() : categories.findById(id).orElseThrow(() -> missing("Category"));
         categories.findByNameIgnoreCase(input.name().trim()).filter(found -> !found.equals(row)).ifPresent(found -> { throw conflict("Category name already exists"); });
         row.name=input.name().trim(); row.description=input.description(); if (input.active()!=null) row.active=input.active();
         categories.saveAndFlush(row); audit.record(id == null ? "PART_CATEGORY_CREATE" : "PART_CATEGORY_UPDATE", "PART_CATEGORY", row.id, "Updated part category"); return category(row);
     }
-    Page<ItemView> catalog(String query, Long categoryId, boolean admin, Pageable page) {
+    Page<?> catalog(String query, Long categoryId, boolean admin, Pageable page) {
+        Role role = identities.actor().getRole();
+        if (admin) requireAdmin();
+        else if (role != Role.CUSTOMER && role != Role.TECHNICIAN) throw denied();
         String normalizedQuery = query == null || query.isBlank() ? null : query.trim();
-        return items.search(normalizedQuery, categoryId, admin, page).map(this::item);
+        return items.search(normalizedQuery, categoryId, admin, page).map(row -> admin ? fullItem(row)
+                : role == Role.CUSTOMER ? customerItem(row) : technicianItem(row));
     }
-    ItemView item(Long id) { return item(items.findWithCategoryById(id).orElseThrow(() -> missing("Part"))); }
+    Object item(Long id) {
+        PartItem row = items.findWithCategoryById(id).orElseThrow(() -> missing("Part"));
+        Role role = identities.actor().getRole();
+        if (role == Role.ADMIN || role == Role.SUPER_ADMIN) return fullItem(row);
+        if (role == Role.CUSTOMER) return customerItem(row);
+        if (role == Role.TECHNICIAN) return technicianItem(row);
+        throw denied();
+    }
+    ItemView adminItem(Long id) {
+        requireAdmin();
+        return fullItem(items.findWithCategoryById(id).orElseThrow(() -> missing("Part")));
+    }
     ItemView saveItem(Long id, ItemWrite input) {
         requireAdmin(); PartItem row=id == null ? new PartItem() : items.findById(id).orElseThrow(() -> missing("Part"));
         if (id == null && items.existsBySkuIgnoreCase(input.sku().trim()) || id != null && items.existsBySkuIgnoreCaseAndIdNot(input.sku().trim(), id)) throw conflict("SKU already exists");
         row.category=categories.findById(input.categoryId()).orElseThrow(() -> missing("Category")); row.name=input.name().trim(); row.sku=input.sku().trim();
         row.description=input.description(); row.unit=input.unit().trim(); row.reorderThreshold=input.reorderThreshold() == null ? 0 : input.reorderThreshold();
         row.compatibilityMetadata=input.compatibilityMetadata(); if (input.active()!=null) row.active=input.active(); items.saveAndFlush(row);
-        audit.record(id == null ? "PART_CREATE" : "PART_UPDATE", "PART_ITEM", row.id, "Updated part item"); return item(row);
+        audit.record(id == null ? "PART_CREATE" : "PART_UPDATE", "PART_ITEM", row.id, "Updated part item"); return fullItem(row);
     }
     ItemView movement(Long id, StockMovementWrite input) {
         requireAdmin(); PartItem row=items.lockById(id).orElseThrow(() -> missing("Part")); int quantity=input.quantity();
@@ -52,7 +73,7 @@ class PartsService {
         int next=input.movementType() == StockMovementType.ADJUSTMENT ? quantity : Math.addExact(row.quantityOnHand, quantity);
         if (next < 0) throw conflict("Stock cannot be negative"); row.quantityOnHand=next; items.saveAndFlush(row);
         PartStockMovement movement=new PartStockMovement(); movement.item=row; movement.movementType=input.movementType(); movement.quantity=quantity; movement.reason=input.reason(); movement.actorUserId=identities.actor().getId(); movements.save(movement);
-        audit.record("PART_STOCK_MOVEMENT", "PART_ITEM", id, "Stock movement " + input.movementType()); return item(row);
+        audit.record("PART_STOCK_MOVEMENT", "PART_ITEM", id, "Stock movement " + input.movementType()); return fullItem(row);
     }
     List<PartStockMovement> movements(Long id) { requireAdmin(); return movements.findByItemIdOrderByCreatedAtDesc(id); }
 
@@ -96,7 +117,10 @@ class PartsService {
     private void event(ServiceRequestPartRequest request, PartRequestStatus before, PartRequestStatus after, String reason) { PartRequestEvent event=new PartRequestEvent(); event.request=request; event.previousStatus=before; event.newStatus=after; event.reason=reason; event.actorUserId=identities.actor().getId(); events.save(event); }
     private RequestView view(ServiceRequestPartRequest request) { List<ServiceRequestPartLine> requestLines=lines.findByRequestId(request.id); return new RequestView(request.id,request.serviceRequest.getId(),request.technician.getId(),request.technician.getUser().getEmail(),request.status,request.notes,request.createdAt,request.submittedAt,request.approvedAt,request.rejectedAt,request.reservedAt,request.issuedAt,requestLines.stream().map(l -> new LineView(l.id,l.item.getId(),l.item.name,l.item.sku,l.requestedQuantity,l.approvedQuantity,l.issuedQuantity)).toList(),events.findByRequestIdOrderByCreatedAtAsc(request.id).stream().map(e -> new EventView(e.id,e.previousStatus,e.newStatus,e.actorUserId,e.reason,e.createdAt)).toList()); }
     private CategoryView category(PartCategory row) { return new CategoryView(row.id,row.name,row.description,row.active); }
-    private ItemView item(PartItem row) { return new ItemView(row.id,row.category.id,row.category.name,row.name,row.sku,row.description,row.unit,row.quantityOnHand,row.reorderThreshold,row.active,row.compatibilityMetadata,row.active && row.category.active && row.quantityOnHand > 0); }
+    private ItemView fullItem(PartItem row) { return new ItemView(row.id,row.category.id,row.category.name,row.name,row.sku,row.description,row.unit,row.quantityOnHand,row.reorderThreshold,row.active,row.compatibilityMetadata,available(row)); }
+    private CustomerItemView customerItem(PartItem row) { return new CustomerItemView(row.id,row.category.id,row.category.name,row.name,row.description,row.unit,row.active,available(row)); }
+    private TechnicianItemView technicianItem(PartItem row) { return new TechnicianItemView(row.id,row.category.id,row.category.name,row.name,row.sku,row.description,row.unit,row.active,row.compatibilityMetadata,available(row)); }
+    private boolean available(PartItem row) { return row.active && row.category.active && row.quantityOnHand > 0; }
     private String customerLabel(PartRequestStatus status) { return switch (status) { case SUBMITTED,UNDER_REVIEW -> "Part requested"; case APPROVED,RESERVED -> "Part being arranged"; case READY,ISSUED,CONSUMED -> "Part ready"; case REJECTED -> "Part required"; default -> "Part required"; }; }
     private void requireAdmin() { Role role=identities.actor().getRole(); if (role!=Role.ADMIN && role!=Role.SUPER_ADMIN) throw denied(); }
     private static RuntimeException missing(String value) { return new IllegalArgumentException(value + " not found"); }
