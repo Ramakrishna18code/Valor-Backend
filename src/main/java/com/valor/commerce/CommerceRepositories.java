@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 
 interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Long> {
     Page<PaymentRecord> findByCustomerId(Long customerId, Pageable pageable);
+    Optional<PaymentRecord> findFirstByCustomerIdAndPurposeAndStatusInOrderByCreatedAtDesc(Long customerId, PaymentPurpose purpose, Collection<PaymentStatus> statuses);
     List<PaymentRecord> findByIdGreaterThanOrderByIdAsc(Long id, Pageable pageable);
     Optional<PaymentRecord> findByInvoiceIdAndStatusIn(Long invoiceId, Collection<PaymentStatus> statuses);
     List<PaymentRecord> findByInvoiceIdOrderByCreatedAtDescIdDesc(Long invoiceId);
@@ -20,6 +21,27 @@ interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from PaymentRecord p where p.id=:id")
     Optional<PaymentRecord> lockById(@Param("id") Long id);
+}
+interface AmcPurchaseOrderRepository extends JpaRepository<AmcPurchaseOrder, Long> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from AmcPurchaseOrder p join fetch p.payment where p.payment.id=:paymentId")
+    Optional<AmcPurchaseOrder> lockByPaymentId(@Param("paymentId") Long paymentId);
+    Optional<AmcPurchaseOrder> findFirstByLiftIdAndStatusOrderByCreatedAtDescIdDesc(Long liftId, AmcPurchaseStatus status);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from AmcPurchaseOrder p where p.id=:id")
+    Optional<AmcPurchaseOrder> lockById(@Param("id") Long id);
+}
+interface WalletAccountRepository extends JpaRepository<WalletAccount, Long> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select w from WalletAccount w where w.customer.id=:customerId")
+    Optional<WalletAccount> lockByCustomerId(@Param("customerId") Long customerId);
+}
+interface WalletTransactionRepository extends JpaRepository<WalletTransaction, Long> {
+    Page<WalletTransaction> findByCustomerIdOrderByCreatedAtDescIdDesc(Long customerId, Pageable pageable);
+    boolean existsByReference(String reference);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from WalletTransaction t where t.payment.id=:paymentId and t.type=:type")
+    Optional<WalletTransaction> lockByPaymentIdAndType(@Param("paymentId") Long paymentId, @Param("type") WalletTransactionType type);
 }
 interface InvoiceRepository extends JpaRepository<Invoice, Long> {
     Page<Invoice> findByCustomerId(Long customerId, Pageable pageable);
@@ -47,6 +69,7 @@ interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Long> {
     List<PaymentRefund> findByPaymentIdOrderByCreatedAtAscIdAsc(Long paymentId);
     Optional<PaymentRefund> findByRazorpayRefundId(String razorpayRefundId);
     boolean existsByPaymentIdAndStatusIn(Long paymentId, Collection<RefundStatus> statuses);
+    boolean existsByPaymentCustomerIdAndPaymentPurposeAndStatusIn(Long customerId, PaymentPurpose purpose, Collection<RefundStatus> statuses);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from PaymentRefund r where r.id=:id")
     Optional<PaymentRefund> lockById(@Param("id") Long id);
@@ -64,6 +87,9 @@ interface CommerceBuildingRepository extends JpaRepository<Building, Long> {
 interface CommerceLiftRepository extends JpaRepository<Lift, Long> {
     @Query("select l from Lift l join fetch l.building b join fetch b.customer c join fetch c.user where l.id=:id")
     Optional<Lift> withOwner(@Param("id") Long id);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select l from Lift l join fetch l.building b join fetch b.customer c join fetch c.user where l.id=:id")
+    Optional<Lift> lockWithOwner(@Param("id") Long id);
 }
 interface CommerceAmcRepository extends JpaRepository<AmcContract, Long> {
     @Query("select a from AmcContract a join fetch a.lift l join fetch l.building b join fetch b.customer c join fetch c.user where a.id=:id")
@@ -71,6 +97,8 @@ interface CommerceAmcRepository extends JpaRepository<AmcContract, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from AmcContract a join fetch a.lift l join fetch l.building b join fetch b.customer c join fetch c.user where a.id=:id")
     Optional<AmcContract> lockWithOwner(@Param("id") Long id);
+    boolean existsByLiftIdAndStatusAndEndDateGreaterThanEqual(Long liftId, AmcStatus status, java.time.LocalDate asOfDate);
+    Optional<AmcContract> findFirstByLiftIdAndStatusOrderByEndDateDescIdDesc(Long liftId, AmcStatus status);
 }
 interface CommerceRequestRepository extends JpaRepository<ServiceRequest, Long> {
     @Query("select r from ServiceRequest r join fetch r.customer c left join fetch r.lift l left join fetch l.building b left join fetch b.customer bc left join fetch bc.user where r.id=:id")

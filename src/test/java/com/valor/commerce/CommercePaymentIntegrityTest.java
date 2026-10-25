@@ -49,6 +49,8 @@ class CommercePaymentIntegrityTest {
     @Mock CommerceAssignmentRepository assignments;
     @Mock CommerceReportRepository reports;
     @Mock PaymentRecordRepository payments;
+    @Mock WalletAccountRepository walletAccounts;
+    @Mock WalletTransactionRepository walletTransactions;
     @Mock InvoiceRepository invoices;
     @Mock CashPaymentOtpRepository cashOtps;
     @Mock SupportTicketRepository tickets;
@@ -77,7 +79,7 @@ class CommercePaymentIntegrityTest {
     @BeforeEach
     void setUp() {
         service = new CommerceService(identities, customers, buildings, lifts, amcs, requests, assignments, reports,
-                payments, invoices, cashOtps, tickets, renewals, documents, refunds, webhookEvents, storage,
+                payments, walletAccounts, walletTransactions, invoices, cashOtps, tickets, renewals, documents, refunds, webhookEvents, storage,
                 paymentGateway, audit, emails, pricing, encoder,
                 Clock.fixed(Instant.parse("2026-10-18T00:00:00Z"), ZoneOffset.UTC));
         admin = mock(User.class);

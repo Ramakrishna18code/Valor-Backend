@@ -4,7 +4,7 @@ Status labels used below: **Implemented** means enforced by current backend code
 
 ## 1. Scope and authority
 
-Valor uses persisted `invoices`, `payment_records`, `payment_refunds`, and `razorpay_webhook_events` records. Razorpay is the external gateway for online checkout and refund initiation. The backend, not a browser callback, is authoritative for settlement: a verified capture/webhook or an authorized reconciliation result must pass the stored payment/invoice relationship, amount, currency, and provider-reference checks before financial state changes.
+Valor uses persisted `invoices`, `payment_records`, `payment_refunds`, `razorpay_webhook_events`, and `amc_purchase_orders` records. Razorpay is the external gateway for online checkout and refund initiation. The backend, not a browser callback, is authoritative for settlement: a verified capture/webhook or an authorized reconciliation result must pass the stored payment obligation, amount, currency, and provider-reference checks before financial state changes.
 
 The configured currency is INR. Refunds are INR-only in the current commerce service. No currency conversion is performed.
 
@@ -16,6 +16,7 @@ The configured currency is INR. Refunds are INR-only in the current commerce ser
 - **Implemented:** verified Razorpay webhook signatures are required. Webhook event IDs are unique, so duplicate delivery is ignored. Stale, mismatched, pending, failed, or uncertain events do not produce successful settlement.
 - **Implemented:** Admin reconciliation can complete eligible payment outcomes after validating provider references and financial fields. It is not a substitute for signature verification when a signed webhook is available.
 - **Implemented:** verified successful payment settlement updates only the linked payment/invoice obligation. Linked AMC renewal activation and installation-milestone settlement are idempotent and tied to the validated association.
+- **Implemented:** new AMC purchases use a server-priced Razorpay order tied to the selected customer lift and plan. The paid invoice and AMC contract are created only after verified payment capture; failed or pending attempts create no invoice.
 
 Gateway mode is explicit. `RAZORPAY_MODE` must be `test` or `live`; the configured key ID must match the recognized Razorpay test/live prefix. A missing, invalid, or mismatched mode is rejected before an external request. `razorpay.offline-test-mode` is an internal mock path and is not Razorpay Test Mode.
 
@@ -24,6 +25,8 @@ Gateway mode is explicit. `RAZORPAY_MODE` must be `test` or `live`; the configur
 `POST /api/v1/payments/razorpay/checkout` locks the eligible invoice, rejects an existing successful payment, and returns an existing order when a resumable local order ID is present. Otherwise it saves a local `PROCESSING` payment and flushes it before calling `PaymentGateway.createOrder`. A successful response stores the provider order ID, gateway status, and synchronization time. A definitive provider 4xx marks the payment `FAILED`; a timeout, transport error, malformed/empty response, or other non-definitive exception leaves local `PROCESSING` with review required. The transaction intentionally permits that state to be persisted while returning an error.
 
 Local `PROCESSING` state and blocking blind retries reduce duplicate-order risk. The current `PaymentGateway` supports `lookupOrder(String razorpayOrderId)` only; `RazorpayGateway` calls `GET /orders/{id}` and has no receipt-to-order recovery operation. A receipt is a tracking field, not an assumed order-creation idempotency key. If the provider order succeeds before the local order ID commits, automatic recovery is not implemented; manual review or a separately approved provider-supported recovery design is required.
+
+`POST /api/v1/payments/razorpay/amc-purchase` accepts only a customer-owned lift and a backend catalog plan ID (`essential`, `extended`, or `long-term`). The backend determines the subtotal, 18% GST, and Razorpay amount; client price fields are not accepted. A successful verified capture creates the AMC contract and a `PAID` invoice in the same settlement transaction and links both records to the payment. A failed or uncertain payment does not create an invoice.
 
 ## 3. Refund policy
 
@@ -47,6 +50,7 @@ Implemented document routes are PDF-oriented: a successful payment receipt is av
 
 - Service invoices are generated only for an eligible completed service request, use backend pricing, and are protected against duplicate active invoice creation.
 - AMC renewal requests are customer/contract scoped. A quote is backend-priced; renewal status and contract dates change only after authoritative successful payment settlement. Repeated settlement cannot increment `renewal_count` or extend dates twice.
+- New AMC plan purchases go directly to Razorpay from the plan selection. The backend keeps the purchase details while payment is pending and generates the AMC contract and paid invoice only after capture verification.
 - Installation milestone billing is gated by the exact approved immutable schedule version, required approvals, validated terms, and an authoritative billing trigger. No default percentage, tax, due date, grace period, or trigger is defined by this repository. Incomplete/unapproved schedules fail closed.
 - Existing milestone invoice generation is Admin-authorized and idempotent for an eligible milestone. Payment settlement updates only its linked milestone.
 

@@ -2,6 +2,7 @@ package com.valor.realtime;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
@@ -40,6 +41,7 @@ class RealtimeChannelInterceptorTest {
         accessor.addNativeHeader("Authorization", "Bearer token");
 
         assertDoesNotThrow(() -> interceptor.preSend(message(accessor), channel));
+        assertEquals("42", accessor.getUser().getName());
         verify(jwt).subject("token");
         verify(users).loadUserByUsername("42");
     }
@@ -61,6 +63,13 @@ class RealtimeChannelInterceptorTest {
     }
 
     @Test
+    void rejectsUnauthenticatedUserQueueSubscriptions() {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+        accessor.setDestination("/user/queue/valor-events");
+        assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(message(accessor), channel));
+    }
+
+    @Test
     void permitsOnlyTheUserQueueForNonAdminSubscriptions() {
         UserDetails details = User.withUsername("42").password("unused").roles("CUSTOMER").build();
         StompHeaderAccessor allowed = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
@@ -75,6 +84,7 @@ class RealtimeChannelInterceptorTest {
     }
 
     private Message<byte[]> message(StompHeaderAccessor accessor) {
+        accessor.setLeaveMutable(true);
         return MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
     }
 }

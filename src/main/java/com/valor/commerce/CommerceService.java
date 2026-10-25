@@ -9,6 +9,7 @@ import com.valor.workflow.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.*;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Connection;
 import java.security.SecureRandom;
 import java.nio.charset.StandardCharsets;
@@ -59,10 +60,14 @@ class CommerceService {
     private final CommerceAssignmentRepository assignments;
     private final CommerceReportRepository reports;
     private final PaymentRecordRepository payments;
+    private final WalletAccountRepository walletAccounts;
+    private final WalletTransactionRepository walletTransactions;
     private final InvoiceRepository invoices;
     private final CashPaymentOtpRepository cashOtps;
     private final SupportTicketRepository tickets;
     private final AmcRenewalRequestRepository renewals;
+    @Autowired(required = false)
+    private AmcPurchaseOrderRepository amcPurchases;
     private final AssetDocumentRepository documents;
     private final PaymentRefundRepository refunds;
     private final RazorpayWebhookEventRepository webhookEvents;
@@ -80,13 +85,15 @@ class CommerceService {
     CommerceService(AssetIdentityAccess identities, CommerceCustomerRepository customers, CommerceBuildingRepository buildings,
             CommerceLiftRepository lifts, CommerceAmcRepository amcs, CommerceRequestRepository requests,
             CommerceAssignmentRepository assignments, CommerceReportRepository reports, PaymentRecordRepository payments,
+            WalletAccountRepository walletAccounts, WalletTransactionRepository walletTransactions,
             InvoiceRepository invoices, CashPaymentOtpRepository cashOtps, SupportTicketRepository tickets, AmcRenewalRequestRepository renewals,
             AssetDocumentRepository documents, PaymentRefundRepository refunds, RazorpayWebhookEventRepository webhookEvents,
             AssetDocumentStorage storage, PaymentGateway paymentGateway, AuditService audit, EmailEventService emails,
             PricingService pricing, PasswordEncoder encoder, Clock clock) {
         this.identities = identities; this.customers = customers; this.buildings = buildings; this.lifts = lifts;
         this.amcs = amcs; this.requests = requests; this.assignments = assignments; this.reports = reports;
-        this.payments = payments; this.invoices = invoices; this.cashOtps = cashOtps; this.tickets = tickets; this.renewals = renewals;
+        this.payments = payments; this.walletAccounts = walletAccounts; this.walletTransactions = walletTransactions;
+        this.invoices = invoices; this.cashOtps = cashOtps; this.tickets = tickets; this.renewals = renewals;
         this.documents = documents; this.refunds = refunds; this.webhookEvents = webhookEvents; this.storage = storage; this.paymentGateway = paymentGateway; this.audit = audit; this.emails = emails; this.pricing = pricing;
         this.encoder = encoder; this.clock = clock;
     }
@@ -98,9 +105,144 @@ class CommerceService {
         return page(rows.map(this::view));
     }
     PaymentView payment(Long id) { return view(authorized(payments.findById(id).orElseThrow(() -> missing("Payment")))); }
+    WalletView wallet() {
+        CustomerProfile owner = customer(identities.actor());
+        WalletAccount account = walletAccount(owner);
+        List<WalletTransactionView> rows = walletTransactions.findByCustomerIdOrderByCreatedAtDescIdDesc(owner.getId(), PageRequest.of(0, 30))
+                .map(this::walletTransactionView).getContent();
+        return new WalletView(account.getBalance(), account.getCurrency(), rows);
+    }
+    PageView<WalletTransactionView> walletTransactions(Pageable page) {
+        CustomerProfile owner = customer(identities.actor());
+        return page(walletTransactions.findByCustomerIdOrderByCreatedAtDescIdDesc(owner.getId(), page).map(this::walletTransactionView));
+    }
+    @Transactional(noRollbackFor = {CommerceException.class, HttpClientErrorException.class})
+    WalletCheckoutView createWalletTopUp(WalletTopUpCreate input) {
+        User actor = identities.actor();
+        if (!isCustomer(actor)) throw denied();
+        if (input.amount().scale() > 2 || input.amount().compareTo(new BigDecimal("100.00")) < 0
+                || input.amount().compareTo(new BigDecimal("50000.00")) > 0) {
+            throw new CommerceException(400, "Wallet top-ups must be between INR 100 and INR 50,000");
+        }
+        if (!paymentGateway.configured()) throw new CommerceException(503, "Razorpay credentials are not configured");
+        CustomerProfile owner = customer(actor);
+        walletAccount(owner);
+        Optional<PaymentRecord> pending = payments.findFirstByCustomerIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                owner.getId(), PaymentPurpose.WALLET_TOP_UP, List.of(PaymentStatus.PROCESSING));
+        if (pending.isPresent()) {
+            PaymentRecord active = pending.get();
+            if (active.getAmount().compareTo(input.amount()) != 0) {
+                throw new CommerceException(409, "A wallet top-up is already processing. Check its status before starting another.");
+            }
+            if (active.getRazorpayOrderId() == null) {
+                throw new CommerceException(409, "A previous wallet top-up has an uncertain outcome and must be reviewed before retrying");
+            }
+            return walletCheckoutView(active);
+        }
+        PaymentRecord payment = new PaymentRecord();
+        payment.setCustomer(owner); payment.setCreatedBy(actor); payment.setAmount(input.amount());
+        payment.setCurrency("INR"); payment.setPurpose(PaymentPurpose.WALLET_TOP_UP); payment.setStatus(PaymentStatus.PROCESSING);
+        payments.saveAndFlush(payment);
+        WalletTransaction transaction = new WalletTransaction();
+        transaction.setCustomer(owner); transaction.setPayment(payment); transaction.setType(WalletTransactionType.TOP_UP);
+        transaction.setReference("TOPUP-" + payment.getId());
+        transaction.setAmount(payment.getAmount()); transaction.setCurrency(payment.getCurrency());
+        transaction.setStatus(PaymentStatus.PROCESSING); transaction.setDescription("Wallet top-up");
+        walletTransactions.saveAndFlush(transaction);
+        try {
+            JsonNode order = paymentGateway.createOrder(payment.getAmount(), payment.getCurrency(), "valor-wallet-" + payment.getId());
+            String orderId = text(order, "id");
+            if (orderId == null || orderId.isBlank()) throw new IllegalStateException("Razorpay order response did not contain an order id");
+            payment.setRazorpayOrderId(orderId); payment.setGatewayStatus(text(order, "status"));
+            payment.setGatewaySyncedAt(LocalDateTime.now(clock));
+            return walletCheckoutView(payment);
+        } catch (RuntimeException ex) {
+            if (isDefinitiveOrderFailure(ex)) {
+                payment.setStatus(PaymentStatus.FAILED); payment.setFailureReason(clean(ex.getMessage(), 500));
+                transaction.setStatus(PaymentStatus.FAILED);
+                throw ex;
+            }
+            payment.setFailureReason("Razorpay order creation outcome is unknown; manual review is required");
+            throw new CommerceException(503, "Razorpay order creation outcome is uncertain; retry is blocked until reviewed");
+        }
+    }
+    WalletInvoicePaymentView payInvoiceWithWallet(Long invoiceId) {
+        User actor = identities.actor();
+        if (!isCustomer(actor)) throw denied();
+        CustomerProfile owner = customer(actor);
+        Invoice invoice = authorized(invoices.lockById(invoiceId).orElseThrow(() -> missing("Invoice")));
+        if (invoice.getStatus() != InvoiceStatus.ISSUED) throw new CommerceException(409, "Invoice is not eligible for wallet payment");
+        if (!"INR".equalsIgnoreCase(invoice.getCurrency())) throw new CommerceException(400, "Wallet payments are supported only for INR invoices");
+        if (payments.findByInvoiceIdAndStatusIn(invoice.getId(), List.of(PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED)).isPresent()) {
+            throw new CommerceException(409, "This invoice already has a payment in progress or has been paid");
+        }
+        WalletAccount account = walletAccount(owner);
+        if (refunds.existsByPaymentCustomerIdAndPaymentPurposeAndStatusIn(owner.getId(), PaymentPurpose.WALLET_TOP_UP,
+                List.of(RefundStatus.REQUESTED, RefundStatus.PROCESSING))) {
+            throw new CommerceException(409, "A wallet top-up refund is pending. Try invoice payment after it finishes.");
+        }
+        if (account.getBalance().compareTo(invoice.getTotalAmount()) < 0) throw new CommerceException(409, "Wallet balance is too low to pay this invoice");
+        PaymentRecord payment = new PaymentRecord();
+        payment.setCustomer(owner); payment.setCreatedBy(actor); payment.setInvoice(invoice);
+        payment.setServiceRequest(invoice.getServiceRequest()); payment.setAmcContract(invoice.getAmcContract());
+        payment.setAmount(invoice.getTotalAmount()); payment.setCurrency(invoice.getCurrency());
+        payment.setPurpose(PaymentPurpose.WALLET_PAYMENT); payment.setStatus(PaymentStatus.SUCCEEDED);
+        payments.saveAndFlush(payment);
+        WalletTransaction transaction = new WalletTransaction();
+        transaction.setCustomer(owner); transaction.setPayment(payment); transaction.setType(WalletTransactionType.INVOICE_PAYMENT);
+        transaction.setReference("PAYMENT-" + payment.getId());
+        transaction.setAmount(payment.getAmount()); transaction.setCurrency(payment.getCurrency());
+        transaction.setStatus(PaymentStatus.SUCCEEDED); transaction.setDescription("Invoice " + (invoice.getInvoiceNumber() == null ? invoice.getId() : invoice.getInvoiceNumber()));
+        walletTransactions.saveAndFlush(transaction);
+        account.setBalance(account.getBalance().subtract(payment.getAmount()));
+        invoice.setStatus(InvoiceStatus.PAID);
+        settleInstallationMilestone(payment); activateRenewalAfterSettlement(payment);
+        audit.record("WALLET_INVOICE_PAYMENT", "PAYMENT", payment.getId(), "Invoice paid from customer wallet");
+        return new WalletInvoicePaymentView(payment.getId(), invoice.getId(), payment.getAmount(), payment.getCurrency(), payment.getStatus().name(), account.getBalance());
+    }
+    private WalletAccount walletAccount(CustomerProfile owner) {
+        entityManager.createNativeQuery("insert ignore into wallet_accounts (customer_id, balance, currency, created_at, updated_at) values (?, 0.00, 'INR', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))")
+                .setParameter(1, owner.getId()).executeUpdate();
+        return walletAccounts.lockByCustomerId(owner.getId()).orElseThrow(() -> new CommerceException(500, "Unable to load customer wallet"));
+    }
+    private WalletCheckoutView walletCheckoutView(PaymentRecord payment) {
+        return new WalletCheckoutView(payment.getId(), paymentGateway.keyId(), payment.getRazorpayOrderId(),
+                payment.getAmount(), payment.getCurrency(), payment.getStatus().name());
+    }
+    private WalletTransactionView walletTransactionView(WalletTransaction row) {
+        return new WalletTransactionView(row.getId(), row.getPayment().getId(), row.getType(), row.getAmount(),
+                row.getCurrency(), row.getStatus(), row.getDescription(), row.getCreatedAt(), row.getUpdatedAt());
+    }
+    private void settleWalletTopUp(PaymentRecord payment) {
+        WalletTransaction transaction = walletTransactions.lockByPaymentIdAndType(payment.getId(), WalletTransactionType.TOP_UP).orElse(null);
+        if (transaction == null || transaction.getType() != WalletTransactionType.TOP_UP || transaction.getStatus() == PaymentStatus.SUCCEEDED) return;
+        WalletAccount account = walletAccount(payment.getCustomer());
+        account.setBalance(account.getBalance().add(transaction.getAmount()));
+        transaction.setStatus(PaymentStatus.SUCCEEDED);
+    }
+    private void settleWalletRefund(PaymentRefund refund) {
+        PaymentRecord payment = refund.getPayment();
+        if (payment.getPurpose() != PaymentPurpose.WALLET_TOP_UP || refund.getStatus() != RefundStatus.SUCCEEDED) return;
+        String reference = "REFUND-" + refund.getId();
+        if (walletTransactions.existsByReference(reference)) return;
+        WalletAccount account = walletAccount(payment.getCustomer());
+        WalletTransaction transaction = new WalletTransaction();
+        transaction.setCustomer(payment.getCustomer()); transaction.setPayment(payment); transaction.setReference(reference);
+        transaction.setType(WalletTransactionType.REFUND); transaction.setAmount(refund.getAmount());
+        transaction.setCurrency(refund.getCurrency()); transaction.setStatus(PaymentStatus.SUCCEEDED);
+        transaction.setDescription("Top-up refund to payment method");
+        walletTransactions.saveAndFlush(transaction);
+        account.setBalance(account.getBalance().subtract(refund.getAmount()));
+    }
     PaymentView createPayment(PaymentCreate input) {
         User actor = identities.actor();
         if (!isCustomer(actor) && !isAdmin(actor)) throw denied();
+        if (input.purpose() == PaymentPurpose.WALLET_TOP_UP || input.purpose() == PaymentPurpose.WALLET_PAYMENT) {
+            throw new CommerceException(400, "Wallet payments must use the wallet checkout flow");
+        }
+        if (input.purpose() == PaymentPurpose.AMC_PURCHASE) {
+            throw new CommerceException(400, "New AMC purchases must use the Razorpay AMC checkout flow");
+        }
         Invoice invoice = input.invoiceId() == null ? null : authorized(invoices.findById(input.invoiceId()).orElseThrow(() -> missing("Invoice")));
         CustomerProfile customer = isCustomer(actor) ? customer(actor)
                 : input.customerProfileId() != null ? customer(input.customerProfileId())
@@ -141,6 +283,11 @@ class CommerceService {
         }
         row.setStatus(input.status()); row.setFailureReason(clean(input.failureReason(), 500));
         row.setProviderReference(clean(input.providerReference(), 120));
+        if (input.status() == PaymentStatus.FAILED || input.status() == PaymentStatus.CANCELLED) failAmcPurchaseAfterPaymentFailure(row);
+        if (row.getPurpose() == PaymentPurpose.WALLET_TOP_UP) {
+            walletTransactions.lockByPaymentIdAndType(row.getId(), WalletTransactionType.TOP_UP)
+                    .ifPresent(transaction -> transaction.setStatus(input.status()));
+        }
         emails.paymentResult(row.getCustomer().getUser().getId(), row.getCustomer().getFullName(), row.getId(), row.getStatus().name());
         return view(row);
     }
@@ -187,6 +334,86 @@ class CommerceService {
     private RazorpayCheckoutView razorpayCheckoutView(PaymentRecord payment, Invoice invoice) {
         return new RazorpayCheckoutView(payment.getId(), invoice.getId(), paymentGateway.keyId(), payment.getRazorpayOrderId(),
                 payment.getAmount(), payment.getCurrency(), payment.getStatus().name());
+    }
+
+    @Transactional(noRollbackFor = {CommerceException.class, HttpClientErrorException.class})
+    AmcPurchaseCheckoutView createAmcPurchaseCheckout(AmcPurchaseCheckoutCreate input) {
+        User actor = identities.actor();
+        if (!isCustomer(actor)) throw denied();
+        if (!paymentGateway.configured()) throw new CommerceException(503, "Razorpay test credentials are not configured");
+        AmcPlanRate plan = amcPlanRate(input.planId());
+        CustomerProfile owner = customer(actor);
+        Lift lift = lifts.lockWithOwner(input.liftId()).orElseThrow(() -> missing("Lift"));
+        if (!lift.getBuilding().getCustomer().getId().equals(owner.getId())) throw denied();
+        if (!lift.isActive()) throw new CommerceException(409, "This lift is not available for AMC purchase");
+        if (amcs.existsByLiftIdAndStatusAndEndDateGreaterThanEqual(lift.getId(), AmcStatus.ACTIVE, LocalDate.now(clock))) {
+            throw new CommerceException(409, "This lift already has active AMC coverage");
+        }
+
+        Optional<AmcPurchaseOrder> pending = amcPurchases.findFirstByLiftIdAndStatusOrderByCreatedAtDescIdDesc(
+                lift.getId(), AmcPurchaseStatus.PAYMENT_PENDING);
+        if (pending.isPresent()) {
+            AmcPurchaseOrder previous = pending.get();
+            if (!previous.getCustomer().getId().equals(owner.getId())) {
+                throw new CommerceException(409, "Another account has an AMC payment in progress for this lift");
+            }
+            PaymentRecord previousPayment = previous.getPayment();
+            if (previousPayment.getStatus() == PaymentStatus.SUCCEEDED) {
+                activateAmcPurchaseAfterSettlement(previousPayment);
+                throw new CommerceException(409, "The previous AMC payment was received. Refresh your AMC records.");
+            }
+            if (previousPayment.getStatus() == PaymentStatus.PROCESSING) {
+                if (!previous.getPlanCode().equals(plan.code())) throw new CommerceException(409, "An AMC payment is already processing for this lift. Check its status before changing plans.");
+                if (previousPayment.getRazorpayOrderId() == null) throw new CommerceException(409, "A previous Razorpay order attempt has an uncertain outcome and must be reviewed before retrying");
+                return amcPurchaseCheckoutView(previous, previousPayment);
+            }
+            previous.setStatus(AmcPurchaseStatus.FAILED);
+        }
+
+        BigDecimal subtotal = plan.subtotal();
+        BigDecimal tax = subtotal.multiply(new BigDecimal("0.18")).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal total = subtotal.add(tax);
+        PaymentRecord payment = new PaymentRecord();
+        payment.setCustomer(owner); payment.setCreatedBy(actor); payment.setAmount(total);
+        payment.setCurrency("INR"); payment.setPurpose(PaymentPurpose.AMC_PURCHASE); payment.setStatus(PaymentStatus.PROCESSING);
+        payments.saveAndFlush(payment);
+        AmcPurchaseOrder purchase = new AmcPurchaseOrder();
+        purchase.setCustomer(owner); purchase.setLift(lift); purchase.setCreatedBy(actor); purchase.setPayment(payment);
+        purchase.setPlanCode(plan.code()); purchase.setPlanName(plan.name()); purchase.setBaseMonths(plan.months());
+        purchase.setBonusMonths(plan.bonusMonths()); purchase.setSubtotal(subtotal); purchase.setTaxAmount(tax);
+        purchase.setTotalAmount(total); purchase.setCurrency("INR"); purchase.setStatus(AmcPurchaseStatus.PAYMENT_PENDING);
+        amcPurchases.saveAndFlush(purchase);
+        try {
+            JsonNode order = paymentGateway.createOrder(payment.getAmount(), payment.getCurrency(), "valor-amc-" + payment.getId());
+            String orderId = text(order, "id");
+            if (orderId == null || orderId.isBlank()) throw new IllegalStateException("Razorpay order response did not contain an order id");
+            payment.setRazorpayOrderId(orderId); payment.setGatewayStatus(text(order, "status")); payment.setGatewaySyncedAt(LocalDateTime.now(clock));
+            return amcPurchaseCheckoutView(purchase, payment);
+        } catch (RuntimeException ex) {
+            if (isDefinitiveOrderFailure(ex)) {
+                payment.setStatus(PaymentStatus.FAILED); payment.setFailureReason(clean(ex.getMessage(), 500));
+                purchase.setStatus(AmcPurchaseStatus.FAILED);
+                throw ex;
+            }
+            payment.setFailureReason("Razorpay order creation outcome is unknown; manual review is required");
+            throw new CommerceException(503, "Razorpay order creation outcome is uncertain; retry is blocked until reviewed");
+        }
+    }
+
+    private record AmcPlanRate(String code, String name, int months, int bonusMonths, BigDecimal subtotal) {}
+    private AmcPlanRate amcPlanRate(String code) {
+        if (code == null) throw new CommerceException(400, "Choose a valid AMC plan");
+        return switch (code.trim().toLowerCase(Locale.ROOT)) {
+            case "essential" -> new AmcPlanRate("essential", "Essential care", 12, 1, new BigDecimal("12000.00"));
+            case "extended" -> new AmcPlanRate("extended", "Extended care", 24, 2, new BigDecimal("22000.00"));
+            case "long-term" -> new AmcPlanRate("long-term", "Long-term care", 36, 3, new BigDecimal("32000.00"));
+            default -> throw new CommerceException(400, "Choose a valid AMC plan");
+        };
+    }
+    private AmcPurchaseCheckoutView amcPurchaseCheckoutView(AmcPurchaseOrder purchase, PaymentRecord payment) {
+        return new AmcPurchaseCheckoutView(payment.getId(), paymentGateway.keyId(), payment.getRazorpayOrderId(),
+                payment.getAmount(), payment.getCurrency(), payment.getStatus().name(), purchase.getPlanName(),
+                purchase.getSubtotal(), purchase.getTaxAmount(), purchase.getTotalAmount());
     }
     private boolean isDefinitiveOrderFailure(RuntimeException ex) {
         return ex instanceof HttpClientErrorException clientError && clientError.getStatusCode().is4xxClientError();
@@ -267,6 +494,17 @@ class CommerceService {
         if (payment.getRazorpayPaymentId() == null) throw new CommerceException(409, "Payment has no gateway payment id");
         if (input.amount().scale() > 2 || input.amount().signum() <= 0) throw new CommerceException(400, "Invalid refund amount");
         if (refunds.existsByPaymentIdAndStatusIn(payment.getId(), List.of(RefundStatus.REQUESTED, RefundStatus.PROCESSING))) throw new CommerceException(409, "Refund already in progress");
+        if (payment.getPurpose() == PaymentPurpose.WALLET_TOP_UP) {
+            CustomerProfile owner = payment.getCustomer();
+            if (refunds.existsByPaymentCustomerIdAndPaymentPurposeAndStatusIn(owner.getId(), PaymentPurpose.WALLET_TOP_UP,
+                    List.of(RefundStatus.REQUESTED, RefundStatus.PROCESSING))) {
+                throw new CommerceException(409, "Another wallet top-up refund is already processing");
+            }
+            WalletAccount account = walletAccount(owner);
+            if (account.getBalance().compareTo(input.amount()) < 0) {
+                throw new CommerceException(409, "Wallet funds have already been used; the requested top-up refund exceeds the available balance");
+            }
+        }
         BigDecimal refunded = refunds.findByPaymentIdOrderByCreatedAtAscIdAsc(payment.getId()).stream()
                 .filter(r -> r.getStatus() == RefundStatus.SUCCEEDED).map(PaymentRefund::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
         if (refunded.add(input.amount()).compareTo(payment.getAmount()) > 0) throw new CommerceException(409, "Refund exceeds paid amount");
@@ -620,7 +858,9 @@ class CommerceService {
                 if (payment.getStatus() != PaymentStatus.REFUNDED && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
                     payment.setStatus(PaymentStatus.SUCCEEDED);
                     if (payment.getInvoice() != null) { payment.getInvoice().setStatus(InvoiceStatus.PAID); settleInstallationMilestone(payment); }
+                    settleWalletTopUp(payment);
                     activateRenewalAfterSettlement(payment);
+                    activateAmcPurchaseAfterSettlement(payment);
                     audit.record("PAYMENT_RECONCILIATION_CAPTURE", "PAYMENT", payment.getId(), "Verified gateway capture applied during reconciliation");
                 }
                 return reconciliationResult(payment, true, status, true, "CAPTURE_CONFIRMED", "Verified gateway capture applied");
@@ -631,6 +871,8 @@ class CommerceService {
                     && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
                 payment.setStatus(PaymentStatus.FAILED);
                 payment.setFailureReason("Verified gateway payment failure");
+                walletTransactions.lockByPaymentIdAndType(payment.getId(), WalletTransactionType.TOP_UP)
+                        .ifPresent(transaction -> transaction.setStatus(PaymentStatus.FAILED));
                 return reconciliationResult(payment, true, status, true, "FAILURE_CONFIRMED", "Verified gateway failure applied");
             }
             payment.setStatus(payment.getStatus() == PaymentStatus.SUCCEEDED ? PaymentStatus.SUCCEEDED : PaymentStatus.PROCESSING);
@@ -1016,8 +1258,10 @@ class CommerceService {
                     } else if (captureAmountMatchesInvoice(payment, paymentNode)) {
                         payment.setStatus(PaymentStatus.SUCCEEDED);
                         if (payment.getInvoice() != null) { payment.getInvoice().setStatus(InvoiceStatus.PAID); settleInstallationMilestone(payment); }
-                    activateRenewalAfterSettlement(payment);
-                    audit.record("PAYMENT_CAPTURE_SETTLED", "PAYMENT", payment.getId(), "Verified gateway capture applied from webhook");
+                        settleWalletTopUp(payment);
+                        activateRenewalAfterSettlement(payment);
+                        activateAmcPurchaseAfterSettlement(payment);
+                        audit.record("PAYMENT_CAPTURE_SETTLED", "PAYMENT", payment.getId(), "Verified gateway capture applied from webhook");
                     } else {
                         payment.setFailureReason("Gateway capture amount does not match invoice amount");
                     }
@@ -1027,6 +1271,9 @@ class CommerceService {
                             && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
                         payment.setStatus(PaymentStatus.FAILED);
                         payment.setFailureReason(text(paymentNode, "error_description"));
+                        walletTransactions.lockByPaymentIdAndType(payment.getId(), WalletTransactionType.TOP_UP)
+                                .ifPresent(transaction -> transaction.setStatus(PaymentStatus.FAILED));
+                        failAmcPurchaseAfterPaymentFailure(payment);
                     }
                 }
                 case "payment.authorized" -> {
@@ -1046,6 +1293,7 @@ class CommerceService {
             // event may still resolve a previously failed/processing local record.
             if (event.equals("refund.processed") && refund.getStatus() != RefundStatus.SUCCEEDED) {
                 refund.setStatus(RefundStatus.SUCCEEDED);
+                settleWalletRefund(refund);
                 emails.refundResult(refund.getPayment().getCustomer().getUser().getId(), refund.getPayment().getCustomer().getFullName(), refund.getId(), refund.getStatus().name(), refund.getAmount().toPlainString(), refund.getCurrency());
             }
             if (event.equals("refund.failed") && refund.getStatus() != RefundStatus.SUCCEEDED
@@ -1053,6 +1301,7 @@ class CommerceService {
                 refund.setStatus(RefundStatus.FAILED);
                 emails.refundResult(refund.getPayment().getCustomer().getUser().getId(), refund.getPayment().getCustomer().getFullName(), refund.getId(), refund.getStatus().name(), refund.getAmount().toPlainString(), refund.getCurrency());
             }
+            settleWalletRefund(refund);
             updateRefundedPayment(payment);
             audit.record(event.equals("refund.processed") ? "PAYMENT_REFUND_SETTLED" : "PAYMENT_REFUND_FAILED",
                     "PAYMENT_REFUND", refund.getId(), "Gateway refund event applied: " + event);
@@ -1065,6 +1314,8 @@ class CommerceService {
     }
     private boolean manualTransitionAllowed(PaymentRecord payment, PaymentStatus requested) {
         if (requested == PaymentStatus.REFUNDED || requested == PaymentStatus.PARTIALLY_REFUNDED) return false;
+        if (payment.getPurpose() == PaymentPurpose.AMC_PURCHASE && requested == PaymentStatus.SUCCEEDED) return false;
+        if (payment.getPurpose() == PaymentPurpose.WALLET_TOP_UP && requested == PaymentStatus.SUCCEEDED) return false;
         boolean gatewayBacked = payment.getRazorpayOrderId() != null || payment.getRazorpayPaymentId() != null
                 || payment.getRazorpayPaymentLinkId() != null;
         if (gatewayBacked && requested == PaymentStatus.SUCCEEDED) return false;
@@ -1078,7 +1329,7 @@ class CommerceService {
     }
     private boolean captureAmountMatchesInvoice(PaymentRecord payment, JsonNode paymentNode) {
         JsonNode amount = paymentNode == null ? null : paymentNode.get("amount");
-        if (amount == null || amount.isNull()) return true;
+        if (amount == null || amount.isNull()) return payment.getPurpose() != PaymentPurpose.AMC_PURCHASE;
         try {
             BigDecimal captured = new BigDecimal(amount.asText()).movePointLeft(2);
             String currency = text(paymentNode, "currency");
@@ -1116,6 +1367,55 @@ class CommerceService {
         } catch (RuntimeException ex) {
             audit.record("AMC_RENEWAL_AUTO_ACTIVATE_REJECTED", "AMC_RENEWAL_REQUEST", renewal.getId(), "Verified payment did not satisfy renewal activation rules", null, null, "FAILURE");
         }
+    }
+    private void activateAmcPurchaseAfterSettlement(PaymentRecord payment) {
+        if (payment == null || payment.getPurpose() != PaymentPurpose.AMC_PURCHASE
+                || payment.getStatus() != PaymentStatus.SUCCEEDED || amcPurchases == null) return;
+        AmcPurchaseOrder purchase = amcPurchases.lockByPaymentId(payment.getId()).orElse(null);
+        if (purchase == null || purchase.getStatus() == AmcPurchaseStatus.COMPLETED) return;
+        if (!purchase.getCustomer().getId().equals(payment.getCustomer().getId())
+                || payment.getAmount().compareTo(purchase.getTotalAmount()) != 0
+                || !payment.getCurrency().equalsIgnoreCase(purchase.getCurrency())) {
+            audit.record("AMC_PURCHASE_SETTLEMENT_REJECTED", "PAYMENT", payment.getId(), "Verified payment did not match the stored AMC purchase amount and owner", null, null, "FAILURE");
+            return;
+        }
+
+        LocalDate start = LocalDate.now(clock);
+        AmcContract previous = amcs.findFirstByLiftIdAndStatusOrderByEndDateDescIdDesc(purchase.getLift().getId(), AmcStatus.ACTIVE).orElse(null);
+        if (previous != null && !previous.getEndDate().isBefore(start)) start = previous.getEndDate().plusDays(1);
+        LocalDate end = start.plusMonths(purchase.getBaseMonths() + purchase.getBonusMonths()).minusDays(1);
+
+        AmcContract contract = new AmcContract();
+        contract.setLift(purchase.getLift()); contract.setAmcNumber("AMC-PAY-%06d".formatted(payment.getId()));
+        contract.setPlan(purchase.getPlanName());
+        String bonusTerm = purchase.getBonusMonths() == 1 ? " additional month" : " additional months";
+        contract.setCoverageDetails(purchase.getBaseMonths() + " months of maintenance with " + purchase.getBonusMonths()
+                + bonusTerm + ", subject to the agreed coverage terms.");
+        contract.setStartDate(start); contract.setEndDate(end); contract.setRenewalDate(end);
+        contract.setStatus(AmcStatus.ACTIVE); contract.setRenewalCount(0);
+        amcs.saveAndFlush(contract);
+
+        Invoice invoice = new Invoice();
+        invoice.setCustomer(purchase.getCustomer()); invoice.setCreatedBy(purchase.getCreatedBy());
+        invoice.setAmcContract(contract); invoice.setDescription(purchase.getPlanName() + " AMC for " + purchase.getLift().getName());
+        invoice.setSubtotal(purchase.getSubtotal()); invoice.setTaxAmount(purchase.getTaxAmount());
+        invoice.setTotalAmount(purchase.getTotalAmount()); invoice.setCurrency(purchase.getCurrency());
+        invoice.setStatus(InvoiceStatus.PAID); invoice.setIssuedDate(LocalDate.now(clock));
+        invoices.saveAndFlush(invoice);
+        invoice.setInvoiceNumber("INV-%06d".formatted(invoice.getId()));
+
+        payment.setAmcContract(contract); payment.setInvoice(invoice);
+        purchase.setContract(contract); purchase.setInvoice(invoice); purchase.setStatus(AmcPurchaseStatus.COMPLETED);
+        amcPurchases.flush();
+        emails.amcCreated(purchase.getCustomer().getUser().getId(), purchase.getCustomer().getFullName(), contract.getId(), contract.getAmcNumber());
+        emails.invoiceCreated(purchase.getCustomer().getUser().getId(), purchase.getCustomer().getFullName(), invoice.getId(), invoice.getInvoiceNumber(), invoice.getTotalAmount().toPlainString(), invoice.getCurrency());
+        audit.record("AMC_PURCHASE_SETTLED", "AMC_PURCHASE_ORDER", purchase.getId(), "Verified Razorpay payment activated the AMC and generated its paid invoice");
+    }
+    private void failAmcPurchaseAfterPaymentFailure(PaymentRecord payment) {
+        if (payment == null || payment.getPurpose() != PaymentPurpose.AMC_PURCHASE || amcPurchases == null) return;
+        amcPurchases.lockByPaymentId(payment.getId()).ifPresent(purchase -> {
+            if (purchase.getStatus() == AmcPurchaseStatus.PAYMENT_PENDING) purchase.setStatus(AmcPurchaseStatus.FAILED);
+        });
     }
     private boolean gatewayAmountMatches(PaymentRecord payment, JsonNode gatewayPayment) {
         JsonNode amount = gatewayPayment == null ? null : gatewayPayment.get("amount");

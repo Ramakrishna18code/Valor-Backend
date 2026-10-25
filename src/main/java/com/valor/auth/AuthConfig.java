@@ -68,6 +68,7 @@ class AuthConfig {
                         .requestMatchers("/api/v1/technician-applications", "/api/v1/technician-applications/**").permitAll()
                         .requestMatchers("/api/v1/admin/technician-applications", "/api/v1/admin/technician-applications/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/customers/**").hasRole("CUSTOMER")
+                        .requestMatchers("/api/v1/wallet", "/api/v1/wallet/**").hasRole("CUSTOMER")
                         .requestMatchers("/api/v1/admin/dashboard/summary").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/admin/technicians").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/settings").hasAnyRole("ADMIN","SUPER_ADMIN")

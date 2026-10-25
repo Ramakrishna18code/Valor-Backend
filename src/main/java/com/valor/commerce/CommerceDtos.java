@@ -21,6 +21,17 @@ final class CommerceDtos {
     record RazorpayCheckoutCreate(@NotNull @Positive Long invoiceId) implements StrictInput {}
     record RazorpayCheckoutView(Long paymentId, Long invoiceId, String razorpayKeyId, String razorpayOrderId,
         BigDecimal amount, String currency, String status) {}
+    record AmcPurchaseCheckoutCreate(@NotNull @Positive Long liftId, @NotBlank @Size(max=40) String planId) implements StrictInput {}
+    record AmcPurchaseCheckoutView(Long paymentId, String razorpayKeyId, String razorpayOrderId,
+        BigDecimal amount, String currency, String status, String planName, BigDecimal subtotal,
+        BigDecimal taxAmount, BigDecimal totalAmount) {}
+    record WalletTopUpCreate(@NotNull @DecimalMin("100.00") @DecimalMax("50000.00") @Digits(integer=8,fraction=2) BigDecimal amount) implements StrictInput {}
+    record WalletCheckoutView(Long paymentId, String razorpayKeyId, String razorpayOrderId, BigDecimal amount, String currency, String status) {}
+    record WalletTransactionView(Long id, Long paymentId, WalletTransactionType type, BigDecimal amount, String currency,
+        PaymentStatus status, String description, LocalDateTime createdAt, LocalDateTime updatedAt) {}
+    record WalletView(BigDecimal balance, String currency, List<WalletTransactionView> transactions) {}
+    record WalletInvoicePaymentView(Long paymentId, Long invoiceId, BigDecimal amount, String currency,
+        String status, BigDecimal walletBalance) {}
     record ServiceInvoiceCreate(LocalDate dueDate) implements StrictInput {}
     record CashPaymentOtpRequest(@NotNull @Positive Long invoiceId) implements StrictInput {}
     record CashPaymentOtpVerify(@NotNull @Positive Long paymentId, @NotNull @Positive Long otpId,

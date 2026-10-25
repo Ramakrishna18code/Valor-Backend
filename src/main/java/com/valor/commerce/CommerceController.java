@@ -19,6 +19,14 @@ class CommerceController {
 
     @GetMapping("/payments")
     ApiResponse<PageView<PaymentView>> payments(@PageableDefault(size = 20) Pageable page) { return ok(service.payments(page)); }
+    @GetMapping("/wallet")
+    ApiResponse<WalletView> wallet() { return ok(service.wallet()); }
+    @GetMapping("/wallet/transactions")
+    ApiResponse<PageView<WalletTransactionView>> walletTransactions(@PageableDefault(size = 20) Pageable page) { return ok(service.walletTransactions(page)); }
+    @PostMapping("/wallet/top-ups")
+    ApiResponse<WalletCheckoutView> walletTopUp(@Valid @RequestBody WalletTopUpCreate input) { return ok(service.createWalletTopUp(input)); }
+    @PostMapping("/wallet/invoices/{invoiceId}/pay")
+    ApiResponse<WalletInvoicePaymentView> walletPayInvoice(@PathVariable Long invoiceId) { return ok(service.payInvoiceWithWallet(invoiceId)); }
     @PostMapping("/payments")
     ApiResponse<PaymentView> createPayment(@Valid @RequestBody PaymentCreate input) { return ok(service.createPayment(input)); }
     @GetMapping("/payments/{id}")
@@ -27,6 +35,8 @@ class CommerceController {
     ApiResponse<PaymentView> paymentStatus(@PathVariable Long id, @Valid @RequestBody PaymentStatusUpdate input) { return ok(service.updatePaymentStatus(id, input)); }
     @PostMapping("/payments/razorpay/checkout")
     ApiResponse<RazorpayCheckoutView> razorpayCheckout(@Valid @RequestBody RazorpayCheckoutCreate input) { return ok(service.createRazorpayCheckout(input)); }
+    @PostMapping("/payments/razorpay/amc-purchase")
+    ApiResponse<AmcPurchaseCheckoutView> amcPurchaseCheckout(@Valid @RequestBody AmcPurchaseCheckoutCreate input) { return ok(service.createAmcPurchaseCheckout(input)); }
     @PostMapping("/payments/cash/otp/request")
     ApiResponse<CashPaymentOtpView> cashOtp(@Valid @RequestBody CashPaymentOtpRequest input) { return ok(service.requestCashPaymentOtp(input)); }
     @PostMapping("/payments/cash/otp/verify")
