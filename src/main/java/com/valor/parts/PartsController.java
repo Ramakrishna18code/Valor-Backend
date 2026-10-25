@@ -13,8 +13,8 @@ class PartsController {
     private final PartsService service;
     PartsController(PartsService service) { this.service=service; }
     @GetMapping("/parts/categories") ApiResponse<List<CategoryView>> categories() { return ok(service.categories(false)); }
-    @GetMapping("/parts") ApiResponse<Page<ItemView>> catalog(@RequestParam(required=false) String q,@RequestParam(required=false) Long categoryId,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) { return ok(service.catalog(q,categoryId,false,PageRequest.of(page,size))); }
-    @GetMapping("/parts/{id}") ApiResponse<ItemView> item(@PathVariable Long id) { return ok(service.item(id)); }
+    @GetMapping("/parts") ApiResponse<Page<?>> catalog(@RequestParam(required=false) String q,@RequestParam(required=false) Long categoryId,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) { return ok(service.catalog(q,categoryId,false,PageRequest.of(page,size))); }
+    @GetMapping("/parts/{id}") ApiResponse<?> item(@PathVariable Long id) { return ok(service.item(id)); }
     @GetMapping("/customers/me/service-requests/{id}/parts-status") ApiResponse<List<CustomerStatusView>> customerStatus(@PathVariable Long id) { return ok(service.customerStatuses(id)); }
     @PostMapping("/technician/me/part-requests") ApiResponse<RequestView> submit(@Valid @RequestBody RequestWrite input) { return ok(service.submit(input)); }
     @GetMapping("/technician/me/part-requests") ApiResponse<Page<RequestView>> mine(@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) { return ok(service.myRequests(PageRequest.of(page,size))); }
@@ -24,9 +24,9 @@ class PartsController {
     @GetMapping("/admin/part-categories") ApiResponse<List<CategoryView>> adminCategories() { return ok(service.categories(true)); }
     @PostMapping("/admin/part-categories") ApiResponse<CategoryView> createCategory(@Valid @RequestBody CategoryWrite input) { return ok(service.saveCategory(null,input)); }
     @PatchMapping("/admin/part-categories/{id}") ApiResponse<CategoryView> updateCategory(@PathVariable Long id,@Valid @RequestBody CategoryWrite input) { return ok(service.saveCategory(id,input)); }
-    @GetMapping("/admin/parts") ApiResponse<Page<ItemView>> adminParts(@RequestParam(required=false) String q,@RequestParam(required=false) Long categoryId,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) { return ok(service.catalog(q,categoryId,true,PageRequest.of(page,size))); }
+    @GetMapping("/admin/parts") ApiResponse<Page<?>> adminParts(@RequestParam(required=false) String q,@RequestParam(required=false) Long categoryId,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) { return ok(service.catalog(q,categoryId,true,PageRequest.of(page,size))); }
     @PostMapping("/admin/parts") ApiResponse<ItemView> createPart(@Valid @RequestBody ItemWrite input) { return ok(service.saveItem(null,input)); }
-    @GetMapping("/admin/parts/{id}") ApiResponse<ItemView> adminPart(@PathVariable Long id) { service.categories(true); return ok(service.item(id)); }
+    @GetMapping("/admin/parts/{id}") ApiResponse<ItemView> adminPart(@PathVariable Long id) { service.categories(true); return ok(service.adminItem(id)); }
     @PatchMapping("/admin/parts/{id}") ApiResponse<ItemView> updatePart(@PathVariable Long id,@Valid @RequestBody ItemWrite input) { return ok(service.saveItem(id,input)); }
     @PostMapping("/admin/parts/{id}/stock-movements") ApiResponse<ItemView> movement(@PathVariable Long id,@Valid @RequestBody StockMovementWrite input) { return ok(service.movement(id,input)); }
     @GetMapping("/admin/parts/{id}/stock-movements") ApiResponse<List<PartStockMovement>> movements(@PathVariable Long id) { return ok(service.movements(id)); }

@@ -7,11 +7,14 @@ import com.valor.workflow.RequestStatus;
 import com.valor.workflow.ServiceRequest;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -101,6 +104,87 @@ class PartsServiceAuthorizationTest {
                 () -> service.submit(new RequestWrite(42L, null, List.of(new LineWrite(11L, 1)))));
         assertEquals("Service request is closed", error.getMessage());
         verifyNoInteractions(requests, lines, items);
+    }
+
+    @Test
+    void customerCatalogOmitsInternalInventoryFields() {
+        User actor = mock(User.class);
+        PartItem item = partItem();
+        when(actor.getRole()).thenReturn(Role.CUSTOMER);
+        when(identities.actor()).thenReturn(actor);
+        when(items.search(isNull(), isNull(), eq(false), any())).thenReturn(new PageImpl<>(List.of(item)));
+        when(items.findWithCategoryById(11L)).thenReturn(Optional.of(item));
+
+        Object listed = service.catalog(null, null, false, PageRequest.of(0, 20)).getContent().get(0);
+        Object detailed = service.item(11L);
+
+        assertInstanceOf(PartsDtos.CustomerItemView.class, listed);
+        assertInstanceOf(PartsDtos.CustomerItemView.class, detailed);
+        assertFalse(listed.toString().contains("quantityOnHand"));
+        assertFalse(listed.toString().contains("reorderThreshold"));
+    }
+
+    @Test
+    void technicianCatalogPreservesCatalogIdentityFieldsWithoutInventoryQuantities() {
+        User actor = mock(User.class);
+        PartItem item = partItem();
+        when(actor.getRole()).thenReturn(Role.TECHNICIAN);
+        when(identities.actor()).thenReturn(actor);
+        when(items.search(isNull(), isNull(), eq(false), any())).thenReturn(new PageImpl<>(List.of(item)));
+
+        Object listed = service.catalog(null, null, false, PageRequest.of(0, 20)).getContent().get(0);
+
+        assertInstanceOf(PartsDtos.TechnicianItemView.class, listed);
+        PartsDtos.TechnicianItemView view = (PartsDtos.TechnicianItemView) listed;
+        assertEquals("SKU-11", view.sku());
+        assertEquals("compat", view.compatibilityMetadata());
+    }
+
+    @Test
+    void adminCatalogRetainsFullInventoryFields() {
+        User actor = mock(User.class);
+        PartItem item = partItem();
+        when(actor.getRole()).thenReturn(Role.ADMIN);
+        when(identities.actor()).thenReturn(actor);
+        when(items.search(isNull(), isNull(), eq(true), any())).thenReturn(new PageImpl<>(List.of(item)));
+
+        Object listed = service.catalog(null, null, true, PageRequest.of(0, 20)).getContent().get(0);
+
+        assertInstanceOf(PartsDtos.ItemView.class, listed);
+        PartsDtos.ItemView view = (PartsDtos.ItemView) listed;
+        assertEquals(7, view.quantityOnHand());
+        assertEquals(2, view.reorderThreshold());
+        assertEquals("SKU-11", view.sku());
+    }
+
+    @Test
+    void unsupportedRoleCannotReadCatalog() {
+        User actor = mock(User.class);
+        when(actor.getRole()).thenReturn(null);
+        when(identities.actor()).thenReturn(actor);
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.catalog(null, null, false, PageRequest.of(0, 20)));
+        verifyNoInteractions(items);
+    }
+
+    private PartItem partItem() {
+        PartCategory category = new PartCategory();
+        category.id = 3L;
+        category.name = "Filters";
+        category.active = true;
+        PartItem item = new PartItem();
+        item.id = 11L;
+        item.category = category;
+        item.name = "Filter";
+        item.sku = "SKU-11";
+        item.description = "Replacement filter";
+        item.unit = "piece";
+        item.quantityOnHand = 7;
+        item.reorderThreshold = 2;
+        item.active = true;
+        item.compatibilityMetadata = "compat";
+        return item;
     }
 
     private ServiceRequest serviceRequest(Long id, RequestStatus status) {

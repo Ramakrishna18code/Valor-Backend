@@ -100,6 +100,8 @@ class AuthConfig {
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/notifications")
                                 .hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/technician/**").hasRole("TECHNICIAN")
+                        .requestMatchers("/api/v1/parts", "/api/v1/parts/**")
+                                .hasAnyRole("CUSTOMER", "TECHNICIAN", "ADMIN", "SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/service-requests")
                                 .hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/service-requests")

@@ -18,6 +18,8 @@ interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Long> {
     Optional<PaymentRecord> findFirstByServiceRequestIdOrderByCreatedAtDesc(Long serviceRequestId);
     Optional<PaymentRecord> findByRazorpayOrderId(String razorpayOrderId);
     Optional<PaymentRecord> findByRazorpayPaymentId(String razorpayPaymentId);
+    @Query("select coalesce(sum(p.amount),0) from PaymentRecord p where p.invoice.id=:invoiceId and p.status in :statuses")
+    java.math.BigDecimal sumCollectedForInvoice(@Param("invoiceId") Long invoiceId, @Param("statuses") Collection<PaymentStatus> statuses);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from PaymentRecord p where p.id=:id")
     Optional<PaymentRecord> lockById(@Param("id") Long id);
@@ -46,6 +48,9 @@ interface WalletTransactionRepository extends JpaRepository<WalletTransaction, L
 interface InvoiceRepository extends JpaRepository<Invoice, Long> {
     Page<Invoice> findByCustomerId(Long customerId, Pageable pageable);
     Optional<Invoice> findFirstByServiceRequestIdOrderByCreatedAtDesc(Long serviceRequestId);
+    @Query("select i from Invoice i join fetch i.customer c join fetch c.user u where i.dueDate is not null and i.dueDate between :from and :to and i.status not in :excluded order by i.dueDate asc, i.id asc")
+    List<Invoice> findCollectibleDueBetween(@Param("from") java.time.LocalDate from, @Param("to") java.time.LocalDate to,
+            @Param("excluded") Collection<InvoiceStatus> excluded, Pageable pageable);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select i from Invoice i where i.id=:id")
     Optional<Invoice> lockById(@Param("id") Long id);
@@ -70,6 +75,8 @@ interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Long> {
     Optional<PaymentRefund> findByRazorpayRefundId(String razorpayRefundId);
     boolean existsByPaymentIdAndStatusIn(Long paymentId, Collection<RefundStatus> statuses);
     boolean existsByPaymentCustomerIdAndPaymentPurposeAndStatusIn(Long customerId, PaymentPurpose purpose, Collection<RefundStatus> statuses);
+    @Query("select coalesce(sum(r.amount),0) from PaymentRefund r where r.payment.invoice.id=:invoiceId and r.status=:status")
+    java.math.BigDecimal sumForInvoice(@Param("invoiceId") Long invoiceId, @Param("status") RefundStatus status);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from PaymentRefund r where r.id=:id")
     Optional<PaymentRefund> lockById(@Param("id") Long id);

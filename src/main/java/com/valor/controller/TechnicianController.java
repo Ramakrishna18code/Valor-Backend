@@ -25,7 +25,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/technicians")
@@ -57,8 +56,12 @@ public class TechnicianController {
     @Operation(summary = "List technicians")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     @GetMapping
-    public ResponseEntity<ApiResponse<List<TechnicianResponse>>> getAllTechnicians() {
-        return ResponseEntity.ok(ApiResponse.success("Technicians fetched", technicianRepository.findAll().stream().map(TechnicianMapper::toResponse).collect(Collectors.toList()), HttpStatus.OK.value()));
+    public ResponseEntity<ApiResponse<List<TechnicianResponse>>> getAllTechnicians(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = paging(page, size, Sort.by(Sort.Direction.ASC, "id"));
+        return ResponseEntity.ok(ApiResponse.success("Technicians fetched",
+                technicianRepository.findAll(pageable).map(TechnicianMapper::toResponse).getContent(), HttpStatus.OK.value()));
     }
 
     @Operation(summary = "Search technicians")
@@ -80,18 +83,28 @@ public class TechnicianController {
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN', 'TECHNICIAN')")
     @GetMapping("/{id}/assignments")
     public ResponseEntity<ApiResponse<List<ServiceRequestResponse>>> getAssignments(@PathVariable Long id,
-                                                                                     Authentication authentication) {
+                                                                                     Authentication authentication,
+                                                                                     @RequestParam(defaultValue = "0") int page,
+                                                                                     @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = paging(page, size, Sort.by(Sort.Direction.DESC, "serviceRequestedAt")
+                .and(Sort.by(Sort.Direction.DESC, "id")));
         requireTechnicianAccess(id, authentication);
         if (!technicianRepository.existsById(id)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(ApiResponse.error("Technician not found", HttpStatus.NOT_FOUND.value()));
         }
         List<ServiceRequestResponse> response = serviceRequestRepository
-                .findByAssignedTechnicianIdOrderByServiceRequestedAtDesc(id)
-                .stream()
+                .findByAssignedTechnicianId(id, pageable)
                 .map(ServiceRequestMapper::toResponse)
-                .collect(Collectors.toList());
+                .getContent();
         return ResponseEntity.ok(ApiResponse.success("Assignments fetched", response, HttpStatus.OK.value()));
+    }
+
+    private static Pageable paging(int page, int size, Sort sort) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new IllegalArgumentException("Invalid paging");
+        }
+        return PageRequest.of(page, size, sort);
     }
 
     private void requireTechnicianAccess(Long technicianId, Authentication authentication) {

@@ -18,6 +18,10 @@ final class PartsDtos {
     record CategoryView(Long id, String name, String description, boolean active) {}
     record ItemView(Long id, Long categoryId, String categoryName, String name, String sku, String description, String unit,
             int quantityOnHand, int reorderThreshold, boolean active, String compatibilityMetadata, boolean available) {}
+    record CustomerItemView(Long id, Long categoryId, String categoryName, String name, String description, String unit,
+            boolean active, boolean available) {}
+    record TechnicianItemView(Long id, Long categoryId, String categoryName, String name, String sku, String description,
+            String unit, boolean active, String compatibilityMetadata, boolean available) {}
     record LineView(Long id, Long partItemId, String itemName, String sku, int requestedQuantity, int approvedQuantity, int issuedQuantity) {}
     record RequestView(Long id, Long serviceRequestId, Long technicianProfileId, String technicianName, PartRequestStatus status,
             String notes, LocalDateTime createdAt, LocalDateTime submittedAt, LocalDateTime approvedAt, LocalDateTime rejectedAt,

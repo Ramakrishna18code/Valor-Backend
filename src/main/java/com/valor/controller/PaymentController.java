@@ -17,12 +17,14 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/payments")
@@ -65,12 +67,19 @@ public class PaymentController {
     @Operation(summary = "List payments")
     @GetMapping
     public ResponseEntity<ApiResponse<List<PaymentResponse>>> list(@RequestParam(required = false) Long customerId,
-                                                                    @RequestParam(required = false) PaymentStatus status) {
-        List<Payment> payments = status == null ? paymentRepository.findAll() : paymentRepository.findByStatus(status);
-        if (customerId != null) payments = payments.stream()
-                .filter(payment -> payment.getCustomer() != null && customerId.equals(payment.getCustomer().getId()))
-                .collect(Collectors.toList());
-        return ResponseEntity.ok(ApiResponse.success("Payments fetched", payments.stream().map(PaymentController::toResponse).collect(Collectors.toList()), HttpStatus.OK.value()));
+                                                                    @RequestParam(required = false) PaymentStatus status,
+                                                                    @RequestParam(defaultValue = "0") int page,
+                                                                    @RequestParam(defaultValue = "20") int size) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new IllegalArgumentException("Invalid paging");
+        }
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Payment> payments = customerId == null
+                ? (status == null ? paymentRepository.findAll(pageable) : paymentRepository.findByStatus(status, pageable))
+                : (status == null ? paymentRepository.findByCustomerId(customerId, pageable)
+                        : paymentRepository.findByCustomerIdAndStatus(customerId, status, pageable));
+        return ResponseEntity.ok(ApiResponse.success("Payments fetched",
+                payments.map(PaymentController::toResponse).getContent(), HttpStatus.OK.value()));
     }
 
     @Operation(summary = "Get payment")

@@ -14,7 +14,7 @@ public interface ServiceRequestRepository extends JpaRepository<ServiceRequest, 
 
 	List<ServiceRequest> findByCustomerIdOrderByServiceRequestedAtDesc(Long customerId);
 
-	List<ServiceRequest> findByAssignedTechnicianIdOrderByServiceRequestedAtDesc(Long technicianId);
+	Page<ServiceRequest> findByAssignedTechnicianId(Long technicianId, Pageable pageable);
 
 	@Query("""
 			select s from ServiceRequest s

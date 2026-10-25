@@ -48,6 +48,12 @@ public class CommunicationService {
         return enqueueInternal(new SendRequest(eventType, recipientUserId, channels, null, variables, idempotencyKey), mandatory);
     }
 
+    /** Payment reminders use all configured billing channels without exposing the package-private channel enum. */
+    public List<MessageView> enqueuePaymentReminder(Long recipientUserId, Map<String,String> variables, String idempotencyKey) {
+        return enqueueApplication("PAYMENT_INVOICE_REMINDER", recipientUserId,
+                Set.of(CommunicationChannel.IN_APP, CommunicationChannel.EMAIL, CommunicationChannel.SMS), variables, idempotencyKey, false);
+    }
+
     private List<MessageView> enqueueInternal(SendRequest input, boolean mandatory) {
         try {
             return idempotentWrite.execute(status -> enqueueInternalOnce(input, mandatory));

@@ -10,6 +10,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -36,6 +37,18 @@ class InstallationRequestTest {
         if (body != null) request.contentType("application/json").content(json.writeValueAsString(body));
         String response = mvc.perform(request).andExpect(status().is(expected)).andReturn().getResponse().getContentAsString();
         JsonNode envelope = json.readTree(response); assertEquals(expected < 400, envelope.get("success").asBoolean()); assertEquals(expected, envelope.get("status").asInt()); return envelope.get("data");
+    }
+
+    @Test void customerInstallationListUsesBoundedDeterministicPagination() throws Exception {
+        User owner = customer();
+        JsonNode first = call("POST", "/api/v1/customers/me/installations", owner, Map.of("requirements", "First", "siteContactName", "Contact", "siteContactPhone", "+919810000001", "clientRequestKey", "page-first"), 200);
+        JsonNode second = call("POST", "/api/v1/customers/me/installations", owner, Map.of("requirements", "Second", "siteContactName", "Contact", "siteContactPhone", "+919810000002", "clientRequestKey", "page-second"), 200);
+        assertEquals(2, call("GET", "/api/v1/customers/me/installations", owner, null, 200).size());
+        assertEquals(2, call("GET", "/api/v1/customers/me/installations?page=0&size=100", owner, null, 200).size());
+        assertEquals(second.get("id").asLong(), call("GET", "/api/v1/customers/me/installations?page=0&size=1", owner, null, 200).get(0).get("id").asLong());
+        assertEquals(first.get("id").asLong(), call("GET", "/api/v1/customers/me/installations?page=1&size=1", owner, null, 200).get(0).get("id").asLong());
+        assertEquals(0, call("GET", "/api/v1/customers/me/installations?page=99&size=1", owner, null, 200).size());
+        for (String query : List.of("size=101", "size=0", "size=-1", "page=-1")) call("GET", "/api/v1/customers/me/installations?" + query, owner, null, 400);
     }
 
     @Test void customerWithoutLiftCanCreateAndReadDraft() throws Exception {
@@ -82,6 +95,31 @@ class InstallationRequestTest {
         User owner = customer(); User other = customer();
         JsonNode draft = call("POST", "/api/v1/customers/me/installations", owner, Map.of("requirements", "Private installation", "siteContactName", "Contact", "siteContactPhone", "+919810000003"), 200);
         call("GET", "/api/v1/customers/me/installations/" + draft.get("id").asLong(), other, null, 403);
+    }
+
+    @Test void adminAuthorizationListRejectsInvalidPagingAndPreservesMetadataAndFilters() throws Exception {
+        User owner = customer(); User admin = user(Role.ADMIN); User other = customer();
+        JsonNode draft = call("POST", "/api/v1/customers/me/installations", owner, Map.of(
+                "requirements", "Authorization list fixture", "siteContactName", "Contact",
+                "siteContactPhone", "+919810000004", "siteCity", "Bengaluru",
+                "authorization", Map.of("ownerName", "Property owner", "relationshipType", "Representative")), 200);
+        long authorizationId = draft.at("/authorization/id").asLong();
+        call("POST", "/api/v1/admin/installations/authorizations/" + authorizationId + "/review", admin, Map.of("status", "APPROVED"), 200);
+        call("POST", "/api/v1/customers/me/installations/" + draft.get("id").asLong() + "/submit", owner,
+                Map.of("submissionKey", "authorization-list-submit", "version", draft.get("version").asLong()), 200);
+
+        JsonNode page = call("GET", "/api/v1/admin/installations/authorizations?page=0&size=1&status=SUBMITTED&q=Bengaluru", admin, null, 200);
+        assertEquals(0, page.get("page").asInt());
+        assertEquals(1, page.get("size").asInt());
+        assertEquals(1, page.get("totalElements").asInt());
+        assertEquals(1, page.get("totalPages").asInt());
+        assertEquals(1, page.get("items").size());
+        assertEquals(draft.get("id").asLong(), page.at("/items/0/id").asLong());
+        assertEquals(0, call("GET", "/api/v1/admin/installations/authorizations?page=1&size=1&status=SUBMITTED&q=Bengaluru", admin, null, 200).get("items").size());
+        call("GET", "/api/v1/admin/installations/authorizations", other, null, 403);
+        for (String query : List.of("page=-1", "size=0", "size=-1", "size=101", "page=bad", "size=bad")) {
+            call("GET", "/api/v1/admin/installations/authorizations?" + query, admin, null, 400);
+        }
     }
 
     @Test void proposalRevisionPreservesDeclineAndGatesConstruction() throws Exception {

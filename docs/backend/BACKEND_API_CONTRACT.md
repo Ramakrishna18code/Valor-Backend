@@ -346,6 +346,10 @@ Dashboard Summary fields are totalCustomers, totalLifts, totalRequests, pendingJ
 
 Dashboard backend connectivity uses the public `GET /api/v1/health` endpoint only. It returns a safe envelope with `data.status=UP`, requires no authentication, and must not expose database state, credentials, stack traces, host internals, JWT configuration or provider secrets. Admin clients may use it to show Backend API reachable/unreachable/checking states, but an HTTP health response is not a full business-data or infrastructure health guarantee.
 
+### Realtime transport
+
+The authenticated realtime endpoint is `GET /ws` over WebSocket. The HTTP upgrade is origin-checked and the STOMP `CONNECT` frame must contain the bearer JWT in its `Authorization` native header; the server authenticates that frame before allowing subscriptions. Clients may subscribe to `/user/queue/valor-events`; only `ADMIN` and `SUPER_ADMIN` may subscribe to `/topic/admin`. Client `SEND` frames are not supported. The current simple broker configuration does not define an application heartbeat scheduler or promise a server idle-timeout/connection-liveness guarantee. Clients must treat WebSocket delivery as an update signal and refetch authoritative REST state; HTTP 101 confirms only the transport upgrade, not STOMP authentication or message delivery.
+
 ## Admin settings
 
 Admin settings are global non-secret business/runtime preferences managed through `/api/v1/admin/settings`. They are not deployment secrets. Database credentials, JWT secrets, provider API keys, password policy secrets, refresh-token/session lifetimes and environment-specific hostnames remain process/environment configuration and are never stored in the settings row.

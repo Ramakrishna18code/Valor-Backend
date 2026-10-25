@@ -862,6 +862,71 @@ class CommercePaymentIntegrityTest {
     }
 
     @Test
+    void reconciliationDiscoversExactOrderWithoutTreatingDiscoveryAsCapture() {
+        payment.setCreatedAt(java.time.LocalDateTime.of(2026, 10, 17, 23, 0));
+        when(paymentGateway.listOrders(eq("valor-payment-11"), anyLong(), anyLong(), eq(100), eq(0)))
+                .thenReturn(orderPage(order("order_found", "valor-payment-11", 100000, "INR", "created", 1792281600L)));
+        when(paymentGateway.lookupOrder("order_found")).thenReturn(node("id", "order_found", "status", "created"));
+
+        CommerceDtos.ReconciliationResult result = service.reconcilePayment(11L);
+
+        assertEquals("NO_ACTION", result.action());
+        assertEquals("order_found", payment.getRazorpayOrderId());
+        assertEquals(PaymentStatus.PROCESSING, payment.getStatus());
+        assertEquals(InvoiceStatus.ISSUED, invoice.getStatus());
+        verify(paymentGateway, never()).createOrder(any(), anyString(), anyString());
+    }
+
+    @Test
+    void reconciliationLeavesMultipleExactOrdersAmbiguous() {
+        payment.setCreatedAt(java.time.LocalDateTime.of(2026, 10, 17, 23, 0));
+        when(paymentGateway.listOrders(eq("valor-payment-11"), anyLong(), anyLong(), eq(100), eq(0)))
+                .thenReturn(orderPage(
+                        order("order_one", "valor-payment-11", 100000, "INR", "created", 1792281600L),
+                        order("order_two", "valor-payment-11", 100000, "INR", "created", 1792281601L)));
+
+        CommerceDtos.ReconciliationResult result = service.reconcilePayment(11L);
+
+        assertEquals("NO_ACTION", result.action());
+        assertNull(payment.getRazorpayOrderId());
+        assertEquals(PaymentStatus.PROCESSING, payment.getStatus());
+        verify(paymentGateway, never()).lookupOrder(anyString());
+        verify(paymentGateway, never()).createOrder(any(), anyString(), anyString());
+    }
+
+    @Test
+    void reconciliationDoesNotTreatTenFullPagesAsComplete() {
+        payment.setCreatedAt(java.time.LocalDateTime.of(2026, 10, 17, 23, 0));
+        JsonNode fullPage = orderPage();
+        com.fasterxml.jackson.databind.node.ArrayNode items = (com.fasterxml.jackson.databind.node.ArrayNode) fullPage.get("items");
+        for (int i = 0; i < 100; i++) items.add(order("order_" + i, "other-receipt", 100000, "INR", "created", 1792281600L));
+        when(paymentGateway.listOrders(anyString(), anyLong(), anyLong(), eq(100), anyInt())).thenReturn(fullPage);
+
+        CommerceDtos.ReconciliationResult result = service.reconcilePayment(11L);
+
+        assertEquals("NO_ACTION", result.action());
+        assertNull(payment.getRazorpayOrderId());
+        verify(paymentGateway, times(10)).listOrders(anyString(), anyLong(), anyLong(), eq(100), anyInt());
+    }
+
+    @Test
+    void reconciliationKeepsProviderDiscoveryFailureUnresolved() {
+        payment.setCreatedAt(java.time.LocalDateTime.of(2026, 10, 17, 23, 0));
+        when(paymentGateway.listOrders(anyString(), anyLong(), anyLong(), eq(100), eq(0)))
+                .thenThrow(new RuntimeException("provider failure"));
+
+        CommerceDtos.ReconciliationResult result = service.reconcilePayment(11L);
+
+        assertEquals("NO_ACTION", result.action());
+        assertFalse(result.gatewayEvidence());
+        assertNull(payment.getRazorpayOrderId());
+        assertEquals(PaymentStatus.PROCESSING, payment.getStatus());
+        assertEquals(InvoiceStatus.ISSUED, invoice.getStatus());
+        verify(paymentGateway, never()).lookupOrder(anyString());
+        verify(paymentGateway, never()).createOrder(any(), anyString(), anyString());
+    }
+
+    @Test
     void reconciliationTraversesPaymentBatchesByStableIdWithoutWholeTableLoad() {
         List<PaymentRecord> first = new ArrayList<>();
         for (long id = 1; id <= 200; id++) {
@@ -1112,6 +1177,18 @@ class CommercePaymentIntegrityTest {
 
     private JsonNode node(String idField, String id, String statusField, String status) {
         return new ObjectMapper().createObjectNode().put(idField, id).put(statusField, status);
+    }
+
+    private JsonNode order(String id, String receipt, int amount, String currency, String status, long createdAt) {
+        return new ObjectMapper().createObjectNode().put("id", id).put("receipt", receipt)
+                .put("amount", amount).put("currency", currency).put("status", status).put("created_at", createdAt);
+    }
+
+    private JsonNode orderPage(JsonNode... orders) {
+        com.fasterxml.jackson.databind.node.ObjectNode page = new ObjectMapper().createObjectNode();
+        com.fasterxml.jackson.databind.node.ArrayNode items = page.putArray("items");
+        for (JsonNode order : orders) items.add(order);
+        return page;
     }
 
     private JsonNode paymentNode(String id, String orderId, String status, int amount, String currency) {

@@ -16,8 +16,8 @@ class AssetController {
     @Operation(operationId="buildings")
     @GetMapping("/buildings")
     ApiResponse<List<BuildingView>> buildings(@RequestParam(required=false) String status,
-            @RequestParam(required=false) Integer page,@RequestParam(required=false) Integer size) {
-        return ok(slice(assets.buildings().stream().filter(b->status==null||status.equals(b.status())).toList(),page,size));
+            @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
+        return ok(assets.buildings(status, page, size));
     }
     @Operation(operationId="createBuilding")
     @PostMapping("/buildings")
@@ -37,8 +37,8 @@ class AssetController {
     @Operation(operationId="lifts")
     @GetMapping("/lifts")
     ApiResponse<List<LiftView>> lifts(@RequestParam(required=false) LiftStatus status,
-            @RequestParam(required=false) Integer page,@RequestParam(required=false) Integer size) {
-        return ok(slice(assets.lifts().stream().filter(l->status==null||status==l.currentStatus()).toList(),page,size));
+            @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
+        return ok(assets.lifts(status, page, size));
     }
     @Operation(operationId="liftCatalog")
     @GetMapping("/lift-catalog")
@@ -61,8 +61,8 @@ class AssetController {
     @Operation(operationId="contracts")
     @GetMapping("/amc-contracts")
     ApiResponse<List<AmcView>> contracts(@RequestParam(required=false) AmcStatus status,
-            @RequestParam(required=false) Integer page,@RequestParam(required=false) Integer size) {
-        return ok(slice(assets.contracts().stream().filter(a->status==null||status==a.status()).toList(),page,size));
+            @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
+        return ok(assets.contracts(status, page, size));
     }
     @Operation(operationId="createContract")
     @PostMapping("/amc-contracts")
@@ -74,7 +74,7 @@ class AssetController {
     }
 
     @Operation(operationId="getCustomerBuildings") @GetMapping("/customers/me/buildings")
-    ApiResponse<List<BuildingView>> customerBuildings(){return ok(assets.customerBuildings());}
+    ApiResponse<List<BuildingView>> customerBuildings(@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size){return ok(assets.customerBuildings(page, size));}
     @Operation(operationId="getCustomerBuilding") @GetMapping("/customers/me/buildings/{id}")
     ApiResponse<BuildingView> customerBuilding(@PathVariable Long id){return ok(assets.customerBuilding(id));}
     @Operation(operationId="createCustomerBuilding") @PostMapping("/customers/me/buildings")
@@ -84,7 +84,7 @@ class AssetController {
     @Operation(operationId="deactivateCustomerBuilding") @DeleteMapping("/customers/me/buildings/{id}")
     ApiResponse<Void> deactivateCustomerBuilding(@PathVariable Long id){assets.deactivateCustomerBuilding(id);return ApiResponse.success("Building deactivated",null,200);}
     @Operation(operationId="getCustomerLifts") @GetMapping("/customers/me/lifts")
-    ApiResponse<List<LiftView>> customerLifts(){return ok(assets.customerLifts());}
+    ApiResponse<List<LiftView>> customerLifts(@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size){return ok(assets.customerLifts(page, size));}
     @Operation(operationId="getCustomerLift") @GetMapping("/customers/me/lifts/{id}")
     ApiResponse<LiftView> customerLift(@PathVariable Long id){return ok(assets.customerLift(id));}
     @Operation(operationId="createCustomerLift") @PostMapping("/customers/me/lifts")
@@ -94,11 +94,5 @@ class AssetController {
     @Operation(operationId="deactivateCustomerLift") @DeleteMapping("/customers/me/lifts/{id}")
     ApiResponse<Void> deactivateCustomerLift(@PathVariable Long id){assets.deactivateCustomerLift(id);return ApiResponse.success("Lift deactivated",null,200);}
 
-    private <T> List<T> slice(List<T> rows,Integer page,Integer size) {
-        if(page==null&&size==null)return rows;
-        int index=page==null?0:page,limit=size==null?20:size;
-        if(index<0||limit<1||limit>100)throw new IllegalArgumentException("Invalid page");
-        return rows.stream().skip((long)index*limit).limit(limit).toList();
-    }
     private <T> ApiResponse<T> ok(T data) { return ApiResponse.success("Success", data, 200); }
 }
