@@ -25,7 +25,16 @@ class CanonicalUserDetailsService implements UserDetailsService {
         }
         String normalized = identity.trim().toLowerCase(Locale.ROOT);
         User user;
-        if (normalized.contains("@")) {
+        if (normalized.matches("\\d+")) {
+            // Access JWTs carry the canonical users.id as their subject. The
+            // realtime CONNECT path must resolve that identity without
+            // falling through to the email/phone login identifiers.
+            try {
+                user = users.findById(Long.valueOf(normalized)).orElseThrow(this::rejected);
+            } catch (NumberFormatException rejected) {
+                throw rejected();
+            }
+        } else if (normalized.contains("@")) {
             user = users.findByEmail(normalized).orElseThrow(this::rejected);
         } else {
             normalized = normalized.replaceAll("[\\s\\-()]", "");

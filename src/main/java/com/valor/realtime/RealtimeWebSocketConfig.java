@@ -36,6 +36,7 @@ public class RealtimeWebSocketConfig implements WebSocketMessageBrokerConfigurer
     }
     @Override public void configureMessageBroker(MessageBrokerRegistry registry) { registry.enableSimpleBroker("/topic", "/queue"); registry.setApplicationDestinationPrefixes("/app"); registry.setUserDestinationPrefix("/user"); }
     @Override public void registerStompEndpoints(StompEndpointRegistry registry) {
+        registry.setErrorHandler(new RealtimeStompErrorHandler());
         List<String> origins = Arrays.stream(allowedOrigins.split(",")).map(String::trim).filter(v -> !v.isBlank()).collect(Collectors.toList());
         registry.addEndpoint("/ws")
                 .setAllowedOrigins(origins.toArray(String[]::new))
