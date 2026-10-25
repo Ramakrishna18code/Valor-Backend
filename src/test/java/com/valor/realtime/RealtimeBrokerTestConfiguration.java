@@ -3,7 +3,7 @@ package com.valor.realtime;
 import com.valor.auth.JwtService;
 import java.util.Map;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
@@ -17,7 +17,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-@Configuration
+@TestConfiguration
 @EnableWebSocketMessageBroker
 class RealtimeBrokerTestConfiguration implements WebSocketMessageBrokerConfigurer {
     static final Map<String, UserDetails> USERS = Map.of(

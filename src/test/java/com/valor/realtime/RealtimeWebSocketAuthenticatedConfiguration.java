@@ -5,12 +5,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.apache.tomcat.websocket.server.WsSci;
 import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.boot.web.servlet.server.ServletWebServerFactory;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.web.servlet.DispatcherServlet;
@@ -26,7 +26,7 @@ import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 
-@Configuration
+@TestConfiguration
 @Import(RealtimeBrokerTestConfiguration.class)
 class RealtimeWebSocketAuthenticatedConfiguration {
     static final BlockingQueue<SessionConnectedEvent> CONNECTED = new LinkedBlockingQueue<>();

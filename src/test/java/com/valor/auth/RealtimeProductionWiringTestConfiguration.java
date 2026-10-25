@@ -19,7 +19,7 @@ import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactor
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.boot.web.servlet.server.ServletWebServerFactory;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 import org.springframework.messaging.simp.config.ChannelRegistration;
@@ -38,7 +38,7 @@ import org.springframework.web.servlet.handler.HandlerMappingIntrospector;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
-@Configuration
+@TestConfiguration
 @EnableWebSecurity
 @Import({AuthConfig.class, RealtimeWebSocketConfig.class})
 public class RealtimeProductionWiringTestConfiguration {
