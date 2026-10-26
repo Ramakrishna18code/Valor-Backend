@@ -14,7 +14,7 @@ class PartsController {
     PartsController(PartsService service) { this.service=service; }
     @GetMapping("/parts/categories") ApiResponse<List<CategoryView>> categories() { return ok(service.categories(false)); }
     @GetMapping("/parts") ApiResponse<Page<?>> catalog(@RequestParam(required=false) String q,@RequestParam(required=false) Long categoryId,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) { return ok(service.catalog(q,categoryId,false,PageRequest.of(page,size))); }
-    @GetMapping("/parts/{id}") ApiResponse<?> item(@PathVariable Long id) { return ok(service.item(id)); }
+    @GetMapping("/parts/{id}") ApiResponse<PartResponse> item(@PathVariable Long id) { return ok((PartResponse) service.item(id)); }
     @GetMapping("/customers/me/service-requests/{id}/parts-status") ApiResponse<List<CustomerStatusView>> customerStatus(@PathVariable Long id) { return ok(service.customerStatuses(id)); }
     @PostMapping("/technician/me/part-requests") ApiResponse<RequestView> submit(@Valid @RequestBody RequestWrite input) { return ok(service.submit(input)); }
     @GetMapping("/technician/me/part-requests") ApiResponse<Page<RequestView>> mine(@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) { return ok(service.myRequests(PageRequest.of(page,size))); }

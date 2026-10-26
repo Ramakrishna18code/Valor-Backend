@@ -4,9 +4,14 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.time.LocalDateTime;
 import java.util.List;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 final class PartsDtos {
     private PartsDtos() {}
+    interface PartResponse {
+        Long id();
+        String name();
+    }
     record CategoryWrite(@NotBlank @Size(max=120) String name, @Size(max=500) String description, Boolean active) {}
     record ItemWrite(@NotNull @Positive Long categoryId, @NotBlank @Size(max=180) String name, @NotBlank @Size(max=80) String sku,
             @Size(max=1000) String description, @NotBlank @Size(max=40) String unit, @PositiveOrZero Integer reorderThreshold,
@@ -17,11 +22,11 @@ final class PartsDtos {
     record DecisionWrite(@Size(max=1000) String reason) {}
     record CategoryView(Long id, String name, String description, boolean active) {}
     record ItemView(Long id, Long categoryId, String categoryName, String name, String sku, String description, String unit,
-            int quantityOnHand, int reorderThreshold, boolean active, String compatibilityMetadata, boolean available) {}
+            int quantityOnHand, int reorderThreshold, boolean active, String compatibilityMetadata, boolean available) implements PartResponse {}
     record CustomerItemView(Long id, Long categoryId, String categoryName, String name, String description, String unit,
-            boolean active, boolean available) {}
+            boolean active, boolean available) implements PartResponse {}
     record TechnicianItemView(Long id, Long categoryId, String categoryName, String name, String sku, String description,
-            String unit, boolean active, String compatibilityMetadata, boolean available) {}
+            String unit, boolean active, String compatibilityMetadata, boolean available) implements PartResponse {}
     record LineView(Long id, Long partItemId, String itemName, String sku, int requestedQuantity, int approvedQuantity, int issuedQuantity) {}
     record RequestView(Long id, Long serviceRequestId, Long technicianProfileId, String technicianName, PartRequestStatus status,
             String notes, LocalDateTime createdAt, LocalDateTime submittedAt, LocalDateTime approvedAt, LocalDateTime rejectedAt,

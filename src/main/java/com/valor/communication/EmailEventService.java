@@ -21,7 +21,8 @@ public class EmailEventService {
     private static final Set<CommunicationChannel> STANDARD = Set.of(CommunicationChannel.EMAIL, CommunicationChannel.SMS, CommunicationChannel.WHATSAPP);
     private static final Set<String> ENABLED_EMAIL_EVENTS = Set.of(
             "CUSTOMER_ACCOUNT_CREATED", "CUSTOMER_WELCOME", "INVOICE_CREATED", "PAYMENT_RESULT", "REFUND_RESULT",
-            "TECHNICIAN_ACCOUNT_CREATED", "TECHNICIAN_REGISTRATION_APPROVED", "TECHNICIAN_REGISTRATION_REJECTED");
+            "TECHNICIAN_ACCOUNT_CREATED", "TECHNICIAN_REGISTRATION_APPROVED", "TECHNICIAN_REGISTRATION_REJECTED",
+            "SERVICE_REQUEST_CREATED", "ADMIN_CRITICAL_SERVICE_EVENT", "TECHNICIAN_ASSIGNMENT");
 
     public EmailEventService(CommunicationService communication, CommunicationUserRepository users, ApplicationEventPublisher events) {
         this.communication = communication; this.users = users; this.events = events;

@@ -29,6 +29,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import jakarta.persistence.EntityManager;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import org.hibernate.Session;
 import org.hibernate.jdbc.Work;
 import com.zaxxer.hikari.HikariDataSource;
@@ -67,6 +68,7 @@ class CommercePaymentIntegrityTest {
     @Mock EntityManager entityManager;
     @Mock Session hibernateSession;
     @Mock Connection lockConnection;
+    @Mock DatabaseMetaData lockConnectionMetadata;
     @Mock HikariDataSource hikariDataSource;
     @Mock Query nativeQuery;
 
@@ -77,7 +79,7 @@ class CommercePaymentIntegrityTest {
     private Invoice invoice;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         service = new CommerceService(identities, customers, buildings, lifts, amcs, requests, assignments, reports,
                 payments, walletAccounts, walletTransactions, invoices, cashOtps, tickets, renewals, documents, refunds, webhookEvents, storage,
                 paymentGateway, audit, emails, pricing, encoder,
@@ -102,6 +104,8 @@ class CommercePaymentIntegrityTest {
         payment.setPurpose(PaymentPurpose.INVOICE);
         payment.setStatus(PaymentStatus.PROCESSING);
         lenient().when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        lenient().when(lockConnection.getMetaData()).thenReturn(lockConnectionMetadata);
+        lenient().when(lockConnectionMetadata.getDatabaseProductName()).thenReturn("MySQL");
 
         invoice = new Invoice();
         invoice.setId(21L);

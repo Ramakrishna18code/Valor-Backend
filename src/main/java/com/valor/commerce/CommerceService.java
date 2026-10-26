@@ -336,6 +336,43 @@ class CommerceService {
                 payment.getAmount(), payment.getCurrency(), payment.getStatus().name());
     }
 
+    @Transactional
+    PaymentView verifyRazorpayPayment(RazorpayPaymentVerification input) {
+        User actor = identities.actor();
+        if (!isCustomer(actor) && !isAdmin(actor)) throw denied();
+        if (!paymentGateway.configured()) throw new CommerceException(503, "Razorpay credentials are not configured");
+        PaymentRecord located = payments.findByRazorpayOrderId(input.razorpayOrderId())
+                .orElseThrow(() -> new CommerceException(400, "Razorpay order was not found"));
+        PaymentRecord payment = payments.lockById(located.getId())
+                .orElseThrow(() -> new CommerceException(400, "Payment was not found"));
+        if (!isAdmin(actor) && !payment.getCustomer().getUser().getId().equals(actor.getId())) throw denied();
+        if (!paymentGateway.validPaymentSignature(input.razorpayOrderId(), input.razorpayPaymentId(), input.razorpaySignature())) {
+            throw new CommerceException(400, "Razorpay payment signature is invalid");
+        }
+        payment.setRazorpayPaymentId(input.razorpayPaymentId());
+        JsonNode gatewayPayment = paymentGateway.lookupPayment(input.razorpayPaymentId());
+        String gatewayStatus = text(gatewayPayment, "status");
+        payment.setGatewayStatus(gatewayStatus);
+        payment.setGatewaySyncedAt(java.time.LocalDateTime.now());
+        if ("captured".equalsIgnoreCase(gatewayStatus)) {
+            if (!captureAmountMatchesInvoice(payment, gatewayPayment)) {
+                throw new CommerceException(400, "Razorpay payment amount does not match the invoice");
+            }
+            payment.setStatus(PaymentStatus.SUCCEEDED);
+            if (payment.getInvoice() != null) {
+                payment.getInvoice().setStatus(InvoiceStatus.PAID);
+                settleInstallationMilestone(payment);
+            }
+            settleWalletTopUp(payment);
+            activateRenewalAfterSettlement(payment);
+            activateAmcPurchaseAfterSettlement(payment);
+        } else if ("failed".equalsIgnoreCase(gatewayStatus)) {
+            payment.setStatus(PaymentStatus.FAILED);
+            payment.setFailureReason(text(gatewayPayment, "error_description"));
+        }
+        return view(payment);
+    }
+
     @Transactional(noRollbackFor = {CommerceException.class, HttpClientErrorException.class})
     AmcPurchaseCheckoutView createAmcPurchaseCheckout(AmcPurchaseCheckoutCreate input) {
         User actor = identities.actor();
@@ -712,6 +749,9 @@ class CommerceService {
 
     private boolean claimWebhookEvent(String eventId, String event, String orderId, String paymentId, String refundId) {
         if (entityManager != null) {
+            if (!supportsMysqlAdvisoryLocks()) {
+                return claimWebhookEventWithRepository(eventId, event, orderId, paymentId, refundId);
+            }
             String lockName = webhookClaimLockName(eventId);
             boolean acquired = false;
             boolean synchronizedRelease = false;
@@ -754,6 +794,10 @@ class CommerceService {
                 throw ex;
             }
         }
+        return claimWebhookEventWithRepository(eventId, event, orderId, paymentId, refundId);
+    }
+
+    private boolean claimWebhookEventWithRepository(String eventId, String event, String orderId, String paymentId, String refundId) {
         RazorpayWebhookEvent claimed = new RazorpayWebhookEvent();
         claimed.setEventId(eventId); claimed.setEventType(event); claimed.setRazorpayOrderId(orderId);
         claimed.setRazorpayPaymentId(paymentId); claimed.setRazorpayRefundId(refundId);
@@ -761,6 +805,18 @@ class CommerceService {
             webhookEvents.saveAndFlush(claimed);
             return true;
         } catch (DataIntegrityViolationException duplicate) {
+            return false;
+        }
+    }
+
+    private boolean supportsMysqlAdvisoryLocks() {
+        try {
+            final String[] product = new String[1];
+            entityManager.unwrap(Session.class).doWork(connection ->
+                    product[0] = connection.getMetaData().getDatabaseProductName());
+            return product[0] != null && product[0].toLowerCase(Locale.ROOT).contains("mysql");
+        } catch (Exception ex) {
+            log.warn("Unable to determine database advisory-lock support", ex);
             return false;
         }
     }

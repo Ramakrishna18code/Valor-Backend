@@ -17,4 +17,5 @@ interface PaymentGateway {
     JsonNode lookupRefund(String providerRefundId);
     default JsonNode listRefunds(String providerPaymentId) { return null; }
     boolean validWebhookSignature(String payload, String signature);
+    boolean validPaymentSignature(String orderId, String paymentId, String signature);
 }

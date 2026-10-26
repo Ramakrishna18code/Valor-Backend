@@ -97,6 +97,11 @@ class RazorpayGateway implements PaymentGateway {
         return constantEquals(hmac(payload, webhookSecret), signature);
     }
 
+    public boolean validPaymentSignature(String orderId, String paymentId, String signature) {
+        if (!configured() || signature == null || signature.isBlank()) return false;
+        return constantEquals(hmac(orderId + "|" + paymentId, keySecret), signature);
+    }
+
     private JsonNode post(String path, Map<String,Object> body) {
         return rest.post().uri(path).headers(h -> h.setBasicAuth(keyId, keySecret, StandardCharsets.UTF_8))
                 .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);

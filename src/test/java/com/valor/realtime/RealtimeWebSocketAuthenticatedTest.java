@@ -247,7 +247,13 @@ class RealtimeWebSocketAuthenticatedTest {
     }
 
     private void closeIfConnected(StompSession session) {
-        if (session != null && session.isConnected()) session.disconnect();
+        if (session != null && session.isConnected()) {
+            try {
+                session.disconnect();
+            } catch (org.springframework.messaging.MessageDeliveryException ignored) {
+                // The peer may close the socket while the test is cleaning up.
+            }
+        }
     }
 
     private static String describe(BlockingQueue<Message<?>> messages) {

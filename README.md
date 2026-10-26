@@ -170,7 +170,8 @@ client-facing endpoints use the `/api/v1` prefix and the standard
 - Admin transactions and reports: `/api/v1/admin/transactions`, `/api/v1/admin/reports/{type}`
 - Admin roles and audit: `/api/v1/admin/permissions`, `/api/v1/admin/roles`,
   `/api/v1/admin/audit-logs`
-- Razorpay checkout/webhook/refunds: `/api/v1/payments/razorpay/checkout`,
+- Razorpay checkout/verification/webhook/refunds: `/api/v1/payments/razorpay/checkout`,
+  `/api/v1/payments/razorpay/verify`,
   `/api/v1/webhooks/razorpay`, `/api/v1/payments/{id}/refunds`
 - Live technician tracking: `/api/v1/technician/me/jobs/{id}/location`,
   `/api/v1/customers/me/service-requests/{id}/technician-location`

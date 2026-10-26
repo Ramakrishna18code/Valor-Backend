@@ -121,7 +121,7 @@ class PartsMysqlSpringLifecycleTest {
         assertThrows(IllegalStateException.class, () -> service.approve(fixture.firstRequestId(), true, null));
         assertEquals(2, jdbc.queryForObject("select quantity_on_hand from part_items where id=?", Integer.class, fixture.itemId()));
         assertEquals(2, jdbc.queryForObject("select quantity_on_hand from part_items where id=?", Integer.class, secondItem));
-        assertEquals(0, jdbc.queryForObject("select count(*) from part_stock_movements where service_request_id=? and movement_type='RESERVE'", Integer.class, fixture.firstRequestId()));
+        assertEquals(0, jdbc.queryForObject("select count(*) from part_stock_movements where service_request_id=? and movement_type='RESERVE'", Integer.class, fixture.firstServiceRequestId()));
         assertEquals(0, jdbc.queryForObject("select count(*) from part_request_events where request_id=?", Integer.class, fixture.firstRequestId()));
         assertEquals(1, jdbc.queryForObject("select count(*) from service_request_part_requests where id=? and status='SUBMITTED'", Integer.class, fixture.firstRequestId()));
         assertEquals(2, jdbc.queryForObject("select count(*) from service_request_part_lines where request_id=? and approved_quantity=0", Integer.class, fixture.firstRequestId()));
@@ -131,7 +131,7 @@ class PartsMysqlSpringLifecycleTest {
         assertDoesNotThrow(() -> service.approve(fixture.firstRequestId(), true, null));
         assertEquals(1, jdbc.queryForObject("select quantity_on_hand from part_items where id=?", Integer.class, fixture.itemId()));
         assertEquals(1, jdbc.queryForObject("select quantity_on_hand from part_items where id=?", Integer.class, secondItem));
-        assertEquals(2, jdbc.queryForObject("select count(*) from part_stock_movements where service_request_id=? and movement_type='RESERVE'", Integer.class, fixture.firstRequestId()));
+        assertEquals(2, jdbc.queryForObject("select count(*) from part_stock_movements where service_request_id=? and movement_type='RESERVE'", Integer.class, fixture.firstServiceRequestId()));
         assertEquals(1, jdbc.queryForObject("select count(*) from service_request_part_requests where id=? and status='RESERVED'", Integer.class, fixture.firstRequestId()));
     }
 
@@ -153,8 +153,8 @@ class PartsMysqlSpringLifecycleTest {
             cancellation.get(15, TimeUnit.SECONDS);
             String status = jdbc.queryForObject("select status from service_request_part_requests where id=?", String.class, fixture.firstRequestId());
             int stock = jdbc.queryForObject("select quantity_on_hand from part_items where id=?", Integer.class, fixture.itemId());
-            int reserves = jdbc.queryForObject("select count(*) from part_stock_movements where service_request_id=? and movement_type='RESERVE'", Integer.class, fixture.firstRequestId());
-            int releases = jdbc.queryForObject("select count(*) from part_stock_movements where service_request_id=? and movement_type='RELEASE'", Integer.class, fixture.firstRequestId());
+            int reserves = jdbc.queryForObject("select count(*) from part_stock_movements where service_request_id=? and movement_type='RESERVE'", Integer.class, fixture.firstServiceRequestId());
+            int releases = jdbc.queryForObject("select count(*) from part_stock_movements where service_request_id=? and movement_type='RELEASE'", Integer.class, fixture.firstServiceRequestId());
             assertTrue(status.equals("RESERVED") || status.equals("CANCELLED"));
             if (status.equals("RESERVED")) { assertEquals(0, stock); assertEquals(1, reserves); assertEquals(0, releases); }
             else {
@@ -255,7 +255,7 @@ class PartsMysqlSpringLifecycleTest {
         long partA = partRequest(tag + " part a", requestA, tech);
         long partB = partRequest(tag + " part b", requestB, tech);
         line(partA, item, 1); line(partB, item, 1);
-        return new Fixture(item, partA, partB, techUser);
+        return new Fixture(item, requestA, partA, partB, techUser);
     }
 
     private long request(String serviceId, long customer, long lift, long admin, long tech) {
@@ -292,5 +292,5 @@ class PartsMysqlSpringLifecycleTest {
 
     private User admin() { User user = mock(User.class); when(user.getId()).thenReturn(1L); when(user.getRole()).thenReturn(Role.ADMIN); return user; }
     private User technicianUser(long id) { User user = mock(User.class); when(user.getId()).thenReturn(id); when(user.getRole()).thenReturn(Role.TECHNICIAN); return user; }
-    private record Fixture(long itemId, long firstRequestId, long secondRequestId, long technicianUserId) {}
+    private record Fixture(long itemId, long firstServiceRequestId, long firstRequestId, long secondRequestId, long technicianUserId) {}
 }

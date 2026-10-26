@@ -35,6 +35,10 @@ class CommerceController {
     ApiResponse<PaymentView> paymentStatus(@PathVariable Long id, @Valid @RequestBody PaymentStatusUpdate input) { return ok(service.updatePaymentStatus(id, input)); }
     @PostMapping("/payments/razorpay/checkout")
     ApiResponse<RazorpayCheckoutView> razorpayCheckout(@Valid @RequestBody RazorpayCheckoutCreate input) { return ok(service.createRazorpayCheckout(input)); }
+    @PostMapping("/payments/razorpay/verify")
+    ApiResponse<PaymentView> verifyRazorpayPayment(@Valid @RequestBody RazorpayPaymentVerification input) {
+        return ok(service.verifyRazorpayPayment(input));
+    }
     @PostMapping("/payments/razorpay/amc-purchase")
     ApiResponse<AmcPurchaseCheckoutView> amcPurchaseCheckout(@Valid @RequestBody AmcPurchaseCheckoutCreate input) { return ok(service.createAmcPurchaseCheckout(input)); }
     @PostMapping("/payments/cash/otp/request")

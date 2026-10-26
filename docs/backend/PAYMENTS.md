@@ -13,6 +13,7 @@ The configured currency is INR. Refunds are INR-only in the current commerce ser
 - **Implemented:** payable amounts and currency are taken from server-side invoice/pricing records. Client amounts, currency, tax, status, or ownership fields are not authoritative.
 - **Implemented:** Razorpay orders/payment references are stored on `payment_records`; provider order and payment identifiers have unique database constraints.
 - **Implemented:** checkout creation is not settlement. Provider acceptance, a client callback, or a manually supplied status does not mark an invoice paid.
+- **Implemented:** `POST /api/v1/payments/razorpay/verify` requires the checkout response fields and verifies the HMAC-SHA256 signature for `razorpay_order_id|razorpay_payment_id` with the server-only key secret before accepting a captured payment.
 - **Implemented:** verified Razorpay webhook signatures are required. Webhook event IDs are unique, so duplicate delivery is ignored. Stale, mismatched, pending, failed, or uncertain events do not produce successful settlement.
 - **Implemented:** Admin reconciliation can complete eligible payment outcomes after validating provider references and financial fields. It is not a substitute for signature verification when a signed webhook is available.
 - **Implemented:** verified successful payment settlement updates only the linked payment/invoice obligation. Linked AMC renewal activation and installation-milestone settlement are idempotent and tied to the validated association.
@@ -23,6 +24,8 @@ Gateway mode is explicit. `RAZORPAY_MODE` must be `test` or `live`; the configur
 ### Checkout state sequence
 
 `POST /api/v1/payments/razorpay/checkout` locks the eligible invoice, rejects an existing successful payment, and returns an existing order when a resumable local order ID is present. Otherwise it saves a local `PROCESSING` payment and flushes it before calling `PaymentGateway.createOrder`. A successful response stores the provider order ID, gateway status, and synchronization time. A definitive provider 4xx marks the payment `FAILED`; a timeout, transport error, malformed/empty response, or other non-definitive exception leaves local `PROCESSING` with review required. The transaction intentionally permits that state to be persisted while returning an error.
+
+After Razorpay Standard Checkout returns, the client posts `razorpay_order_id`, `razorpay_payment_id`, and `razorpay_signature` to `/api/v1/payments/razorpay/verify`. Signature mismatch, missing fields, unknown orders, and amount mismatches are rejected without marking the payment successful. The browser/native client only receives the public key ID; `RAZORPAY_KEY_SECRET` remains backend-only.
 
 Local `PROCESSING` state and blocking blind retries reduce duplicate-order risk. `PaymentGateway.lookupOrder(String razorpayOrderId)` retrieves an already identified provider order through `GET /orders/{id}`. Separately, `PaymentGateway.listOrders(String receipt, long from, long to, int count, int skip)` supports the bounded receipt-based discovery path described in Section 7. A receipt is a tracking field, not an assumed order-creation idempotency key. If provider order creation succeeds before the local order ID commits, automatic second-order creation is not implemented; manual review or the separately approved bounded discovery path is required.
 

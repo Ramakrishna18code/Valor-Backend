@@ -21,6 +21,9 @@ final class CommerceDtos {
     record RazorpayCheckoutCreate(@NotNull @Positive Long invoiceId) implements StrictInput {}
     record RazorpayCheckoutView(Long paymentId, Long invoiceId, String razorpayKeyId, String razorpayOrderId,
         BigDecimal amount, String currency, String status) {}
+    record RazorpayPaymentVerification(@NotBlank @Size(max=80) String razorpayOrderId,
+        @NotBlank @Size(max=80) String razorpayPaymentId,
+        @NotBlank @Size(max=128) String razorpaySignature) implements StrictInput {}
     record AmcPurchaseCheckoutCreate(@NotNull @Positive Long liftId, @NotBlank @Size(max=40) String planId) implements StrictInput {}
     record AmcPurchaseCheckoutView(Long paymentId, String razorpayKeyId, String razorpayOrderId,
         BigDecimal amount, String currency, String status, String planName, BigDecimal subtotal,
