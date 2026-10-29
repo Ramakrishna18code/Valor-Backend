@@ -72,6 +72,7 @@ class AuthConfig {
                         .requestMatchers("/api/v1/admin/dashboard/summary").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/admin/technicians").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/settings").hasAnyRole("ADMIN","SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/pricing-catalogue").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/admin/permissions", "/api/v1/admin/roles", "/api/v1/admin/roles/**").hasAuthority("PERM_ROLE_READ")
                         .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/admin/roles/*/permissions").hasAuthority("PERM_ROLE_WRITE")
                         .requestMatchers("/api/v1/admin/audit-logs", "/api/v1/admin/audit-logs/**").hasAuthority("PERM_AUDIT_READ")
