@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.*;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -19,6 +20,7 @@ public class PricingCatalogue {
     private final CatalogueDocument document;
     private final Map<String, Item> itemsByCode;
 
+    @Autowired
     public PricingCatalogue(ObjectMapper mapper) {
         try (InputStream input = new ClassPathResource(RESOURCE).getInputStream()) {
             CatalogueDocument loaded = mapper.readValue(input, CatalogueDocument.class);

@@ -10,7 +10,7 @@ This is a documentation-first audit. No financial flow consumes the JSON catalog
 
 The catalogue is loaded from `src/main/resources/pricing/pricing-catalogue.json` by `com.valor.pricing.PricingCatalogue`. Loading validates schema version `1`, INR currency, non-empty items, duplicate codes, basic required fields, positive fixed amounts, valid ranges, quotation-required entries, and AMC floor bounds.
 
-`PricingCatalogue` exposes exact case-sensitive lookup through `findByCode()` and `requireByCode()`, the document schema version through `schemaVersion()`, and approval gating through `approvedForFinancialUse()`. All current JSON items are marked `REQUIRES_OWNER_CONFIRMATION`, so `PricingSnapshot.from()` rejects every current catalogue item for authoritative financial use.
+`PricingCatalogue` exposes exact case-sensitive lookup through `findByCode()` and `requireByCode()`, the document schema version through `schemaVersion()`, and approval gating through `approvedForFinancialUse()`. The B2B display catalogue marks its approved price entries `APPROVED`; tax treatment remains `REQUIRES_BUSINESS_FINANCE_APPROVAL`, and this approval does not connect the catalogue to authoritative billing.
 
 `PricingSnapshot` is an immutable, catalogue-backed Java value object. Its constructor is private; `PricingSnapshot.from()` performs exact catalogue lookup and requires the loaded item to be approved before creating a snapshot. It validates INR, approved status, category/pricing-type compatibility, fixed/range/quote amount rules, AMC metadata, nonnegative tax amounts, and tax-basis requirements. It is not persisted and is not wired into invoices, payments, AMC orders, renewals, or installation milestones.
 
@@ -64,11 +64,44 @@ The catalogue is loaded from `src/main/resources/pricing/pricing-catalogue.json`
 - The catalogue item list is defensively copied and exposed as an unmodifiable list, so `read()` cannot diverge from exact-code lookup.
 - `floorBandMinimum` is explicitly the lower boundary of an AMC floor band. It is positive when present, but no customer-floor selection or upper-bound inference is implemented.
 - The current tax treatment remains `REQUIRES_BUSINESS_FINANCE_APPROVAL`; tax rates cannot be supplied against that unresolved treatment. No GST is calculated here.
-- The current catalogue contains only unapproved entries, so no current item can create an authoritative snapshot through `PricingSnapshot.from()`.
+- Approved catalogue entries can create a validated in-memory snapshot through `PricingSnapshot.from()`; no snapshot is persisted or consumed by current billing flows.
 
 These are integration-readiness limitations, not observed financial vulnerabilities in the current system, because no current invoice, payment, checkout, renewal, refund, or settlement flow calls the catalogue or snapshot.
 
 ## Proposed integration sequence and approval gates
+
+## B2B approved display selections
+
+The owner approved the catalogue entries for reference display. This approval is separate from tax-policy approval: the catalogue remains `REQUIRES_BUSINESS_FINANCE_APPROVAL` for tax treatment, and no existing financial flow consumes these values.
+
+Originally ranged entries use the following fixed reference selections. These are catalogue display values, not a migration of service, AMC, invoice, or checkout calculations.
+
+| Code | Original supplied range | Selected fixed reference | Selection rationale |
+|---|---:|---:|---|
+| `STANDARD_BREAKDOWN_CALLOUT` | ₹1,500–₹2,500 | ₹2,000 | Rounded midpoint |
+| `AFTER_HOURS_EMERGENCY_CALLOUT` | ₹2,500–₹4,000 | ₹3,250 | Rounded midpoint |
+| `DOOR_SENSOR_ADJUSTMENT` | ₹1,500–₹3,000 | ₹2,250 | Rounded midpoint |
+| `DOOR_ROLLER_REPLACEMENT` | ₹2,500–₹6,000 | ₹4,250 | Rounded midpoint |
+| `LANDING_DOOR_LOCK_REPLACEMENT` | ₹3,000–₹8,000 | ₹5,500 | Rounded midpoint |
+| `PUSH_BUTTON_REPLACEMENT` | ₹1,500–₹4,000 | ₹2,750 | Rounded midpoint |
+| `EMERGENCY_ALARM_REPAIR` | ₹1,500–₹4,000 | ₹2,750 | Rounded midpoint |
+| `ARD_BATTERY_REPLACEMENT` | ₹8,000–₹15,000 | ₹11,500 | Rounded midpoint |
+| `CONTACTOR_REPLACEMENT` | ₹3,000–₹8,000 | ₹5,500 | Rounded midpoint |
+| `LIFT_WIRING_REPAIR` | ₹2,500–₹10,000 | ₹6,250 | Rounded midpoint |
+| `DOOR_OPERATOR_REPAIR` | ₹8,000–₹25,000 | ₹16,500 | Rounded midpoint |
+| `CONTROLLER_REVIEW` | ₹8,000–₹40,000 | ₹24,000 | Rounded midpoint; exact scope remains case-assessed |
+| `PARTIAL_MODERNIZATION` | ₹50,000–₹1,50,000 | ₹1,00,000 | Rounded midpoint |
+| `CONTROLLER_ELECTRICAL_UPGRADES` | ₹1,50,000–₹4,00,000 | ₹2,75,000 | Rounded midpoint |
+| `CABIN_RENOVATION` | ₹40,000–₹1,50,000 | ₹95,000 | Rounded midpoint |
+| `DOOR_ALIGNMENT_ADJUSTMENT` | ₹1,500–₹3,500 | ₹2,500 | Rounded midpoint |
+| `LIFT_LEVELING_ADJUSTMENT` | ₹1,500–₹3,000 | ₹2,250 | Rounded midpoint |
+| `ELECTRICAL_FAULT_DIAGNOSIS` | ₹1,500–₹3,500 | ₹2,500 | Rounded midpoint |
+| `DETAILED_LIFT_SAFETY_INSPECTION` | ₹2,500–₹5,000 | ₹3,750 | Rounded midpoint |
+| `MAINTENANCE_AUDIT_REPORT` | ₹3,500–₹7,500 | ₹5,500 | Rounded midpoint; developer-selected wording |
+
+`PASSENGER_ENTRAPMENT_RESPONSE`, `TRACTION_ROPE_REPLACEMENT`, and `MOTOR_OR_DRIVE_REPLACEMENT` remain quotation-only and have no fabricated amount. Legacy AMC IDs `essential`, `extended`, and `long-term` remain separate from the approved annual package proposals.
+
+For display semantics, numeric `floorCount` remains authoritative. `G+0` means the ground-floor baseline, `G+1` means one floor above ground, and so on; G+ labels are alternate presentation of the same normalized numeric concept, not a second pricing input. The catalogue floor band is informational and does not introduce a live floor-to-price algorithm.
 
 ### Gate 1 — Catalogue contract
 

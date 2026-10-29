@@ -10,12 +10,21 @@ class PricingCatalogueTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private static final String TAX = PricingCatalogue.TAX_REQUIRES_FINANCE_APPROVAL;
 
-    @Test void loadsCandidateCatalogueFromClasspath() {
+    @Test void loadsApprovedCatalogueFromClasspath() {
         PricingCatalogue c = new PricingCatalogue(mapper);
         assertEquals(1, c.schemaVersion()); assertEquals("INR", c.read().currency());
         assertTrue(c.read().items().stream().anyMatch(i -> i.pricingType() == PricingCatalogue.PricingType.QUOTE_REQUIRED));
         assertThrows(UnsupportedOperationException.class, () -> c.read().items().clear());
-        assertTrue(c.requireByCode("GENERAL_LIFT_INSPECTION") != null);
+        assertTrue(c.approvedForFinancialUse(c.requireByCode("GENERAL_LIFT_INSPECTION")));
+    }
+
+    @Test void approvedCatalogueKeepsQuoteOnlyItemsWithoutAmounts() {
+        PricingCatalogue c = new PricingCatalogue(mapper);
+        assertTrue(c.read().items().stream().allMatch(i -> "APPROVED".equals(i.reviewStatus())));
+        assertTrue(c.read().items().stream().filter(i -> i.pricingType() == PricingCatalogue.PricingType.QUOTE_REQUIRED)
+                .allMatch(i -> i.fixedAmount() == null && i.minAmount() == null && i.maxAmount() == null && Boolean.TRUE.equals(i.quoteRequired())));
+        assertTrue(c.read().items().stream().filter(i -> i.pricingType() == PricingCatalogue.PricingType.FIXED)
+                .allMatch(i -> i.fixedAmount() != null && i.fixedAmount().signum() > 0));
     }
 
     @Test void rejectsDuplicateCodesInvalidRangesAndTaxTreatment() {
@@ -26,13 +35,14 @@ class PricingCatalogueTest {
         assertThrows(IllegalArgumentException.class, () -> PricingCatalogue.validate(new PricingCatalogue.CatalogueDocument(1, "INR", "UNKNOWN", List.of(fixed))));
     }
 
-    @Test void exactLookupAndApprovalAreFailClosed() {
+    @Test void exactLookupAndApprovalAreCatalogueBacked() {
         PricingCatalogue c = new PricingCatalogue(mapper);
         assertTrue(c.findByCode("GENERAL_LIFT_INSPECTION").isPresent()); assertTrue(c.findByCode("general_lift_inspection").isEmpty());
         assertThrows(PricingCatalogueException.class, () -> c.requireByCode("MISSING"));
         PricingCatalogue.Item external = new PricingCatalogue.Item("GENERAL_LIFT_INSPECTION", "ONE_TIME_SERVICE", "x", "", PricingCatalogue.PricingType.FIXED, "PER_JOB", null, null, null, BigDecimal.ONE, null, null, false, "APPROVED");
         assertFalse(c.approvedForFinancialUse(external));
-        assertThrows(IllegalArgumentException.class, () -> PricingSnapshot.from(c, "GENERAL_LIFT_INSPECTION", BigDecimal.ONE, null, null, null, null));
+        PricingSnapshot snapshot = PricingSnapshot.from(c, "GENERAL_LIFT_INSPECTION", null, null, null, BigDecimal.ZERO, null);
+        assertEquals("GENERAL_LIFT_INSPECTION", snapshot.catalogueCode());
     }
 
     @Test void factoryCreatesOnlyApprovedCatalogueSnapshots() {
