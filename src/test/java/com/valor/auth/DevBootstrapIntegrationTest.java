@@ -4,10 +4,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest
 @ActiveProfiles("dev")
@@ -24,14 +23,9 @@ import static org.junit.jupiter.api.Assertions.*;
  "dev.bootstrap.super-admin-password=Stage1OnlyPassword!"
 })
 class DevBootstrapIntegrationTest {
- @Autowired JdbcTemplate db; @Autowired PasswordEncoder encoder; @Autowired DevBootstrap bootstrap;
- @Test void createsOneHashedSuperAdminAndIsIdempotent() throws Exception {
+ @Autowired JdbcTemplate db;
+ @Test void doesNotSeedAutomaticallyDuringStartup() throws Exception {
    int before=db.queryForObject("select count(*) from users where email=? and role='SUPER_ADMIN'",Integer.class,"stage1.bootstrap@example.test");
-   assertEquals(1,before);
-   String first=db.queryForObject("select password_hash from users where email=?",String.class,"stage1.bootstrap@example.test");
-   assertNotEquals("Stage1OnlyPassword!",first); assertTrue(encoder.matches("Stage1OnlyPassword!",first));
-   bootstrap.run(null);
-   assertEquals(1,db.queryForObject("select count(*) from users where email=? and role='SUPER_ADMIN'",Integer.class,"stage1.bootstrap@example.test"));
-   assertEquals(first,db.queryForObject("select password_hash from users where email=?",String.class,"stage1.bootstrap@example.test"));
+   assertEquals(0,before);
  }
 }

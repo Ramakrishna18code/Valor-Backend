@@ -44,6 +44,7 @@ class TechnicianApplication {
     @Column(name = "otp_attempts_remaining", nullable = false) Integer otpAttemptsRemaining = 3;
     @Column(name = "otp_verified_at") LocalDateTime otpVerifiedAt;
     @Column(name = "reviewed_at") LocalDateTime reviewedAt;
+    @Column(name = "review_reason", length = 1000) String reviewReason;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "reviewed_by_user_id") User reviewedBy;
     @Column(name = "created_at", nullable = false) LocalDateTime createdAt;
     @Column(name = "updated_at", nullable = false) LocalDateTime updatedAt;

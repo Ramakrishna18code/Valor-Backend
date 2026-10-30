@@ -109,6 +109,17 @@
     <build>
         <plugins>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>**/WebhookMysqlSpringLifecycleTest.java</exclude>
+                        <exclude>**/PartsMysqlSpringLifecycleTest.java</exclude>
+                        <exclude>**/Db37WebhookLockEvictionTest.java</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
@@ -122,4 +133,37 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>mysql-integration</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <version>3.5.4</version>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <db37.integration.opted-in>true</db37.integration.opted-in>
+                            </systemPropertyVariables>
+                            <includes>
+                                <include>**/WebhookMysqlSpringLifecycleTest.java</include>
+                                <include>**/PartsMysqlSpringLifecycleTest.java</include>
+                                <include>**/Db37WebhookLockEvictionTest.java</include>
+                            </includes>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

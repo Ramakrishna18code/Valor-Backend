@@ -5,6 +5,7 @@ import com.valor.auth.*;
 import com.valor.communication.EmailEventService;
 import com.valor.pricing.PricingService;
 import com.valor.testsupport.Db37ConnectionCapture;
+import com.valor.testsupport.Db37MysqlTestHarness;
 import com.valor.testsupport.Db37SpringTestConfiguration;
 import com.valor.workflow.*;
 import java.nio.charset.StandardCharsets;
@@ -20,6 +21,7 @@ import org.hibernate.engine.jdbc.connections.internal.DatasourceConnectionProvid
 import org.hibernate.engine.jdbc.connections.spi.ConnectionProvider;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -48,6 +50,7 @@ import static org.mockito.Mockito.when;
         "dev.bootstrap.enabled=false",
         "dev.seed.sample-data-enabled=false"
 })
+@org.springframework.test.context.ActiveProfiles("mysql-integration")
 @Import(Db37SpringTestConfiguration.class)
 class Db37WebhookLockEvictionTest {
     @Autowired CommerceService service;
@@ -78,6 +81,11 @@ class Db37WebhookLockEvictionTest {
     @MockBean EmailEventService emails;
     @MockBean PricingService pricing;
 
+    @AfterEach
+    void removeOnlyThisRunWebhookRows() {
+        jdbc.update("delete from razorpay_webhook_events where event_id like ?", "db37-eviction-" + Db37MysqlTestHarness.activeRunId() + "-%");
+    }
+
     @Test
     void failedReleaseRetiresPhysicalLockConnection() throws Exception {
         assertSame(dataSource, flyway.getConfiguration().getDataSource());
@@ -90,7 +98,7 @@ class Db37WebhookLockEvictionTest {
         when(paymentGateway.validWebhookSignature(anyString(), anyString())).thenReturn(true);
         when(payments.findByRazorpayOrderId("order-db37")).thenReturn(Optional.empty());
 
-        String eventId = "db37-eviction-" + UUID.randomUUID();
+        String eventId = "db37-eviction-" + Db37MysqlTestHarness.activeRunId() + "-" + UUID.randomUUID();
         String lockName = "valor-webhook-" + UUID.nameUUIDFromBytes(eventId.getBytes(StandardCharsets.UTF_8));
         service.razorpayWebhook(payment(eventId), "sig");
 

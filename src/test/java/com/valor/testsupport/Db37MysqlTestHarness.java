@@ -12,12 +12,17 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -27,15 +32,27 @@ import java.util.function.Consumer;
 import javax.sql.DataSource;
 
 public final class Db37MysqlTestHarness {
+    private static final String OPT_IN_VARIABLE = "DB37_MYSQL_OPT_IN";
+    private static final String DISPOSABLE_CONFIRMATION_VARIABLE = "DB37_MYSQL_DISPOSABLE_CONFIRMATION";
+    private static final String RUN_ID_VARIABLE = "DB37_MYSQL_RUN_ID";
+    private static final String APPROVED_SCHEMA = "valor_backend_db37_gopi01";
     private static final String URL_VARIABLE = "DB37_MYSQL_URL";
     private static final String USERNAME_VARIABLE = "DB37_MYSQL_USERNAME";
     private static final String PASSWORD_VARIABLE = "DB37_MYSQL_PASSWORD";
+    private static final Object LEASE_MONITOR = new Object();
+    private static FileChannel leaseChannel;
+    private static FileLock lease;
+    private static String activeRunId;
 
     private Db37MysqlTestHarness() {
     }
 
     public static Configuration fromEnvironment() {
-        return new Configuration(required(URL_VARIABLE), required(USERNAME_VARIABLE), required(PASSWORD_VARIABLE));
+        requireExplicitOptIn();
+        Configuration configuration = new Configuration(required(URL_VARIABLE), required(USERNAME_VARIABLE), required(PASSWORD_VARIABLE), required(RUN_ID_VARIABLE));
+        requireDisposableAcknowledgement(configuration);
+        acquireWorkspaceLease(configuration.runId());
+        return configuration;
     }
 
     public static Optional<Configuration> fromEnvironmentIfOptedIn() {
@@ -43,7 +60,14 @@ public final class Db37MysqlTestHarness {
         String username = System.getenv(USERNAME_VARIABLE);
         String password = System.getenv(PASSWORD_VARIABLE);
         if (url == null && username == null && password == null) return Optional.empty();
-        return Optional.of(new Configuration(requiredValue(URL_VARIABLE, url), requiredValue(USERNAME_VARIABLE, username), requiredValue(PASSWORD_VARIABLE, password)));
+        return Optional.of(fromEnvironment());
+    }
+
+    public static String activeRunId() {
+        synchronized (LEASE_MONITOR) {
+            if (activeRunId == null) throw new IllegalStateException("DB37 integration run has not been initialized");
+            return activeRunId;
+        }
     }
 
     public static HikariDataSource createDataSource(Configuration configuration) {
@@ -130,6 +154,24 @@ public final class Db37MysqlTestHarness {
             if (!result.next() || !configuration.schema().equals(result.getString(1))) {
                 throw new SQLException("DB37 connected schema does not match the approved disposable schema");
             }
+            var metadata = connection.getMetaData();
+            if (!metadata.getDatabaseProductName().toLowerCase(Locale.ROOT).contains("mysql")) {
+                throw new SQLException("DB37 requires a MySQL database product");
+            }
+            if (!configuration.schema().equals(connection.getCatalog())) {
+                throw new SQLException("DB37 connected catalog does not match the approved disposable schema");
+            }
+            URI configured = Configuration.parseLocalEndpoint(configuration.jdbcUrl());
+            URI connected;
+            try {
+                connected = new URI(metadata.getURL().substring("jdbc:".length()));
+            } catch (URISyntaxException | RuntimeException failure) {
+                throw new SQLException("DB37 connected JDBC URL is not a valid MySQL identity", failure);
+            }
+            if (!"localhost".equalsIgnoreCase(connected.getHost()) || connected.getPort() != 3306
+                    || !configured.getPath().equals(connected.getPath())) {
+                throw new SQLException("DB37 connected JDBC identity does not match the approved local endpoint");
+            }
         }
     }
 
@@ -147,9 +189,9 @@ public final class Db37MysqlTestHarness {
         });
     }
 
-    public record Configuration(String jdbcUrl, String username, String password) {
+    public record Configuration(String jdbcUrl, String username, String password, String runId) {
         public Configuration {
-            validate(jdbcUrl, username, password);
+            validate(jdbcUrl, username, password, runId);
         }
 
         public String schema() {
@@ -157,9 +199,12 @@ public final class Db37MysqlTestHarness {
             return withoutParameters.substring(withoutParameters.lastIndexOf('/') + 1);
         }
 
-        private static void validate(String jdbcUrl, String username, String password) {
+        private static void validate(String jdbcUrl, String username, String password, String runId) {
             if (blank(jdbcUrl) || blank(username) || blank(password)) {
                 throw new IllegalArgumentException("DB37 MySQL configuration is incomplete");
+            }
+            if (blank(runId) || !runId.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")) {
+                throw new IllegalArgumentException("DB37 requires a UUID run id");
             }
             if (!jdbcUrl.startsWith("jdbc:mysql://") || !jdbcUrl.contains("?")) {
                 throw new IllegalArgumentException("DB37 requires a parameterized MySQL JDBC URL");
@@ -171,8 +216,8 @@ public final class Db37MysqlTestHarness {
                 throw new IllegalArgumentException("DB37 requires the localhost:3306 endpoint");
             }
             validateQuery(endpoint.getRawQuery());
-            if (!"valor_backend_db37_gopi01".equals(new ConfigurationUnchecked(jdbcUrl).schema())) {
-                throw new IllegalArgumentException("DB37 requires the valor_backend_db37_gopi01 schema");
+            if (!APPROVED_SCHEMA.equals(new ConfigurationUnchecked(jdbcUrl).schema())) {
+                throw new IllegalArgumentException("DB37 requires the approved disposable schema");
             }
             String schema = new ConfigurationUnchecked(jdbcUrl).schema();
             if (!schema.matches("valor_backend_db37_[a-z0-9]+")) {
@@ -263,6 +308,52 @@ public final class Db37MysqlTestHarness {
 
     private static String required(String name) {
         return requiredValue(name, System.getenv(name));
+    }
+
+    private static void requireExplicitOptIn() {
+        if (!"true".equalsIgnoreCase(System.getProperty("db37.integration.opted-in", System.getenv(OPT_IN_VARIABLE)))) {
+            throw new IllegalStateException("DB37 requires explicit integration-test opt-in");
+        }
+    }
+
+    private static void requireDisposableAcknowledgement(Configuration configuration) {
+        if (!APPROVED_SCHEMA.equals(System.getenv(DISPOSABLE_CONFIRMATION_VARIABLE))) {
+            throw new IllegalStateException("DB37 requires explicit acknowledgement of the approved disposable schema");
+        }
+        if (!APPROVED_SCHEMA.equals(configuration.schema())) {
+            throw new IllegalStateException("DB37 schema identity is not approved");
+        }
+    }
+
+    private static void acquireWorkspaceLease(String runId) {
+        synchronized (LEASE_MONITOR) {
+            if (activeRunId != null && !activeRunId.equals(runId)) {
+                throw new IllegalStateException("DB37 already has an active run in this workspace");
+            }
+            if (activeRunId != null) return;
+            try {
+                Path lockPath = Path.of("target", "db37-mysql-integration.lock").toAbsolutePath().normalize();
+                Files.createDirectories(lockPath.getParent());
+                leaseChannel = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                lease = leaseChannel.tryLock();
+                if (lease == null) throw new IllegalStateException("DB37 integration is already running in this workspace");
+                activeRunId = runId;
+                Runtime.getRuntime().addShutdownHook(new Thread(Db37MysqlTestHarness::releaseWorkspaceLease, "db37-test-lease-release"));
+            } catch (java.nio.channels.OverlappingFileLockException | java.io.IOException failure) {
+                releaseWorkspaceLease();
+                throw new IllegalStateException("DB37 could not acquire the workspace integration-test lease", failure);
+            }
+        }
+    }
+
+    private static void releaseWorkspaceLease() {
+        synchronized (LEASE_MONITOR) {
+            try { if (lease != null && lease.isValid()) lease.release(); } catch (java.io.IOException ignored) { }
+            try { if (leaseChannel != null && leaseChannel.isOpen()) leaseChannel.close(); } catch (java.io.IOException ignored) { }
+            lease = null;
+            leaseChannel = null;
+            activeRunId = null;
+        }
     }
 
     private static String requiredValue(String name, String value) {

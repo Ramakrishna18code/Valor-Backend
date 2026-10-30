@@ -16,6 +16,7 @@ class TechnicianApplicationController {
     private final TechnicianApplicationService service;
     TechnicianApplicationController(TechnicianApplicationService service) { this.service = service; }
     @PostMapping ApiResponse<TechnicianApplicationService.Created> create(@Valid @RequestBody Create input) { return ApiResponse.success("Technician application created", service.create(input), 201); }
+    @PostMapping("/status-login") ApiResponse<TechnicianApplicationService.Created> statusLogin(@Valid @RequestBody StatusLogin input) { return ApiResponse.success("Application status access granted", service.statusLogin(input.email(), input.password()), 200); }
     @PostMapping("/{id}/otp/send") ApiResponse<TechnicianApplicationService.OtpView> sendOtp(@PathVariable Long id, @RequestHeader("X-Application-Token") String token) { return ApiResponse.success("OTP sent", service.sendOtp(id, token), 200); }
     @PostMapping("/{id}/otp/verify") ApiResponse<TechnicianApplicationService.ApplicationView> verifyOtp(@PathVariable Long id, @RequestHeader("X-Application-Token") String token, @Valid @RequestBody Otp input) { return ApiResponse.success("Mobile verified", service.verifyOtp(id, token, input.otp()), 200); }
     @PutMapping("/{id}") ApiResponse<TechnicianApplicationService.ApplicationView> update(@PathVariable Long id, @RequestHeader("X-Application-Token") String token, @Valid @RequestBody Update input) { return ApiResponse.success("Application updated", service.update(id, token, input), 200); }
@@ -23,13 +24,15 @@ class TechnicianApplicationController {
     @GetMapping("/{id}") ApiResponse<TechnicianApplicationService.ApplicationView> read(@PathVariable Long id, @RequestHeader("X-Application-Token") String token) { return ApiResponse.success("Application", service.read(id, token), 200); }
     @PostMapping("/{id}/submit") ApiResponse<TechnicianApplicationService.ApplicationView> submit(@PathVariable Long id, @RequestHeader("X-Application-Token") String token) { return ApiResponse.success("Application submitted", service.submit(id, token), 200); }
     record Create(@NotBlank @Size(max=160) String fullName,@NotBlank @Email String email,@NotBlank @Size(max=20) String phone,@io.swagger.v3.oas.annotations.media.Schema(accessMode=io.swagger.v3.oas.annotations.media.Schema.AccessMode.WRITE_ONLY,format="password") @NotBlank @Size(max=72) String password) implements StrictInput {}
+    record StatusLogin(@NotBlank @Email String email,@NotBlank @Size(max=72) String password) implements StrictInput {}
     record Otp(@NotBlank @Size(min=4,max=4) String otp) implements StrictInput {}
     record Update(@Size(max=80) String experience, @Size(max=160) String specialization,
             @Size(max=500) String liftBrands, @Size(max=500) String certifications,
             @Size(max=160) String highestQualification, @Size(max=160) String handsOnExperience,
-            @Size(max=500) String preferredLocations, Boolean willingToWorkAtHeights,
+            @Size(max=500) @Pattern(regexp="(?i)^[a-z][a-z .'-]{1,79}(?:\\s*,\\s*(?:[a-z][a-z .'-]{1,79}|[0-9]{6}))*$|^[0-9]{6}$", message="Preferred locations must be city names or 6-digit pincodes separated by commas") String preferredLocations, Boolean willingToWorkAtHeights,
             @Size(max=80) String travelAvailability, @Size(max=1000) String additionalNotes,
-            @Size(max=20) String aadhaarNumber, @Size(max=40) String drivingLicenseNumber) implements StrictInput {}
+            @Pattern(regexp="^$|^[0-9]{4}\\s?[0-9]{4}\\s?[0-9]{4}$", message="Aadhaar number must contain 12 digits") String aadhaarNumber,
+            @Pattern(regexp="^$|(?i)^[a-z]{2}\\s?-?\\d{2}\\s?-?\\d{4}\\s?-?\\d{7}$", message="Driving licence number format is invalid") String drivingLicenseNumber) implements StrictInput {}
     record Meeting(@NotBlank String mode, java.time.LocalDateTime meetingAt, String meetingUrl, String meetingPhone, String meetingLocation, @jakarta.validation.constraints.DecimalMin("-90") @jakarta.validation.constraints.DecimalMax("90") java.math.BigDecimal meetingLatitude, @jakarta.validation.constraints.DecimalMin("-180") @jakarta.validation.constraints.DecimalMax("180") java.math.BigDecimal meetingLongitude, String meetingMapUrl, String notes) implements StrictInput {}
     interface StrictInput { @JsonAnySetter default void rejectUnknown(String key, JsonNode value) { throw new IllegalArgumentException("Unsupported field"); } }
 }

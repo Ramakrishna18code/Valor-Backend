@@ -12,116 +12,43 @@ import com.valor.workflow.ServiceRequest;
 import com.valor.workflow.TechnicianAssignment;
 import com.valor.workflow.WorkflowServiceType;
 import jakarta.persistence.EntityManager;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.HashSet;
 import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Set;
 
 @Component
 @Profile("dev & !prod")
-class DevBootstrap implements ApplicationRunner {
+class DevBootstrap {
   private final UserRepo users; private final PasswordEncoder encoder;
   private final EntityManager em;
-  private final boolean enabled; private final String configuredEmail; private final String configuredPassword;
-  private final boolean sampleDataEnabled; private final String samplePassword;
-    private final boolean pruneUsers;
-  DevBootstrap(UserRepo users, PasswordEncoder encoder, EntityManager em,
-      @Value("${dev.bootstrap.enabled:false}") boolean enabled,
-      @Value("${dev.bootstrap.super-admin-email:}") String configuredEmail,
-      @Value("${dev.bootstrap.super-admin-password:}") String configuredPassword,
-      @Value("${dev.seed.sample-data-enabled:false}") boolean sampleDataEnabled,
-      @Value("${dev.seed.sample-password:}") String samplePassword,
-      @Value("${dev.bootstrap.prune-users:false}") boolean pruneUsers){this.users=users;this.encoder=encoder;this.em=em;this.enabled=enabled;this.configuredEmail=configuredEmail;this.configuredPassword=configuredPassword;this.sampleDataEnabled=sampleDataEnabled;this.samplePassword=samplePassword;this.pruneUsers=pruneUsers;}
-  @Transactional
-  public void run(ApplicationArguments args){
-    if (!enabled) return;
-    String email=configuredEmail; String password=configuredPassword;
-    if(email==null||email.isBlank()||password==null||password.isBlank()) throw new IllegalStateException("Development bootstrap requires configured environment credentials");
-    email=email.trim().toLowerCase(Locale.ROOT); final String normalizedEmail=email; final String configuredPassword=password;
-    if (pruneUsers) pruneUnexpectedDevData(normalizedEmail);
-    User u=users.findByEmail(normalizedEmail).orElseGet(()->{User n=new User();n.setEmail(normalizedEmail);n.setRole(Role.SUPER_ADMIN);n.setPasswordHash(encoder.encode(configuredPassword));return users.save(n);});
-    if(u.getPasswordHash()==null){u.setPasswordHash(encoder.encode(configuredPassword));users.save(u);}
-    ensureSuperAdmin("rk4053727@gmail.com", configuredPassword);
-    ensureAdmin("rk4053728@gmail.com", configuredPassword);
-    ensureAdmin("rk4053729@gmail.com", configuredPassword);
-    if (sampleDataEnabled) seedSampleData(u);
-  }
+  DevBootstrap(UserRepo users, PasswordEncoder encoder, EntityManager em){this.users=users;this.encoder=encoder;this.em=em;}
 
-  private void ensureSuperAdmin(String email, String password) {
-    String normalized = email.trim().toLowerCase(Locale.ROOT);
-    User user = users.findByEmail(normalized).orElseGet(() -> {
-      User created = new User(); created.setEmail(normalized); created.setRole(Role.SUPER_ADMIN); created.setPasswordHash(encoder.encode(password));
-      return users.save(created);
-    });
-    if (user.getPasswordHash() == null) { user.setPasswordHash(encoder.encode(password)); users.save(user); }
-  }
-
-  private void ensureAdmin(String email, String password) {
-    String normalized = email.trim().toLowerCase(Locale.ROOT);
-    User user = users.findByEmail(normalized).orElseGet(() -> {
-      User created = new User(); created.setEmail(normalized); created.setRole(Role.ADMIN); created.setPasswordHash(encoder.encode(password));
-      return users.save(created);
-    });
-    user.setRole(Role.ADMIN);
-    if (user.getPasswordHash() == null) user.setPasswordHash(encoder.encode(password));
-    users.save(user);
-  }
-
-  private void pruneUnexpectedDevData(String configuredAdminEmail) {
-    Set<String> allowedEmails = new HashSet<>();
-    allowedEmails.add(configuredAdminEmail);
-    allowedEmails.addAll(Set.of("rk4053727@gmail.com", "rk4053728@gmail.com", "rk4053729@gmail.com"));
-    allowedEmails.addAll(Set.of(
-        "tech.arjun@valor.local", "tech.meera@valor.local", "tech.kabir@valor.local",
-        "mgopichakradhar@gmail.com", "gopichowdary1603@gmail.com", "gopimandepudi1603@gmail.com"));
-
-    em.createNativeQuery("SET FOREIGN_KEY_CHECKS=0").executeUpdate();
-    try {
-      @SuppressWarnings("unchecked")
-      var tables = em.createNativeQuery("select table_name from information_schema.tables where table_schema=database()").getResultList();
-      Set<String> preservedTables = Set.of("flyway_schema_history", "users", "customer_profiles", "technician_profiles", "roles", "permissions", "role_permissions");
-      for (Object table : tables) {
-        String tableName = table.toString();
-        if (!preservedTables.contains(tableName)) em.createNativeQuery("delete from `" + tableName + "`").executeUpdate();
-      }
-        em.createNativeQuery("delete from customer_profiles where user_id in (select id from users where email is null or lower(email) not in (:emails))")
-          .setParameter("emails", allowedEmails).executeUpdate();
-        em.createNativeQuery("delete from technician_profiles where user_id in (select id from users where email is null or lower(email) not in (:emails))")
-          .setParameter("emails", allowedEmails).executeUpdate();
-        em.createNativeQuery("delete from users where email is null or lower(email) not in (:emails)").setParameter("emails", allowedEmails).executeUpdate();
-    } finally {
-      em.createNativeQuery("SET FOREIGN_KEY_CHECKS=1").executeUpdate();
-    }
-  }
-
-  private void seedSampleData(User admin) {
-    String password=samplePassword==null||samplePassword.isBlank()?configuredPassword:samplePassword;
-    if(password==null||password.isBlank()) throw new IllegalStateException("Development sample seed requires a password");
+  void seedSampleData(User admin, String password) {
+    if(password==null||password.isBlank()) throw new IllegalStateException("Development sample seed requires an operator-supplied password");
     TechnicianProfile[] technicians = new TechnicianProfile[] {
-        technician("tech.arjun@valor.local","VAL-T001","North Bengaluru","Traction lifts","AVAILABLE",password),
-        technician("tech.meera@valor.local","VAL-T002","South Bengaluru","Hydraulic lifts","AVAILABLE",password),
-        technician("tech.kabir@valor.local","VAL-T003","East Bengaluru","Door systems","BUSY",password)
+        technician("technician1@valor-demo.test","VAL-T001","North Bengaluru","Traction lifts","AVAILABLE",password),
+        technician("technician2@valor-demo.test","VAL-T002","South Bengaluru","Hydraulic lifts","AVAILABLE",password),
+        technician("technician3@valor-demo.test","VAL-T003","East Bengaluru","Door systems","BUSY",password)
     };
     seedTechnicianLocations(technicians);
     CustomerProfile[] customers = new CustomerProfile[] {
-        customer("mgopichakradhar@gmail.com","+919810000001","M. Gopi Chakradhar","Gopi Residency","Indiranagar, Bengaluru",password),
-        customer("gopichowdary1603@gmail.com","+919810000002","Gopi Chowdary","Chowdary Heights","Koramangala, Bengaluru",password),
-        customer("gopimandepudi1603@gmail.com","+919810000003","Gopi Mandeepudi","Mandeepudi House","Whitefield, Bengaluru",password)
+        customer("customer1@valor-demo.test","+919810000001","Demo Customer One","Demo Residency One","Indiranagar, Bengaluru",password),
+        customer("customer2@valor-demo.test","+919810000002","Demo Customer Two","Demo Residency Two","Koramangala, Bengaluru",password),
+        customer("customer3@valor-demo.test","+919810000003","Demo Customer Three","Demo Residency Three","Whitefield, Bengaluru",password)
     };
     seedAnanyaCustomerDemo(admin, customers[0], technicians, password);
-    for (int i=0;i<2;i++) seedCustomerAssetsAndRequest(admin, customers[i], technicians[i], i+1);
+    for (int i=0;i<3;i++) {
+      seedCustomerAssetsAndRequest(admin, customers[i], technicians[i], i + 1);
+      seedCustomerAssetsAndRequest(admin, customers[i], technicians[(i + 1) % technicians.length], i + 4);
+    }
     seedParts(technicians, customers);
   }
 

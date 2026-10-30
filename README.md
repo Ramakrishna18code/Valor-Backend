@@ -1,5 +1,4 @@
 # Valor Lift Services & Maintenance Backend
-
 ## Overview
 This Spring Boot 3 backend provides the REST API and persistence layer for the Valor Lift Services & Maintenance platform.
 It covers:
@@ -548,3 +547,9 @@ Building coordinates are returned on job request DTOs. Existing customer buildin
 ## Location model
 
 Valor uses permanent building coordinates, private technician default/profile coordinates, and one immutable technician job-start location (`startLatitude`, `startLongitude`, `startedAt`). Arrival estimates are backend-authoritative and static; they use a simple configured estimate speed and the building point, without routing providers. Technician navigation opens external Google Maps. Continuous foreground/background tracking, live customer markers, geofences, polylines, and dynamic route ETA are not part of the active product flow.
+# ⚠️ DESTRUCTIVE LOCAL DEVELOPMENT DATABASE RESET — NEVER RUN IN PRODUCTION OR STAGING
+The local development reset and demo-seed operations are destructive. They are intended only for a positively verified loopback development database and must never be run against production, staging, a shared database, or an unknown target. They remove explicitly classified customer and technician demo data and associated local records/files while preserving Admin and Super Admin identities, roles, permissions, shared master data, pricing configuration, and Flyway history.
+
+These operations require an explicit action, verified local database identity, a separate expected database name, an exact confirmation phrase, and an operator-supplied local-only demo password. They are not automatic application-startup behavior and must never be implemented as a Flyway migration. Demo accounts use the reserved `@valor-demo.test` namespace; their credentials are local-only and must never be deployed or written here. Local uploads are temporary development storage, not production-grade durable storage. Production must explicitly configure private durable storage.
+
+Before using `preview`, `reset-and-seed`, `seed-if-empty`, or `delete-demo-seed`, verify the active local profile and target database privately. `preview` is read-only. `reset-and-seed` clears only the explicitly classified local customer/technician dataset before creating the deterministic demo dataset. `seed-if-empty` never clears existing data. `delete-demo-seed` selects only the exact reserved demo identities and their verified dependents. Associated files are cleaned by storage key only; an entire storage root must never be recursively deleted.
