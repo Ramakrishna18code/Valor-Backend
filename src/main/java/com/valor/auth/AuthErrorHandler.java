@@ -43,6 +43,12 @@ class AuthErrorHandler {
   ResponseEntity<ApiResponse<Map<String,Object>>> malformed(HttpMessageNotReadableException ex) {
     return ResponseEntity.badRequest().body(new ApiResponse<>(false, "Malformed request", Map.of(), 400));
   }
+  @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+  ResponseEntity<ApiResponse<Map<String,Object>>> status(org.springframework.web.server.ResponseStatusException ex) {
+    int code = ex.getStatusCode().value();
+    String message = ex.getReason() == null || ex.getReason().isBlank() ? "Request could not be processed" : ex.getReason();
+    return ResponseEntity.status(code).body(new ApiResponse<>(false, message, Map.of(), code));
+  }
   @ExceptionHandler(Exception.class)
   ResponseEntity<ApiResponse<Map<String,Object>>> error(Exception ignored) {
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new ApiResponse<>(false, "Internal server error", Map.of(), 500));

@@ -26,11 +26,12 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @SpringBootTest(properties = {
+        "spring.config.import=",
         "email.enabled=false",
         "smtp.enabled=false",
         "spring.task.scheduling.enabled=false"
 })
-@ActiveProfiles("prod")
+@ActiveProfiles("mysql-integration")
 class WebhookMysqlSpringLifecycleTest {
     @Autowired CommerceService service;
     @Autowired JdbcTemplate jdbc;

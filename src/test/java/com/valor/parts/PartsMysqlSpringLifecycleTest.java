@@ -21,12 +21,13 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @SpringBootTest(properties = {
+        "spring.config.import=",
         "email.enabled=false",
         "smtp.enabled=false",
         "spring.task.scheduling.enabled=false",
         "logging.level.root=WARN"
 })
-@ActiveProfiles("prod")
+@ActiveProfiles("mysql-integration")
 class PartsMysqlSpringLifecycleTest {
     @Autowired PartsService service;
     @Autowired JdbcTemplate jdbc;

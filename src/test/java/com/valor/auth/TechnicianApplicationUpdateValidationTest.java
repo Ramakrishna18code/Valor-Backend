@@ -70,4 +70,23 @@ class TechnicianApplicationUpdateValidationTest {
         assertFalse(violations.isEmpty());
         violations.forEach(violation -> assertFalse(violation.getMessage().contains(sensitive)));
     }
+
+    @Test
+    void acceptsCityAndPincodeLocationsAndStructuredIdentityNumbers() {
+        var update = new TechnicianApplicationController.Update(
+                null, null, null, null, null, null, "Hyderabad, Secunderabad, 500001", null,
+                null, null, "1234 5678 9012", "KA 01 2023 0012345");
+
+        assertTrue(validator.validate(update).isEmpty());
+    }
+
+    @Test
+    void rejectsMalformedIdentityNumbersAndLocations() {
+        var updates = Stream.of(
+                new TechnicianApplicationController.Update(null, null, null, null, null, null, "Hyderabad, 50001", null, null, null, "12345678901", "KA0120230012345"),
+                new TechnicianApplicationController.Update(null, null, null, null, null, null, "Hyderabad", null, null, null, "123456789012", "KARNATAKA-123"),
+                new TechnicianApplicationController.Update(null, null, null, null, null, null, "Hyderabad, !@#", null, null, null, null, null));
+
+        updates.forEach(update -> assertFalse(validator.validate(update).isEmpty()));
+    }
 }
