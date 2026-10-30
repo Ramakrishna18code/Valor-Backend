@@ -8,6 +8,8 @@ Valor uses persisted `invoices`, `payment_records`, `payment_refunds`, `razorpay
 
 The configured currency is INR. Refunds are INR-only in the current commerce service. No currency conversion is performed.
 
+The informational pricing catalogue at `GET /api/v1/admin/pricing-catalogue` and its `PricingSnapshot` foundation are not payment authorities in this phase. Existing service, AMC, renewal, installation, invoice, checkout, tax, refund, cash-OTP, and settlement calculations continue to use their current backend-owned flows. Candidate catalogue entries require owner approval and must not be used to recalculate or rewrite historical financial records.
+
 ## 2. Checkout and confirmation
 
 - **Implemented:** payable amounts and currency are taken from server-side invoice/pricing records. Client amounts, currency, tax, status, or ownership fields are not authoritative.
