@@ -8,10 +8,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -81,6 +83,30 @@ class RuntimeSecurityTest {
                 .andExpect(status().isUnauthorized()).andReturn().getResponse().getContentAsString(), 401);
         assertEnvelope(mvc.perform(post("/api/v1/auth/logout"))
                 .andExpect(status().isUnauthorized()).andReturn().getResponse().getContentAsString(), 401);
+        assertEnvelope(mvc.perform(get("/api/v1/admin/dashboard/summary"))
+                .andExpect(status().isUnauthorized()).andReturn().getResponse().getContentAsString(), 401);
+    }
+
+    @Test void onboardingPasswordChangeRequiresItsSingleUseToken() throws Exception {
+        mvc.perform(post("/api/v1/auth/set-password").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"invalid-reset-token\",\"password\":\"New-password-123\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test void customerAdminAndTechnicianLoginArePublicWithoutJwt() throws Exception {
+        User customer = user(Role.CUSTOMER);
+        User admin = user(Role.ADMIN);
+        User technician = user(Role.TECHNICIAN);
+
+        assertLoginSucceeds("/api/v1/auth/login/customer", "identity", customer);
+        assertLoginSucceeds("/api/v1/auth/login/admin", "email", admin);
+        assertLoginSucceeds("/api/v1/auth/login/technician", "email", technician);
+    }
+
+    @Test void onlyOneSecurityChainAndJwtFilterAreActive() {
+        assertEquals(1, context.getBeansOfType(SecurityFilterChain.class).size());
+        assertEquals(1, context.getBeansOfType(JwtFilter.class).size());
     }
 
     @Test void customerCannotAccessAdminRoutes() throws Exception {
@@ -144,6 +170,16 @@ class RuntimeSecurityTest {
     private void assertRejected(String identity) {
         assertEquals("Authentication failed", assertThrows(UsernameNotFoundException.class,
                 () -> details.loadUserByUsername(identity)).getMessage());
+    }
+
+    private void assertLoginSucceeds(String path, String identityField, User user) throws Exception {
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(java.util.Map.of(
+                                identityField, user.getEmail(),
+                                "password", "Test-only-runtime-password"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.accessToken").isNotEmpty());
     }
 
     private void assertEnvelope(String body, int status) throws Exception {

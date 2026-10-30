@@ -5,6 +5,7 @@ import com.valor.response.ApiResponse;
 import java.util.Arrays;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpMethod;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.context.annotation.Bean;
@@ -63,8 +64,19 @@ class AuthConfig {
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**",
                                 "/api/v1/health", "/api/v1/health/", "/error").permitAll()
                         .requestMatchers("/api/v1/webhooks/razorpay").permitAll()
-                        .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login/**",
-                                "/api/v1/auth/otp/**", "/api/v1/auth/refresh", "/api/v1/auth/set-password").permitAll()
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/v1/auth/register",
+                                "/api/v1/auth/register/email/start",
+                                "/api/v1/auth/register/email/resend",
+                                "/api/v1/auth/register/email/verify",
+                                "/api/v1/auth/login/customer",
+                                "/api/v1/auth/login/admin",
+                                "/api/v1/auth/login/technician",
+                                "/api/v1/auth/otp/send",
+                                "/api/v1/auth/otp/resend",
+                                "/api/v1/auth/otp/verify",
+                                "/api/v1/auth/refresh",
+                                "/api/v1/auth/set-password").permitAll()
                         .requestMatchers("/api/v1/technician-applications", "/api/v1/technician-applications/**").permitAll()
                         .requestMatchers("/api/v1/admin/technician-applications", "/api/v1/admin/technician-applications/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/customers/**").hasRole("CUSTOMER")
