@@ -4,6 +4,7 @@ import com.valor.audit.AuditableEntity;
 import com.valor.enums.RoleName;
 import com.valor.enums.TechnicianAvailabilityStatus;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -35,6 +36,7 @@ public class Technician extends AuditableEntity {
     private String employeeId;
 
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Schema(accessMode = Schema.AccessMode.WRITE_ONLY, format = "password")
     private String password;
     private String phone;
 

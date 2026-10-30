@@ -2,6 +2,7 @@ package com.valor.entity;
 
 import com.valor.audit.AuditableEntity;
 import com.valor.enums.RoleName;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -30,6 +31,7 @@ public class Admin extends AuditableEntity {
     @Column(unique = true)
     private String employeeId;
 
+    @Schema(accessMode = Schema.AccessMode.WRITE_ONLY, format = "password")
     @Column(nullable = false)
     private String password;
 

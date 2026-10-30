@@ -38,9 +38,16 @@ public class RealtimeChannelInterceptor implements ExecutorChannelInterceptor {
                 Authentication auth = (Authentication) accessor.getUser(); String destination = accessor.getDestination();
                 if (!StringUtils.hasText(destination)) throw new IllegalArgumentException("Subscription destination required");
                 if (auth == null || !auth.isAuthenticated()) throw new IllegalArgumentException("Authentication required");
-                boolean admin = auth != null && auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("ROLE_SUPER_ADMIN"));
-                if (destination.equals("/topic/admin") && !admin) throw new IllegalArgumentException("Subscription not allowed");
-                if (!destination.equals("/topic/admin") && !destination.equals("/user/queue/valor-events")) throw new IllegalArgumentException("Subscription not allowed");
+                boolean admin = auth != null && auth.getAuthorities().stream().anyMatch(a -> {
+                    String authority = a.getAuthority();
+                    return "ROLE_ADMIN".equals(authority) || "ADMIN".equals(authority)
+                        || "ROLE_SUPER_ADMIN".equals(authority) || "SUPER_ADMIN".equals(authority);
+                });
+                boolean adminTopic = "/topic/admin".equals(destination);
+                boolean userEventsTopic = "/user/queue/valor-events".equals(destination)
+                        || destination.matches("^/user/[^/]+/queue/valor-events$");
+                if (adminTopic && !admin) throw new IllegalArgumentException("Subscription not allowed");
+                if (!adminTopic && !userEventsTopic) throw new IllegalArgumentException("Subscription not allowed");
             }
             if (StompCommand.SEND.equals(accessor.getCommand())) {
                 String destination = accessor.getDestination();

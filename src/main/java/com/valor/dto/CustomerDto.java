@@ -1,11 +1,12 @@
 package com.valor.dto;
 
+import com.valor.enums.CustomerStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
-import com.valor.enums.CustomerStatus;
 
 @Data
 public class CustomerDto {
@@ -18,6 +19,7 @@ public class CustomerDto {
     @Email(message = "Email should be valid")
     private String email;
 
+    @Schema(accessMode = Schema.AccessMode.WRITE_ONLY, format = "password")
     @NotBlank(message = "Password is required")
     @Size(min = 6, max = 100, message = "Password must be at least 6 characters")
     private String password;

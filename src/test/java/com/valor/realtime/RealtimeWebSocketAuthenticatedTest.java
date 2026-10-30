@@ -176,10 +176,17 @@ class RealtimeWebSocketAuthenticatedTest {
             Map<String, String> serverSessions = new HashMap<>();
             subscribeAndRecord("3", adminSession, adminHandler, serverSessions, "/topic/admin");
             subscribeAndRecord("4", superAdminSession, superAdminHandler, serverSessions, "/topic/admin");
+            System.out.println("serverSessions=" + serverSessions);
+            System.out.println("user3=" + context.getBean(SimpUserRegistry.class).getUser("3"));
+            System.out.println("user4=" + context.getBean(SimpUserRegistry.class).getUser("4"));
             assertNotNull(context.getBean(SimpUserRegistry.class).getUser("3").getSession(serverSessions.get("3")));
             assertNotNull(context.getBean(SimpUserRegistry.class).getUser("4").getSession(serverSessions.get("4")));
 
             context.getBean(SimpMessagingTemplate.class).convertAndSend("/topic/admin", "admin-event");
+            System.out.println("adminErrors=" + adminHandler.errors + ", superAdminErrors=" + superAdminHandler.errors);
+            System.out.println("adminPayloads=" + adminHandler.payloads + ", superAdminPayloads=" + superAdminHandler.payloads);
+            System.out.println("subscribed=" + RealtimeWebSocketAuthenticatedConfiguration.SUBSCRIBED);
+            System.out.println("inbound=" + RealtimeWebSocketAuthenticatedConfiguration.INBOUND);
             assertEquals("admin-event", adminHandler.payloads.poll(5, TimeUnit.SECONDS));
             assertEquals("admin-event", superAdminHandler.payloads.poll(5, TimeUnit.SECONDS));
         } finally {

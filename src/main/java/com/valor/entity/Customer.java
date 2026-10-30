@@ -3,6 +3,7 @@ package com.valor.entity;
 import com.valor.audit.AuditableEntity;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.valor.enums.CustomerStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.valor.enums.RoleName;
 import jakarta.persistence.*;
 import lombok.*;
@@ -36,6 +37,7 @@ public class Customer extends AuditableEntity {
     private String email;
 
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Schema(accessMode = Schema.AccessMode.WRITE_ONLY, format = "password")
     @Column(nullable = false)
     private String password;
 

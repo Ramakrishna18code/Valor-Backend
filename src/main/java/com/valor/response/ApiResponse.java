@@ -1,10 +1,12 @@
 package com.valor.response;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 
 public class ApiResponse<T> {
     private boolean success;
     private String message;
+    @Schema(description = "Always null for operations without a payload; the envelope message reports the outcome.", nullable = true)
     private T data;
     private LocalDateTime timestamp;
     private int status;

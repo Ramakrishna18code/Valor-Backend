@@ -12,6 +12,7 @@ import com.valor.workflow.ServiceRequest;
 import com.valor.workflow.TechnicianAssignment;
 import com.valor.workflow.WorkflowServiceType;
 import jakarta.persistence.EntityManager;
+import org.springframework.boot.ApplicationArguments;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -31,8 +32,13 @@ class DevBootstrap {
   private final EntityManager em;
   DevBootstrap(UserRepo users, PasswordEncoder encoder, EntityManager em){this.users=users;this.encoder=encoder;this.em=em;}
 
+  public void run(ApplicationArguments args) {
+    // Dev bootstrap is intentionally opt-in and never creates fallback credentials.
+    // The component acts as a manual bootstrap API for explicit developer workflows.
+  }
+
   void seedSampleData(User admin, String password) {
-    if(password==null||password.isBlank()) throw new IllegalStateException("Development sample seed requires an operator-supplied password");
+    if (password == null || password.isBlank()) throw new IllegalStateException("Development sample seed requires an operator-supplied password");
     TechnicianProfile[] technicians = new TechnicianProfile[] {
         technician("technician1@valor-demo.test","VAL-T001","North Bengaluru","Traction lifts","AVAILABLE",password),
         technician("technician2@valor-demo.test","VAL-T002","South Bengaluru","Hydraulic lifts","AVAILABLE",password),
@@ -479,3 +485,7 @@ class DevBootstrap {
     };
   }
 }
+
+
+
+
