@@ -20,6 +20,16 @@ class ServiceCodeController {
 class TechnicianServiceCodeController {
     private final ServiceCodeService serviceCodes;
     TechnicianServiceCodeController(ServiceCodeService serviceCodes) { this.serviceCodes = serviceCodes; }
+    @GetMapping("/{requestId}/service-code")
+    ApiResponse<TechnicianServiceCodeVerificationView> state(@PathVariable Long requestId, @RequestParam ServiceCodeAction action) {
+        ServiceCodeService.CodeView result = serviceCodes.technicianState(requestId, action);
+        return ApiResponse.success("Success", result == null ? null : new TechnicianServiceCodeVerificationView(result.liftId(), result.status(), result.lockedUntil(), result.attempts(), result.verifiedAt()), 200);
+    }
+    @PostMapping("/{requestId}/service-code/request")
+    ApiResponse<TechnicianServiceCodeVerificationView> send(@PathVariable Long requestId, @RequestParam ServiceCodeAction action) {
+        ServiceCodeService.CodeView result = serviceCodes.sendToCustomer(requestId, action);
+        return ApiResponse.success("Code sent to customer Notifications", new TechnicianServiceCodeVerificationView(result.liftId(), result.status(), result.lockedUntil(), result.attempts(), result.verifiedAt()), 200);
+    }
     @PostMapping("/{requestId}/service-code/verify")
     ApiResponse<TechnicianServiceCodeVerificationView> verify(@PathVariable Long requestId,
             @Valid @RequestBody TechnicianServiceCodeVerificationRequest input) {

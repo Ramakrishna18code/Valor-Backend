@@ -1,6 +1,7 @@
 package com.valor.workflow;
 
 import com.valor.assets.Lift;
+import com.valor.notifications.NotificationService;
 import com.valor.auth.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -28,16 +29,18 @@ class ServiceCodeService {
     private final AssetIdentityAccess identities;
     private final WorkflowIdentityAccess profiles;
     private final PasswordEncoder encoder;
+    private final NotificationService notifications;
     private final SecureRandom random = new SecureRandom();
     private final byte[] encryptionKey;
 
     ServiceCodeService(LiftServiceCodeRepository codes, ServiceCodeVerificationRepository verifications,
             RequestRepository requests, AssignmentRepository assignments, AssetIdentityAccess identities,
-            WorkflowIdentityAccess profiles, PasswordEncoder encoder,
+            WorkflowIdentityAccess profiles, PasswordEncoder encoder, NotificationService notifications,
             WorkflowLiftRepository liftRepository, @Value("${valor.service-code.secret:change-this-service-code-secret}") String secret) {
         this.codes = codes; this.verifications = verifications; this.requests = requests;
         this.assignments = assignments; this.identities = identities; this.profiles = profiles; this.encoder = encoder;
         this.liftRepository = liftRepository;
+        this.notifications = notifications;
         try { this.encryptionKey = MessageDigest.getInstance("SHA-256").digest(secret.getBytes(StandardCharsets.UTF_8)); }
         catch (Exception error) { throw new IllegalStateException("Unable to initialize service-code encryption", error); }
     }
@@ -83,6 +86,41 @@ class ServiceCodeService {
                 verification == null ? null : verification.lockedUntil, verification == null ? 0 : (int) verification.attempts, verification == null ? null : verification.verifiedAt);
     }
 
+    CodeView technicianState(Long requestId, ServiceCodeAction action) {
+        TechnicianProfile technician = profiles.technician(identities.actor());
+        var assignment = assignments.active(requestId).orElseThrow(() -> new WorkflowException(409, "Active assignment required"));
+        if (!assignment.getTechnician().getId().equals(technician.getId())) throw denied();
+        CodeView state = stateForRequest(requestId, action, false);
+        if (state == null) return null;
+        var verification = verifications.lock(requestId, technician.getId(), action).orElse(null);
+        LocalDateTime now = LocalDateTime.now();
+        String status = verification != null && verification.lockedUntil != null && verification.lockedUntil.isAfter(now)
+                ? "LOCKED" : verification != null && verification.verifiedAt != null ? "VERIFIED"
+                : "UNAVAILABLE".equals(state.status()) ? "UNAVAILABLE" : "AVAILABLE";
+        return new CodeView(state.liftId(), null, status, verification == null ? null : verification.lockedUntil,
+                verification == null ? 0 : (int) verification.attempts, verification == null ? null : verification.verifiedAt);
+    }
+
+    CodeView sendToCustomer(Long requestId, ServiceCodeAction action) {
+        // Authorize the current technician before looking up or sending any code.
+        CodeView current = technicianState(requestId, action);
+        ServiceRequest request = requests.lockById(requestId).orElseThrow(() -> new WorkflowException(404, "Service request not found"));
+        if (current == null) throw new WorkflowException(409, "This job does not use a lift service code");
+        if ((action == ServiceCodeAction.START && request.getStatus() != RequestStatus.REACHED_SITE)
+                || (action == ServiceCodeAction.COMPLETE && request.getStatus() != RequestStatus.TESTING)) {
+            throw new WorkflowException(409, "Verification is not available in this state");
+        }
+        if ("VERIFIED".equals(current.status())) return current;
+        CodeView customerCode = stateForRequest(requestId, action, true);
+        if (customerCode == null || customerCode.code() == null) throw new WorkflowException(409, "Service code is unavailable");
+        notifications.createSystem(request.getCustomer().getUser().getId(),
+                action == ServiceCodeAction.START ? "Arrival service code" : "Completion service code",
+                "Service code: " + customerCode.code() + ". Request #" + requestId
+                        + (action == ServiceCodeAction.START ? ". Share only after your technician arrives." : ". Share only after testing is complete."));
+        return technicianState(requestId, action);
+    }
+
+    @Transactional(noRollbackFor = WorkflowException.class)
     CodeView verify(Long requestId, ServiceCodeAction action, String submitted) {
         User actor = identities.actor();
         TechnicianProfile technician = profiles.technician(actor);
