@@ -37,7 +37,7 @@ class ArrivalOtpService {
         otp.customerVisibleCode = code; otp.customerVisibleUntil = otp.expiresAt;
         otps.saveAndFlush(otp);
         notifications.createSystem(request.getCustomer().getUser().getId(), "Start-work code ready",
-            "Arrival OTP: " + code + ". Request #" + request.getId() + ". Valid for 10 minutes. Share it only after the technician reaches your site.");
+            "A start-work code is ready for request #" + request.getId() + ". Retrieve it in the app after the technician reaches your site. Valid for 10 minutes.");
         return state(otp, false);
     }
 

@@ -1,6 +1,8 @@
 package com.valor.realtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.awaitility.Awaitility.await;
+import org.springframework.messaging.simp.broker.SimpleBrokerMessageHandler;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -103,6 +105,7 @@ class RealtimeWebSocketAuthenticatedTest {
         assertNotNull(subscribed, diagnostics(handler));
         String serverSessionId = SimpMessageHeaderAccessor.getSessionId(subscribed.getMessage().getHeaders());
         assertNotNull(serverSessionId);
+        awaitBrokerSubscription(subscribed);
 
         SimpUser user = context.getBean(SimpUserRegistry.class).getUser("1");
         assertNotNull(user);
@@ -240,10 +243,26 @@ class RealtimeWebSocketAuthenticatedTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         do {
             event = RealtimeWebSocketAuthenticatedConfiguration.SUBSCRIBED.poll(100, TimeUnit.MILLISECONDS);
-        } while (event != null && !userId.equals(event.getUser().getName()) && System.nanoTime() < deadline);
+        } while ((event == null || !userId.equals(event.getUser().getName())) && System.nanoTime() < deadline);
         assertNotNull(event);
         assertEquals(userId, event.getUser().getName());
         serverSessions.put(userId, SimpMessageHeaderAccessor.getSessionId(event.getMessage().getHeaders()));
+        awaitBrokerSubscription(event);
+    }
+
+    private void awaitBrokerSubscription(SessionSubscribeEvent event) {
+        // SessionSubscribeEvent observes receipt, not completion of the broker's async registration.
+        String sessionId = SimpMessageHeaderAccessor.getSessionId(event.getMessage().getHeaders());
+        String destination = SimpMessageHeaderAccessor.getDestination(event.getMessage().getHeaders());
+        UserDestinationResult resolved = context.getBean(UserDestinationResolver.class).resolveDestination(event.getMessage());
+        var targets = resolved == null ? java.util.Set.of(destination) : resolved.getTargetDestinations();
+        var registry = context.getBean(SimpleBrokerMessageHandler.class).getSubscriptionRegistry();
+        await().atMost(5, TimeUnit.SECONDS).until(() -> targets.stream().allMatch(target -> {
+            SimpMessageHeaderAccessor headers = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+            headers.setDestination(target);
+            return registry.findSubscriptions(MessageBuilder.createMessage("probe", headers.getMessageHeaders()))
+                    .containsKey(sessionId);
+        }));
     }
 
     private void assertRejectedSubscription(StompSession session, ClientHandler handler, String destination) throws Exception {
