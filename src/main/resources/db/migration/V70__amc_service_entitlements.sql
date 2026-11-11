@@ -1,0 +1,38 @@
+CREATE TABLE amc_service_entitlements (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY,
+ contract_id BIGINT NOT NULL,
+ service_type VARCHAR(40) NOT NULL,
+ scope VARCHAR(20) NOT NULL,
+ covered BOOLEAN NOT NULL,
+ included_visit_limit INT NULL,
+ effective_from DATE NOT NULL,
+ effective_until DATE NOT NULL,
+ note VARCHAR(500) NULL,
+ updated_by_user_id BIGINT NOT NULL,
+ updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+ CONSTRAINT uk_amc_entitlement UNIQUE(contract_id,service_type,scope),
+ CONSTRAINT fk_amc_entitlement_contract FOREIGN KEY(contract_id) REFERENCES amc_contracts(id),
+ CONSTRAINT fk_amc_entitlement_user FOREIGN KEY(updated_by_user_id) REFERENCES users(id),
+ CONSTRAINT ck_amc_entitlement_dates CHECK(effective_until>=effective_from),
+ CONSTRAINT ck_amc_entitlement_limit CHECK(included_visit_limit IS NULL OR included_visit_limit>0),
+ CONSTRAINT ck_amc_entitlement_scope CHECK(scope IN ('VISIT','LABOUR','PARTS'))
+);
+CREATE TABLE service_request_coverage_decisions (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY,
+ service_request_id BIGINT NOT NULL,
+ version_number INT NOT NULL,
+ contract_id BIGINT NULL,
+ entitlement_id BIGINT NULL,
+ service_type VARCHAR(40) NOT NULL,
+ scope VARCHAR(20) NOT NULL,
+ service_date DATE NOT NULL,
+ outcome VARCHAR(20) NOT NULL,
+ reason VARCHAR(500) NOT NULL,
+ decided_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+ CONSTRAINT uk_request_coverage_scope_version UNIQUE(service_request_id,scope,version_number),
+ CONSTRAINT fk_request_coverage_request FOREIGN KEY(service_request_id) REFERENCES service_requests(id),
+ CONSTRAINT fk_request_coverage_contract FOREIGN KEY(contract_id) REFERENCES amc_contracts(id),
+ CONSTRAINT fk_request_coverage_entitlement FOREIGN KEY(entitlement_id) REFERENCES amc_service_entitlements(id),
+ CONSTRAINT ck_request_coverage_outcome CHECK(outcome IN ('COVERED','EXCLUDED','UNCONFIRMED')),
+ CONSTRAINT ck_request_coverage_scope CHECK(scope IN ('VISIT','LABOUR','PARTS'))
+);

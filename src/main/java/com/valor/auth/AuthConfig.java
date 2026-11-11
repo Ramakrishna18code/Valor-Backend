@@ -98,8 +98,14 @@ class AuthConfig {
                         .requestMatchers("/api/v1/admin/checklists", "/api/v1/admin/checklists/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/service-visits/**", "/api/v1/admin/visit-change-requests/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/transactions", "/api/v1/admin/transactions/**", "/api/v1/admin/transactions.csv",
-                                "/api/v1/admin/reports/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                                "/api/v1/admin/reconciliation/invoices", "/api/v1/admin/reports/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/installations/**", "/api/v1/admin/config/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/protection/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/payments/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/company-cash/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/finance-workflow/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/amc-contracts/*/entitlements", "/api/v1/admin/service-requests/*/coverage-decisions").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/quotations/**", "/api/v1/admin/service-requests/*/quotation-drafts").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/payments/*/status", "/api/v1/invoices/*/status",
                                 "/api/v1/support-tickets/*/status", "/api/v1/amc-renewal-requests/*/quote", "/api/v1/amc-renewal-requests/*/status")

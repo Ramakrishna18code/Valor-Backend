@@ -27,6 +27,10 @@ class PaymentRefund {
     @Column(name = "second_approved_at") private LocalDateTime secondApprovedAt;
     @Column(name = "approval_reason", length = 500) private String approvalReason;
     @Column(name = "second_approval_reason", length = 500) private String secondApprovalReason;
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "rejected_by_user_id")
+    private User rejectedBy;
+    @Column(name = "rejected_at") private LocalDateTime rejectedAt;
+    @Column(name = "rejection_reason", length = 500) private String rejectionReason;
     @Column(name = "amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
     @Column(name = "currency", nullable = false, length = 3)

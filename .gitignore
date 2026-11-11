@@ -4,3 +4,5 @@ data/
 *.log
 .env
 application-local.properties
+# Local test emails contain verification codes.
+.local-mailbox/

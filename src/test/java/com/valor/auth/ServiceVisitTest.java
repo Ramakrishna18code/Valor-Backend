@@ -87,6 +87,23 @@ class ServiceVisitTest {
         assertEquals("2031-01-11", call(post("/api/v1/admin/visit-change-requests/" + changeId + "/approve"), fixture.admin(), Map.of(), 200).get("scheduledDate").asText());
     }
 
+    @Test void customerSubmissionKeyReturnsTheOriginalRequest() throws Exception {
+        Fixture fixture = fixture();
+        long liftId = call(get("/api/v1/service-requests/" + fixture.requestId()), fixture.customer(), null, 200)
+                .get("request").get("liftId").asLong();
+        Map<String, Object> input = new HashMap<>(Map.of(
+                "liftId", liftId,
+                "title", "Duplicate-safe request",
+                "description", "Retryable submission",
+                "serviceType", "BREAKDOWN",
+                "submissionKey", "submission-key-123"));
+
+        long first = call(post("/api/v1/service-requests"), fixture.customer(), input, 200).get("request").get("id").asLong();
+        long second = call(post("/api/v1/service-requests"), fixture.customer(), input, 200).get("request").get("id").asLong();
+
+        assertEquals(first, second);
+    }
+
     @Test void adminCreatesTypedVisitAndCustomerSeesSafeProjection() throws Exception {
         Fixture fixture = fixture();
         JsonNode created = call(post(visitPath(fixture)), fixture.admin(), visit(fixture, "2031-01-10", "10:00:00", "11:00:00"), 200);
@@ -179,7 +196,7 @@ class ServiceVisitTest {
         assertEquals("ACCEPTED", call(post("/api/v1/service-requests/" + later.requestId() + "/assignments/" +
                 call(get("/api/v1/service-requests/" + later.requestId()), later.admin(), null, 200).at("/activeAssignment/id").asLong() + "/accept"), later.technician(), null, 200).at("/request/status").asText());
         call(post("/api/v1/service-requests/" + later.requestId() + "/status"), later.technician(), Map.of("toStatus", "ON_THE_WAY", "notes", "Travel"), 200);
-        call(post("/api/v1/service-requests/" + later.requestId() + "/status"), later.customer(), Map.of("toStatus", "CANCELLED", "notes", "Changed plans"), 200);
+        call(post("/api/v1/service-requests/" + later.requestId() + "/status"), later.customer(), Map.of("toStatus", "CANCELLED", "notes", "Changed plans"), 409);
         Fixture arrived = fixture();
         long assignment = call(post("/api/v1/service-requests/" + arrived.requestId() + "/assignments"), arrived.admin(), Map.of("technicianProfileId", arrived.assignedTechnicianId()), 200).at("/activeAssignment/id").asLong();
         call(post("/api/v1/service-requests/" + arrived.requestId() + "/assignments/" + assignment + "/accept"), arrived.technician(), null, 200);

@@ -50,12 +50,16 @@ class PaymentRecord {
     private String gatewayStatus;
     @Column(name = "gateway_synced_at")
     private LocalDateTime gatewaySyncedAt;
+    @Column(name = "verified_at")
+    private LocalDateTime verifiedAt;
     @Column(name = "failure_reason", length = 500)
     private String failureReason;
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
-    @PrePersist void pre() { createdAt = LocalDateTime.now(); updatedAt = createdAt; }
-    @PreUpdate void upd() { updatedAt = LocalDateTime.now(); }
+    @Transient private PaymentStatus loadedStatus;
+    @PostLoad void loaded(){loadedStatus=status;}
+    @PrePersist void pre() { createdAt = LocalDateTime.now(); updatedAt = createdAt; if(status==PaymentStatus.SUCCEEDED)verifiedAt=createdAt; }
+    @PreUpdate void upd() { updatedAt = LocalDateTime.now(); if(verifiedAt==null&&loadedStatus!=status&&status==PaymentStatus.SUCCEEDED)verifiedAt=updatedAt; }
 }

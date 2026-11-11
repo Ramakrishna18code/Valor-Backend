@@ -15,12 +15,12 @@ public final class WorkflowDtos {
     }
     public record CreateRequest(
             @Schema(description="Admin-only; required for admin creation. CUSTOMER submissions are rejected; customer ownership comes from JWT.") @Positive Long customerProfileId, @Positive Long liftId,
-            @NotBlank @Size(max = 200) String title, @NotBlank String description,
+            @NotBlank @Size(max = 200) String title, String description,
             @Size(max = 100) String issueCategory, RequestPriority priority,
             @NotNull WorkflowServiceType serviceType,
             @Size(max = 2000) String customerRemarks, LocalDate preferredVisitDate,
             @Size(max = 80) String preferredTimeSlot, @Schema(description="Admin-only input. CUSTOMER submissions are rejected.") @Size(max = 2000) String internalAdminNotes,
-            @PositiveOrZero Integer estimatedCompletionMinutes) implements StrictWrite {}
+            @PositiveOrZero Integer estimatedCompletionMinutes, @Size(min = 8, max = 80) String submissionKey) implements StrictWrite {}
     public record AssignRequest(@NotNull @Positive Long technicianProfileId, @Size(max = 2000) String notes) implements StrictWrite {}
     public record StatusRequest(@NotNull RequestStatus toStatus, @Size(max = 2000) String notes,
             @DecimalMin("-90.0") @DecimalMax("90.0") java.math.BigDecimal startLatitude,
@@ -37,7 +37,8 @@ public final class WorkflowDtos {
             String buildingAddress, String liftName, String liftNumber, String technicianName,
             java.math.BigDecimal buildingLatitude, java.math.BigDecimal buildingLongitude,
             java.math.BigDecimal startLatitude, java.math.BigDecimal startLongitude, LocalDateTime startedAt,
-            Integer arrivalEstimateMinutes, LocalDateTime arrivalEstimatedAt) {}
+            Integer arrivalEstimateMinutes, LocalDateTime arrivalEstimatedAt,
+            String amcCategory, String visitCoverage) {}
     public record AssignmentView(Long id, Long serviceRequestId, Long technicianProfileId, AssignmentStatus status,
             Long assignedByUserId, LocalDateTime assignedAt, LocalDateTime acceptedAt, LocalDateTime releasedAt,
             String notes, String technicianName) {}

@@ -14,6 +14,8 @@ import static com.valor.workflow.ServiceVisitDtos.*;
 @Service
 @Transactional
 public class ServiceVisitService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.valor.commerce.AmcCoverageService amcCoverage;
     private static final EnumSet<VisitStatus> ACTIVE = EnumSet.of(VisitStatus.SCHEDULED, VisitStatus.IN_PROGRESS);
     private final ServiceVisitRepository visits;
     private final VisitChangeRequestRepository changeRequests;
@@ -61,6 +63,7 @@ public class ServiceVisitService {
         visit.setRequest(request); visit.setTechnician(technician); visit.setScheduledDate(input.scheduledDate());
         visit.setStartTime(input.startTime()); visit.setEndTime(input.endTime()); visit.setNotes(input.notes());
         visits.saveAndFlush(visit); record(visit, actor, "CREATED", null);
+        refreshCoverage(request,input.scheduledDate());
         audit.record("SERVICE_VISIT_CREATE", "SERVICE_VISIT", visit.getId(), "Created service visit request=" + request.getId(),
                 null, visitSummary(visit), "SUCCESS");
         emails.appointmentScheduled(request.getCustomer().getUser().getId(), request.getCustomer().getFullName(),
@@ -86,6 +89,7 @@ public class ServiceVisitService {
         visit.setStartTime(input.startTime()); visit.setEndTime(input.endTime()); visit.setNotes(input.notes());
         visits.flush();
         VisitHistory change = record(visit, actor, technicianChanged ? "TECHNICIAN_CHANGED" : "RESCHEDULED", input.notes());
+        refreshCoverage(request,input.scheduledDate());
         change.setFromTechnician(previousTechnician);
         audit.record(technicianChanged ? "SERVICE_VISIT_TECHNICIAN_CHANGE" : "SERVICE_VISIT_UPDATE", "SERVICE_VISIT", visit.getId(),
                 technicianChanged ? "Changed service visit technician" : "Updated service visit",
@@ -203,6 +207,7 @@ public class ServiceVisitService {
             visit.setTechnician(technician); visit.setScheduledDate(date); visit.setStartTime(start); visit.setEndTime(end);
             visits.flush();
             VisitHistory changeEvent = record(visit, actor, technicianChanged ? "TECHNICIAN_CHANGED" : "RESCHEDULED", input.reviewNotes());
+            refreshCoverage(request,date);
             changeEvent.setFromTechnician(previousTechnician);
             change.setStatus(VisitChangeRequestStatus.APPROVED); review(change, actor, input.reviewNotes());
             audit.record("VISIT_CHANGE_REQUEST_APPROVE", "VISIT_CHANGE_REQUEST", change.getId(), "Approved visit change request visit=" + visit.getId(),
@@ -221,6 +226,7 @@ public class ServiceVisitService {
         visit.setScheduledDate(date); visit.setStartTime(start); visit.setEndTime(end); visit.setNotes(input.reviewNotes());
         String before = changeSummary(change);
         visits.saveAndFlush(visit); record(visit, actor, "CREATED", input.reviewNotes());
+        refreshCoverage(request,date);
         audit.record("SERVICE_VISIT_CREATE", "SERVICE_VISIT", visit.getId(), "Created service visit request=" + request.getId(),
                 null, visitSummary(visit), "SUCCESS");
         change.setStatus(VisitChangeRequestStatus.APPROVED); review(change, actor, input.reviewNotes());
@@ -339,6 +345,9 @@ public class ServiceVisitService {
     }
     private PageView<VisitView> page(Page<ServiceVisit> result, User actor) {
         return new PageView<>(result.getContent().stream().map(v -> view(v, actor)).toList(), result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
+    }
+    private void refreshCoverage(ServiceRequest request,LocalDate date){
+        if(amcCoverage!=null&&request.getLift()!=null)amcCoverage.capture(request.getId(),"VISIT",date);
     }
     private Pageable paging(int page, int size) { if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Invalid page"); return PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "scheduledDate", "startTime", "id")); }
     private Pageable changeRequestPaging(int page, int size) { if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Invalid page"); return PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")); }

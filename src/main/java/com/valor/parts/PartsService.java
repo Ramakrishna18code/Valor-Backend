@@ -14,6 +14,8 @@ import static com.valor.parts.PartsDtos.*;
 @Service
 @Transactional
 class PartsService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.valor.commerce.FinanceAccess financeAccess;
     private final PartCategoryRepository categories; private final PartItemRepository items; private final PartMovementRepository movements;
     private final PartRequestRepository requests; private final PartLineRepository lines; private final PartEventRepository events;
     private final PartsTechnicianRepository technicians; private final PartsServiceRequestRepository serviceRequests;
@@ -78,6 +80,7 @@ class PartsService {
     List<PartStockMovement> movements(Long id) { requireAdmin(); return movements.findByItemIdOrderByCreatedAtDesc(id); }
 
     RequestView submit(RequestWrite input) {
+        if(financeAccess!=null) financeAccess.requireAssignedJob(input.serviceRequestId());
         User actor=identities.actor(); TechnicianProfile technician=technicians.findByUserId(actor.getId()).orElseThrow(() -> denied());
         ServiceRequest serviceRequest=serviceRequests.findById(input.serviceRequestId()).orElseThrow(() -> missing("Service request"));
         if (serviceRequest.getStatus() == com.valor.workflow.RequestStatus.COMPLETED || serviceRequest.getStatus() == com.valor.workflow.RequestStatus.CANCELLED) throw conflict("Service request is closed");
@@ -102,7 +105,7 @@ class PartsService {
         request.status=PartRequestStatus.RESERVED; request.approvedAt=LocalDateTime.now(); request.reservedAt=request.approvedAt; event(request,before,request.status,reason); audit.record("PART_REQUEST_APPROVE", "PART_REQUEST", id, "Approved and reserved part request"); return detail(id);
     }
     RequestView ready(Long id) { requireAdmin(); ServiceRequestPartRequest request=requests.lockById(id).orElseThrow(() -> missing("Part request")); if (request.status != PartRequestStatus.RESERVED) throw conflict("Request is not reserved"); PartRequestStatus before=request.status; request.status=PartRequestStatus.READY; event(request,before,request.status,"Marked ready by Admin"); audit.record("PART_REQUEST_READY", "PART_REQUEST", id, "Marked part request ready"); return detail(id); }
-    RequestView issue(Long id) { requireAdmin(); ServiceRequestPartRequest request=requests.lockById(id).orElseThrow(() -> missing("Part request")); if (request.status != PartRequestStatus.RESERVED && request.status != PartRequestStatus.READY) throw conflict("Request is not ready to issue"); PartRequestStatus before=request.status; request.status=PartRequestStatus.ISSUED; request.issuedAt=LocalDateTime.now(); event(request,before,request.status,"Issued by Admin"); audit.record("PART_REQUEST_ISSUE", "PART_REQUEST", id, "Issued part request"); return detail(id); }
+    RequestView issue(Long id) { requireAdmin(); ServiceRequestPartRequest request=requests.lockById(id).orElseThrow(() -> missing("Part request")); if (request.status != PartRequestStatus.RESERVED && request.status != PartRequestStatus.READY) throw conflict("Request is not ready to issue"); PartRequestStatus before=request.status; request.status=PartRequestStatus.ISSUED; request.issuedAt=LocalDateTime.now(); for (ServiceRequestPartLine line : lines.findByRequestId(id)) { line.issuedQuantity=line.approvedQuantity; lines.save(line); PartStockMovement movement=new PartStockMovement(); movement.item=line.item; movement.movementType=StockMovementType.ISSUE; movement.quantity=line.issuedQuantity; movement.reason="Issued part request " + id; movement.serviceRequest=request.serviceRequest; movement.actorUserId=identities.actor().getId(); movements.save(movement); } event(request,before,request.status,"Issued by Admin"); audit.record("PART_REQUEST_ISSUE", "PART_REQUEST", id, "Issued part request"); return detail(id); }
 
     private void releaseReservedStock(ServiceRequestPartRequest request) {
         List<ServiceRequestPartLine> requestLines=lines.findByRequestId(request.id).stream().sorted(Comparator.comparing(line -> line.item.id)).toList();

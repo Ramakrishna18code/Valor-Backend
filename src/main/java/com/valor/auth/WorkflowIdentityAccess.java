@@ -19,6 +19,13 @@ public class WorkflowIdentityAccess {
         CustomerProfile profile = customers.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedException("Access denied"));
         return access.activeCustomer(profile.getId());
     }
+    @Transactional
+    public CustomerProfile customerForWrite(User actor) {
+        if (actor.getRole() != Role.CUSTOMER) throw new AccessDeniedException("Access denied");
+        CustomerProfile profile = customers.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedException("Access denied"));
+        CustomerProfile locked = customers.lockById(profile.getId()).orElseThrow(() -> new AccessDeniedException("Access denied"));
+        return access.activeCustomer(locked.getId());
+    }
     public TechnicianProfile technician(User actor) {
         if (actor.getRole() != Role.TECHNICIAN) throw new AccessDeniedException("Access denied");
         TechnicianProfile profile = technicians.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedException("Access denied"));

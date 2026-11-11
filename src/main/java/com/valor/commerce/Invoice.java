@@ -8,6 +8,8 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -29,6 +31,9 @@ class Invoice {
     private AmcContract amcContract;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "created_by_user_id", nullable = false)
     private User createdBy;
+    @OneToMany(mappedBy = "invoice", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("lineNumber ASC")
+    private List<InvoiceLineItem> items = new ArrayList<>();
     @Column(name = "description", nullable = false, length = 500)
     private String description;
     @Column(name = "subtotal", nullable = false, precision = 12, scale = 2)
@@ -44,12 +49,16 @@ class Invoice {
     private InvoiceStatus status = InvoiceStatus.ISSUED;
     @Column(name = "issued_date", nullable = false)
     private LocalDate issuedDate = LocalDate.now();
+    @Column(name = "issued_at")
+    private LocalDateTime issuedAt;
     @Column(name = "due_date")
     private LocalDate dueDate;
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
-    @PrePersist void pre() { createdAt = LocalDateTime.now(); updatedAt = createdAt; }
-    @PreUpdate void upd() { updatedAt = LocalDateTime.now(); }
+    @Transient private InvoiceStatus loadedStatus;
+    @PostLoad void loaded(){loadedStatus=status;}
+    @PrePersist void pre() { createdAt = LocalDateTime.now(); updatedAt = createdAt; if(status==InvoiceStatus.ISSUED||status==InvoiceStatus.PAID)issuedAt=createdAt; }
+    @PreUpdate void upd() { updatedAt = LocalDateTime.now(); if(issuedAt==null&&loadedStatus!=status&&(status==InvoiceStatus.ISSUED||status==InvoiceStatus.PAID))issuedAt=updatedAt; }
 }

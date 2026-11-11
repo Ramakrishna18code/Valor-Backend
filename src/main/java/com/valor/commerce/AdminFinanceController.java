@@ -25,6 +25,13 @@ class AdminFinanceController {
         return ApiResponse.success("Transactions", service.transactions(page, size, sort, status, customerProfileId, type, dateFrom, dateTo, q), 200);
     }
 
+    @GetMapping("/reconciliation/invoices")
+    ApiResponse<PageView<InvoiceReconciliationView>> invoiceReconciliation(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String q) {
+        return ApiResponse.success("Invoice reconciliation", service.invoiceReconciliation(page, size, q), 200);
+    }
+
     @GetMapping("/transactions/{id}")
     ApiResponse<TransactionView> transaction(@PathVariable String id) { return ApiResponse.success("Transaction", service.transaction(id), 200); }
 

@@ -204,6 +204,24 @@ class Phase1CommerceTest {
         assertNotEquals("PAID", call(get("/api/v1/invoices/" + invoiceId), f.customer(), null, 200).get("status").asText());
     }
 
+    @Test void completedTechnicianCollectsCashThenAdminSeparatelyVerifiesCompanyHandover() throws Exception {
+        Fixture f=fixture();startTracking(f);
+        call(post("/api/v1/service-requests/"+f.requestId()+"/status"),f.technician(),Map.of("toStatus","REACHED_SITE"),200);verifyStartCode(f);
+        for(String next:List.of("DIAGNOSIS","REPAIR_IN_PROGRESS","TESTING"))call(post("/api/v1/service-requests/"+f.requestId()+"/status"),f.technician(),Map.of("toStatus",next),200);
+        call(post("/api/v1/technician/me/jobs/"+f.requestId()+"/report"),f.technician(),Map.of("diagnosis","Fault","workPerformed","Repair","testingResult","Passed"),200);verifyCompleteCode(f);
+        call(post("/api/v1/service-requests/"+f.requestId()+"/status"),f.technician(),Map.of("toStatus","COMPLETED"),200);
+        long invoice=call(post("/api/v1/invoices"),f.admin(),Map.of("customerProfileId",f.customerId(),"serviceRequestId",f.requestId(),"description","Completed repair","subtotal",1000),200).get("id").asLong();
+        var otp=call(post("/api/v1/payments/cash/otp/request"),f.customer(),Map.of("invoiceId",invoice),200);
+        call(post("/api/v1/payments/cash/otp/verify"),f.technician(),Map.of("paymentId",otp.get("paymentId").asLong(),"otpId",otp.get("id").asLong(),"otp",otp.get("code").asText()),200);
+        int invoiced=call(get("/api/v1/invoices/"+invoice),f.customer(),null,200).get("totalAmount").asInt();
+        var cash=call(get("/api/v1/technician/me/company-cash/summary"),f.technician(),null,200);assertEquals(invoiced,cash.get("outstanding").asInt());
+        var remittance=call(post("/api/v1/technician/me/company-cash/remittances"),f.technician(),Map.of("idempotencyKey","handover-"+UUID.randomUUID(),"amount",400,"method","OFFICE_HANDOVER","handoverReference","OFFICE-"+UUID.randomUUID()),201);
+        assertEquals("PENDING_VERIFICATION",remittance.get("status").asText());assertEquals(invoiced,call(get("/api/v1/technician/me/company-cash/summary"),f.technician(),null,200).get("outstanding").asInt());
+        call(post("/api/v1/admin/company-cash/remittances/"+remittance.get("id").asLong()+"/review"),f.technician(),Map.of("approve",true,"reason","Cannot approve own claim"),403);
+        call(post("/api/v1/admin/company-cash/remittances/"+remittance.get("id").asLong()+"/review"),f.admin(),Map.of("approve",true,"reason","Office verified the handover"),200);
+        assertEquals(invoiced-400,call(get("/api/v1/technician/me/company-cash/summary"),f.technician(),null,200).get("outstanding").asInt());
+    }
+
     @Test void installationWithoutRegisteredLiftSupportsLocationAndSupportTickets() throws Exception {
         User admin = user(Role.ADMIN);
         CustomerProfile owner = customer();
@@ -304,7 +322,7 @@ class Phase1CommerceTest {
                 {"id":"evt_tx_refund","event":"refund.processed","payload":{"refund":{"entity":{"id":"%s","status":"processed"}}}}
                 """.formatted(refundId), 200);
 
-        JsonNode page = call(get("/api/v1/admin/transactions?type=PAYMENT&status=PARTIALLY_REFUNDED&page=0&size=10"), f.admin(), null, 200);
+        JsonNode page = call(get("/api/v1/admin/transactions?type=PAYMENT&status=PARTIALLY_REFUNDED&page=0&size=10&q=pay_tx_1"), f.admin(), null, 200);
         assertEquals(1, page.get("items").size());
         assertEquals("PAYMENT-" + paymentId, page.at("/items/0/id").asText());
         JsonNode refundPage = call(get("/api/v1/admin/transactions?type=REFUND&q=" + refundId), f.admin(), null, 200);
@@ -508,5 +526,106 @@ class Phase1CommerceTest {
         mvc.perform(get("/api/v1/service-requests/" + f.requestId() + "/report.pdf")
                 .header("Authorization", "Bearer " + jwt.issue(customer().getUser())))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void adminInvoiceReconciliationUsesConfirmedPaymentAndRefundTotals() throws Exception {
+        Fixture f = fixture();
+        long invoiceId = call(post("/api/v1/invoices"), f.admin(), Map.of(
+                "customerProfileId", f.customerId(), "description", "Reconciliation invoice",
+                "subtotal", 1000, "taxAmount", 0, "currency", "INR"), 200).get("id").asLong();
+        JsonNode checkout = call(post("/api/v1/payments/razorpay/checkout"), f.customer(),
+                Map.of("invoiceId", invoiceId), 200);
+        long paymentId = checkout.get("paymentId").asLong();
+        webhook("""
+                {"id":"evt_reconcile_capture","event":"payment.captured","payload":{"payment":{"entity":{"id":"pay_reconcile","order_id":"%s","status":"captured"}}}}
+                """.formatted(checkout.get("razorpayOrderId").asText()), 200);
+        call(post("/api/v1/payments/" + paymentId + "/refunds"), f.admin(),
+                Map.of("amount", 250, "reason", "Reconciliation test"), 200);
+        String refundId = call(get("/api/v1/payments/" + paymentId + "/refunds"), f.admin(), null, 200)
+                .get(0).get("razorpayRefundId").asText();
+        webhook("""
+                {"id":"evt_reconcile_refund","event":"refund.processed","payload":{"refund":{"entity":{"id":"%s","status":"processed"}}}}
+                """.formatted(refundId), 200);
+
+        call(get("/api/v1/admin/reconciliation/invoices"), f.customer(), null, 403);
+        JsonNode result = call(get("/api/v1/admin/reconciliation/invoices?page=0&size=10&q=pay_reconcile"),
+                f.admin(), null, 200);
+        assertEquals(1, result.get("totalElements").asInt());
+        JsonNode row = result.at("/items/0");
+        assertEquals(invoiceId, row.get("invoiceId").asLong());
+        assertEquals(1000, row.get("successfulPayments").asInt());
+        assertEquals(250, row.get("confirmedRefunds").asInt());
+        assertEquals(250, row.get("outstandingBalance").asInt());
+        assertEquals("pay_reconcile", row.at("/payments/0/razorpayPaymentId").asText());
+        assertEquals("SUCCEEDED", row.at("/refunds/0/status").asText());
+        mvc.perform(get("/api/v1/invoices/" + invoiceId + "/document.pdf")
+                .header("Authorization", "Bearer " + jwt.issue(f.customer())))
+                .andExpect(status().isOk()).andExpect(header().string("Content-Type", "application/pdf"));
+        mvc.perform(get("/api/v1/invoices/" + invoiceId + "/document.pdf")
+                .header("Authorization", "Bearer " + jwt.issue(customer().getUser())))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/payments/" + paymentId + "/receipt.pdf")
+                .header("Authorization", "Bearer " + jwt.issue(f.customer())))
+                .andExpect(status().isOk()).andExpect(header().string("Content-Type", "application/pdf"));
+    }
+
+    @Test
+    void refundApprovalAndRejectionCannotBothWinConcurrently() throws Exception {
+        Fixture f = fixture();
+        long invoiceId = call(post("/api/v1/invoices"), f.admin(), Map.of(
+                "customerProfileId", f.customerId(), "description", "Concurrent refund invoice",
+                "subtotal", 1000, "taxAmount", 0, "currency", "INR"), 200).get("id").asLong();
+        JsonNode checkout = call(post("/api/v1/payments/razorpay/checkout"), f.customer(),
+                Map.of("invoiceId", invoiceId), 200);
+        long paymentId = checkout.get("paymentId").asLong();
+        webhook("""
+                {"id":"evt_concurrent_refund_capture","event":"payment.captured","payload":{"payment":{"entity":{"id":"pay_concurrent","order_id":"%s","status":"captured"}}}}
+                """.formatted(checkout.get("razorpayOrderId").asText()), 200);
+        long refundId = call(post("/api/v1/payments/" + paymentId + "/refund-requests"), f.customer(),
+                Map.of("amount", 100, "reason", "Concurrent decision test"), 200).get("id").asLong();
+
+        User secondAdmin = user(Role.ADMIN);
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(2);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.Callable<Integer> approve = () -> concurrentDecision(
+                post("/api/v1/admin/payments/refunds/" + refundId + "/approve"), f.admin(),
+                Map.of("refundId", refundId, "reason", "Approve"));
+        java.util.concurrent.Callable<Integer> reject = () -> concurrentDecision(
+                post("/api/v1/admin/payments/refunds/" + refundId + "/reject"), secondAdmin,
+                Map.of("refundId", refundId, "reason", "Reject"));
+        java.util.concurrent.Future<Integer> approval = executor.submit(() -> {
+            ready.countDown();
+            start.await();
+            return approve.call();
+        });
+        java.util.concurrent.Future<Integer> rejection = executor.submit(() -> {
+            ready.countDown();
+            start.await();
+            return reject.call();
+        });
+        int approvalStatus;
+        int rejectionStatus;
+        try {
+            assertTrue(ready.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            start.countDown();
+            approvalStatus = approval.get(15, java.util.concurrent.TimeUnit.SECONDS);
+            rejectionStatus = rejection.get(15, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        assertTrue((approvalStatus == 200 && rejectionStatus == 409)
+                || (approvalStatus == 409 && rejectionStatus == 200),
+                "Exactly one concurrent refund decision must succeed; approval=" + approvalStatus
+                        + ", rejection=" + rejectionStatus);
+    }
+
+    private int concurrentDecision(MockHttpServletRequestBuilder request, User actor, Object body) throws Exception {
+        return mvc.perform(request.header("Authorization", "Bearer " + jwt.issue(actor))
+                        .contentType("application/json").content(json.writeValueAsString(body)))
+                .andReturn().getResponse().getStatus();
     }
 }

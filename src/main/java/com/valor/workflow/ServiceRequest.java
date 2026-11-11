@@ -58,4 +58,5 @@ public class ServiceRequest extends AssetRecord {
     @Column(name = "started_at") private LocalDateTime startedAt;
     @Column(name = "arrival_estimate_minutes") private Integer arrivalEstimateMinutes;
     @Column(name = "arrival_estimated_at") private LocalDateTime arrivalEstimatedAt;
+    @Column(name = "submission_key", length = 80) private String submissionKey;
 }

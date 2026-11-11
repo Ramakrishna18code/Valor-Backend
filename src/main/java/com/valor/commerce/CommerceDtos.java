@@ -45,7 +45,9 @@ final class CommerceDtos {
     record RefundCreate(@NotNull @DecimalMin("0.01") BigDecimal amount, @Size(max=500) String reason) implements StrictInput {}
     record RefundApproval(@NotNull @Positive Long refundId, @Size(max=500) String reason) implements StrictInput {}
     record RefundView(Long id, Long paymentId, BigDecimal amount, String currency, RefundStatus status,
-        String razorpayRefundId, String gatewayStatus, String reason, LocalDateTime createdAt, LocalDateTime updatedAt) {}
+        String razorpayRefundId, String gatewayStatus, String reason, LocalDateTime createdAt, LocalDateTime updatedAt,
+        boolean awaitingSecondApproval, String rejectionReason, LocalDateTime rejectedAt) {}
+    record RefundRejection(@NotNull @Positive Long refundId, @NotBlank @Size(max=500) String reason) implements StrictInput {}
     record ReconciliationIssue(Long paymentId, Long invoiceId, String type, String detail) {}
     record RefundReconciliationResult(Long refundId, Long paymentId, String localStatus, BigDecimal amount,
         String currency, boolean providerEvidence, String providerStatus, boolean referencesMatch,
@@ -62,7 +64,9 @@ final class CommerceDtos {
     record InvoiceStatusUpdate(@NotNull InvoiceStatus status) implements StrictInput {}
     record InvoiceView(Long id, String invoiceNumber, Long customerProfileId, Long serviceRequestId, Long amcContractId,
         String description, BigDecimal subtotal, BigDecimal taxAmount, BigDecimal totalAmount, String currency,
-        InvoiceStatus status, LocalDate issuedDate, LocalDate dueDate, LocalDateTime createdAt, LocalDateTime updatedAt) {}
+        InvoiceStatus status, LocalDate issuedDate, LocalDate dueDate, LocalDateTime createdAt, LocalDateTime updatedAt,
+        List<InvoiceLineItemView> items) {}
+    record InvoiceLineItemView(String pricingCode, String description, int quantity, BigDecimal unitAmount, BigDecimal lineAmount) {}
     record SupportTicketCreate(Long serviceRequestId, SupportTicketCategory category, SupportTicketPriority priority,
         @NotBlank @Size(max=200) String subject, @NotBlank @Size(max=5000) String description,
         @Size(max=80) String preferredContact) implements StrictInput {}

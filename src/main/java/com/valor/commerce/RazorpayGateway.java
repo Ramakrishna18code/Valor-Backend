@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import jakarta.annotation.PostConstruct;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,6 +40,24 @@ class RazorpayGateway implements PaymentGateway {
 
     public String keyId() { return keyId; }
     public boolean configured() { return !keyId.isBlank() && !keySecret.isBlank(); }
+
+    @PostConstruct
+    void validateConfiguration() {
+        if (offlineTestMode) return;
+        boolean hasKeyId = !keyId.isBlank();
+        boolean hasKeySecret = !keySecret.isBlank();
+        boolean hasMode = mode != null && !mode.isBlank();
+        boolean hasWebhookSecret = !webhookSecret.isBlank();
+        if (!(hasKeyId || hasKeySecret || hasMode || hasWebhookSecret)) return;
+        if (!hasKeyId || !hasKeySecret || !hasMode || !hasWebhookSecret) {
+            throw new IllegalStateException("Razorpay configuration is incomplete; configure the key pair, mode, and dashboard webhook secret");
+        }
+        try {
+            validateMode();
+        } catch (CommerceException ex) {
+            throw new IllegalStateException(ex.getMessage());
+        }
+    }
 
     public JsonNode createOrder(BigDecimal amount, String currency, String receipt) {
         requireConfigured();

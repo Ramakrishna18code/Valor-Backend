@@ -55,6 +55,14 @@ class CommerceController {
     ApiResponse<RefundView> refundRequest(@PathVariable Long id, @Valid @RequestBody RefundCreate input) { return ok(service.customerRequestRefund(id, input)); }
     @PostMapping("/admin/payments/refunds/{id}/approve")
     ApiResponse<PaymentView> approveRefund(@PathVariable Long id, @Valid @RequestBody RefundApproval input) { return ok(service.approveRefund(id, input)); }
+    @PostMapping("/admin/payments/refunds/{id}/reject")
+    ApiResponse<RefundView> rejectRefund(@PathVariable Long id, @Valid @RequestBody RefundRejection input) { return ok(service.rejectRefund(id, input)); }
+    @GetMapping("/admin/payments/refunds")
+    ApiResponse<PageView<RefundView>> adminRefundRequests(
+            @RequestParam(required = false) RefundStatus status,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return ok(service.adminRefundRequests(status, pageable));
+    }
     @GetMapping("/payments/{id}/refunds")
     ApiResponse<List<RefundView>> refunds(@PathVariable Long id) { return ok(service.paymentRefunds(id)); }
     @GetMapping("/payments/{id}/refunds/document")
@@ -80,6 +88,8 @@ class CommerceController {
     ApiResponse<InvoiceView> createInvoice(@Valid @RequestBody InvoiceCreate input) { return ok(service.createInvoice(input)); }
     @GetMapping("/invoices/{id}")
     ApiResponse<InvoiceView> invoice(@PathVariable Long id) { return ok(service.invoice(id)); }
+    @GetMapping("/invoices/{id}/document.pdf")
+    ResponseEntity<Resource> invoicePdf(@PathVariable Long id) { return download(service.invoicePdf(id)); }
     @GetMapping("/technician/me/jobs/{id}/payment")
     ApiResponse<TechnicianServicePaymentView> technicianServicePayment(@PathVariable Long id) { return ok(service.technicianServicePayment(id)); }
     @PostMapping("/admin/service-requests/{id}/invoice")

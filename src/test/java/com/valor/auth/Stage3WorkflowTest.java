@@ -154,6 +154,25 @@ class Stage3WorkflowTest {
         assertEquals(f.customer().getId(), detail.at("/history/0/changedByUserId").asLong());
     }
 
+    @Test void routineServiceAcceptsOptionalDescriptionButBreakdownStillRequiresIt() throws Exception {
+        Fixture f = fixture();
+        JsonNode routine = call(post("/api/v1/service-requests"), f.customer(), Map.of(
+                "liftId", f.liftId(), "title", "General Service", "serviceType", "ROUTINE_MAINTENANCE"), 200);
+        assertEquals("General Service", routine.at("/request/title").asText());
+        assertEquals("Routine service requested", routine.at("/request/description").asText());
+        call(post("/api/v1/service-requests"), f.customer(), Map.of(
+                "liftId", f.liftId(), "title", "Breakdown", "serviceType", "BREAKDOWN"), 400);
+    }
+
+    @Test void customerCancellationStopsWhenTechnicianIsOnTheWay() throws Exception {
+        Fixture f = fixture();
+        long assignment = assign(f);
+        accept(f, assignment, f.technician());
+        transition(f, f.technician(), "ON_THE_WAY", "Travelling to the building", 200);
+        transition(f, f.customer(), "CANCELLED", "Need to change date", 409);
+        assertEquals("ON_THE_WAY", state(f));
+    }
+
     @Test void installationRequestsCanBeCreatedWithoutExistingLiftOnlyForInstallation() throws Exception {
         User customer = user(Role.CUSTOMER);
         CustomerProfile owner = new CustomerProfile(); owner.setUser(customer); owner.setFullName("Install customer");

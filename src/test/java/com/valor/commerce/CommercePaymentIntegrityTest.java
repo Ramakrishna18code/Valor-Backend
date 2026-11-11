@@ -490,6 +490,42 @@ class CommercePaymentIntegrityTest {
     }
 
     @Test
+    void adminRejectionIsAuditedAndDistinctFromGatewayFailure() throws Exception {
+        injectEntityManager();
+        PaymentRefund refund = pendingRefund();
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+        when(refunds.saveAndFlush(any(PaymentRefund.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        CommerceDtos.RefundView result = service.rejectRefund(31L,
+                new CommerceDtos.RefundRejection(31L, "Duplicate charge not found"));
+
+        assertEquals(RefundStatus.REJECTED, result.status());
+        assertEquals("Duplicate charge not found", result.rejectionReason());
+        assertNotNull(result.rejectedAt());
+        assertNull(result.gatewayStatus());
+        verify(refunds).saveAndFlush(refund);
+        verify(paymentGateway, never()).createRefund(any(), any(), any(), any());
+        verify(audit).record(eq("PAYMENT_REFUND_REJECTED"), eq("PAYMENT_REFUND"), eq(31L), anyString(),
+                anyString(), anyString(), eq("SUCCESS"));
+    }
+
+    @Test
+    void refundCannotBeRejectedAfterProviderProcessingStarts() throws Exception {
+        injectEntityManager();
+        PaymentRefund refund = pendingRefund();
+        refund.setStatus(RefundStatus.PROCESSING);
+        when(payments.lockById(11L)).thenReturn(Optional.of(payment));
+        when(refunds.lockById(31L)).thenReturn(Optional.of(refund));
+
+        assertThrows(CommerceException.class, () -> service.rejectRefund(31L,
+                new CommerceDtos.RefundRejection(31L, "Review declined")));
+
+        verify(refunds, never()).saveAndFlush(any(PaymentRefund.class));
+        verify(paymentGateway, never()).createRefund(any(), any(), any(), any());
+    }
+
+    @Test
     void approvalPathCallsGatewayOnlyAfterWithinThresholdApproval() throws Exception {
         setThreshold("1000.00"); PaymentRefund refund = pendingRefund();
         when(refunds.lockById(31L)).thenReturn(Optional.of(refund)); when(payments.lockById(11L)).thenReturn(Optional.of(payment));
@@ -618,7 +654,14 @@ class CommercePaymentIntegrityTest {
     }
 
     private void setThreshold(String value) throws Exception {
+        injectEntityManager();
         Field field = CommerceService.class.getDeclaredField("sameAdminRefundThreshold"); field.setAccessible(true); field.set(service, value);
+    }
+
+    private void injectEntityManager() throws Exception {
+        Field field = CommerceService.class.getDeclaredField("entityManager");
+        field.setAccessible(true);
+        field.set(service, entityManager);
     }
 
     @Test
@@ -1226,7 +1269,7 @@ class CommercePaymentIntegrityTest {
         when(payments.lockById(11L)).thenReturn(Optional.of(payment));
         when(cashOtps.lockById(55L)).thenReturn(Optional.of(otp));
         when(assignments.existsByRequestIdAndTechnicianUserIdAndStatusIn(31L, 44L,
-                List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED))).thenReturn(true);
+                List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED, AssignmentStatus.COMPLETED))).thenReturn(true);
         when(encoder.matches("123456", "hash")).thenReturn(true);
 
         service.verifyCashPaymentOtp(new CommerceDtos.CashPaymentOtpVerify(11L, 55L, "123456"));
@@ -1253,7 +1296,7 @@ class CommercePaymentIntegrityTest {
         otp.expiresAt = java.time.LocalDateTime.now().plusMinutes(5);
         when(cashOtps.lockById(56L)).thenReturn(Optional.of(otp));
         when(assignments.existsByRequestIdAndTechnicianUserIdAndStatusIn(31L, 44L,
-                List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED))).thenReturn(true);
+                List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED, AssignmentStatus.COMPLETED))).thenReturn(true);
 
         assertThrows(CommerceException.class, () -> service.verifyCashPaymentOtp(
                 new CommerceDtos.CashPaymentOtpVerify(11L, 56L, "123456")));
@@ -1272,7 +1315,7 @@ class CommercePaymentIntegrityTest {
         when(request.getId()).thenReturn(31L);
         payment.setServiceRequest(request);
         when(assignments.existsByRequestIdAndTechnicianUserIdAndStatusIn(31L, 44L,
-                List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED))).thenReturn(false);
+                List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED, AssignmentStatus.COMPLETED))).thenReturn(false);
 
         assertThrows(org.springframework.security.access.AccessDeniedException.class, () -> service.verifyCashPaymentOtp(
                 new CommerceDtos.CashPaymentOtpVerify(11L, 55L, "123456")));

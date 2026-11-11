@@ -16,6 +16,10 @@ import static com.valor.workflow.WorkflowDtos.*;
 @Service
 @Transactional
 public class WorkflowService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.valor.commerce.FinanceAccess financeAccess;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.valor.commerce.AmcCoverageService amcCoverage;
     private final RequestRepository requests;
     private final AssignmentRepository assignments;
     private final AutoAssignTechnicianRepository autoAssignTechnicians;
@@ -67,7 +71,11 @@ public class WorkflowService {
             if (input.customerProfileId() != null || input.internalAdminNotes() != null || input.estimatedCompletionMinutes() != null) {
                 throw new WorkflowException(400, "Customer ownership and admin fields cannot be submitted");
             }
-            owner = profiles.customer(actor);
+            owner = input.submissionKey() == null ? profiles.customer(actor) : profiles.customerForWrite(actor);
+            if (input.submissionKey() != null) {
+                var existing = requests.findByCustomerIdAndSubmissionKey(owner.getId(), input.submissionKey());
+                if (existing.isPresent()) return detail(existing.get(), actor);
+            }
         } else {
             admin(actor);
             if (input.customerProfileId() == null) throw new WorkflowException(400, "Customer profile is required");
@@ -84,14 +92,23 @@ public class WorkflowService {
             if (!lift.getBuilding().getCustomer().getId().equals(owner.getId())) throw denied();
             if (!lift.isActive() || !lift.getBuilding().isActive()) throw new WorkflowException(409, "Asset is inactive");
         }
+        String description = input.description();
+        if (blank(description)) {
+            if (input.serviceType() != WorkflowServiceType.ROUTINE_MAINTENANCE) {
+                throw new WorkflowException(400, "Describe the service you need");
+            }
+            description = "Routine service requested";
+        }
         ServiceRequest request = new ServiceRequest();
         request.setCustomer(owner); request.setLift(lift); request.setServiceId("SR-" + UUID.randomUUID());
-        request.setTitle(input.title()); request.setDescription(input.description()); request.setIssueCategory(input.issueCategory());
+        request.setTitle(input.title()); request.setDescription(description); request.setIssueCategory(input.issueCategory());
         request.setPriority(input.priority() == null ? RequestPriority.MEDIUM : input.priority());
         request.setServiceType(input.serviceType()); request.setCustomerRemarks(input.customerRemarks());
         request.setPreferredVisitDate(input.preferredVisitDate()); request.setPreferredTimeSlot(input.preferredTimeSlot());
         request.setInternalAdminNotes(input.internalAdminNotes()); request.setEstimatedCompletionMinutes(input.estimatedCompletionMinutes());
+        request.setSubmissionKey(actor.getRole() == Role.CUSTOMER ? input.submissionKey() : null);
         requests.saveAndFlush(request);
+        if(lift!=null&&amcCoverage!=null)amcCoverage.capture(request.getId(),"VISIT",input.preferredVisitDate());
         event(request, null, actor, null);
         audit.record("SERVICE_REQUEST_CREATE", "SERVICE_REQUEST", request.getId(), "Created service request customer=" + owner.getId() + ",lift=" + (lift == null ? null : lift.getId()),
                 null, requestSummary(request, null), "SUCCESS");
@@ -252,7 +269,7 @@ public class WorkflowService {
         if (actor.getRole() == Role.CUSTOMER) {
             var customer = profiles.customer(actor);
             if (!request.getCustomer().getId().equals(customer.getId())) throw denied();
-            if (input.toStatus() != RequestStatus.CANCELLED || !EnumSet.of(RequestStatus.PENDING, RequestStatus.ASSIGNED, RequestStatus.ACCEPTED, RequestStatus.ON_THE_WAY).contains(request.getStatus())) {
+            if (input.toStatus() != RequestStatus.CANCELLED || !EnumSet.of(RequestStatus.PENDING, RequestStatus.ASSIGNED, RequestStatus.ACCEPTED).contains(request.getStatus())) {
                 throw new WorkflowException(409, "Customer cancellation is not allowed in this state");
             }
             if (blank(input.notes())) throw new WorkflowException(400, "Transition notes are required");
@@ -292,6 +309,7 @@ public class WorkflowService {
             throw new WorkflowException(409, "Assignment must be accepted first");
         }
         if (to == RequestStatus.COMPLETED) {
+            if (financeAccess != null) financeAccess.requireWorkApproved(id);
             ServiceReport report = reports.findByRequestId(id).orElseThrow(() -> new WorkflowException(409, "Valid report required"));
             if (!validReport(report, request, assignment)) throw new WorkflowException(409, "Valid report required");
             checklists.requireComplete(id);
@@ -299,6 +317,7 @@ public class WorkflowService {
             request.setCompletedAt(LocalDateTime.now()); assignment.setStatus(AssignmentStatus.COMPLETED);
         }
         if (to == RequestStatus.DIAGNOSIS && actor.getRole() == Role.TECHNICIAN) serviceCodes.requireVerified(id, ServiceCodeAction.START);
+        if (to == RequestStatus.REPAIR_IN_PROGRESS && financeAccess != null) financeAccess.requireWorkApproved(id);
         if (to == RequestStatus.CANCELLED && assignment != null) {
             assignment.setStatus(AssignmentStatus.RELEASED); assignment.setReleasedAt(LocalDateTime.now());
         }
@@ -426,6 +445,7 @@ public class WorkflowService {
 
     private RequestView view(ServiceRequest r, User actor) {
         boolean admin = actor.getRole() == Role.ADMIN || actor.getRole() == Role.SUPER_ADMIN;
+        var classification = !admin || amcCoverage == null ? null : amcCoverage.requestClassification(r.getId());
         var lift = r.getLift();
         var building = lift == null ? null : lift.getBuilding();
         String technicianName = assignments.active(r.getId()).map(a -> technicianName(a.getTechnician())).orElse(null);
@@ -436,7 +456,8 @@ public class WorkflowService {
                 r.getCreatedAt(), r.getUpdatedAt(), r.getCustomer().getFullName(), building == null ? null : building.getBuildingName(),
                 building == null ? r.getCustomer().getAddress() : java.util.stream.Stream.of(building.getAddress(), building.getCity(), building.getState(), building.getPincode()).filter(v -> v != null && !v.isBlank()).distinct().collect(java.util.stream.Collectors.joining(", ")), lift == null ? null : lift.getName(), lift == null ? null : lift.getLiftNumber(),
                 technicianName, building == null ? null : building.getLatitude(), building == null ? null : building.getLongitude(),
-                r.getStartLatitude(), r.getStartLongitude(), r.getStartedAt(), r.getArrivalEstimateMinutes(), r.getArrivalEstimatedAt());
+                r.getStartLatitude(), r.getStartLongitude(), r.getStartedAt(), r.getArrivalEstimateMinutes(), r.getArrivalEstimatedAt(),
+                classification == null ? "UNKNOWN" : classification.amcCategory(), classification == null ? "UNCONFIRMED" : classification.visitCoverage());
     }
     private Detail detail(ServiceRequest request, User actor) {
         var assignment = assignments.active(request.getId()).map(a -> new AssignmentView(a.getId(), request.getId(),

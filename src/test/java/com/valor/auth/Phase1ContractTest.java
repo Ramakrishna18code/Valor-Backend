@@ -134,11 +134,11 @@ class Phase1ContractTest {
             String operationId=op.get("operationId").asText();assertTrue(ids.add(operationId));for(String code:List.of("400","401","403","404","409"))assertTrue(op.get("responses").get(code).toString().contains("ApiErrorResponse"));
             if(operationId.toLowerCase(Locale.ROOT).contains("download") || operationId.endsWith("Pdf") || operationId.endsWith("Csv"))return;
             if(operationId.equals("item"))return;
-            JsonNode success=op.get("responses").get("200");assertNotNull(success);
+            JsonNode success=op.get("responses").get("200");if(success==null)success=op.get("responses").get("201");assertNotNull(success,operationId);
             JsonNode envelope=resolve(doc,success.get("content").elements().next().get("schema"));
             JsonNode data=resolve(doc,envelope.at("/properties/data"));
             if(operationId.equals("retries")) { assertEquals("integer",data.path("type").asText()); return; }
-            assertTrue(data.has("properties")||data.has("items")||data.has("oneOf")
+            assertTrue(data.has("properties")||data.has("items")||data.has("oneOf")||data.has("additionalProperties")
                     ||data.path("description").asText().contains("Always null"),operationId);
         });});
     }

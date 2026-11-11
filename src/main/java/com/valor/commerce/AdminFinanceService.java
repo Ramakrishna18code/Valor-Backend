@@ -43,6 +43,115 @@ class AdminFinanceService {
         return new PageView<>(rows.stream().map(this::transaction).toList(), total, (int)Math.ceil(total / (double)b.size), b.page, b.size);
     }
 
+    PageView<InvoiceReconciliationView> invoiceReconciliation(int page, int size, String search) {
+        requireAdmin();
+        Bounds bounds = bounds(page, size);
+        String q = search == null || search.isBlank() ? null : search.trim().toLowerCase(Locale.ROOT);
+        if (q != null && q.length() > 120) throw new CommerceException(400, "Invalid search");
+        String where = q == null ? "" : " where lower(coalesce(i.invoiceNumber,'')) like :q or exists "
+                + "(select p.id from PaymentRecord p where p.invoice=i and "
+                + "(lower(coalesce(p.razorpayOrderId,'')) like :q or lower(coalesce(p.razorpayPaymentId,'')) like :q "
+                + "or lower(coalesce(p.providerReference,'')) like :q))";
+        TypedQuery<Long> countQuery = em.createQuery("select count(i) from Invoice i" + where, Long.class);
+        TypedQuery<Invoice> invoicesQuery = em.createQuery("select i from Invoice i" + where
+                + " order by i.issuedDate desc, i.id desc", Invoice.class);
+        if (q != null) {
+            countQuery.setParameter("q", "%" + q + "%");
+            invoicesQuery.setParameter("q", "%" + q + "%");
+        }
+        long total = countQuery.getSingleResult();
+        List<Invoice> invoiceRows = invoicesQuery.setFirstResult(bounds.page * bounds.size)
+                .setMaxResults(bounds.size).getResultList();
+        if (invoiceRows.isEmpty()) {
+            return new PageView<>(List.of(), total, (int)Math.ceil(total / (double)bounds.size), bounds.page, bounds.size);
+        }
+
+        List<Long> invoiceIds = invoiceRows.stream().map(Invoice::getId).toList();
+        Map<String, BigDecimal> collected = groupedAmounts(
+                "select p.invoice.id, p.currency, sum(p.amount) from PaymentRecord p where p.invoice.id in :ids "
+                        + "and p.status in :statuses group by p.invoice.id, p.currency",
+                invoiceIds, "statuses", List.of(PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED,
+                        PaymentStatus.PARTIALLY_REFUNDED));
+        Map<String, BigDecimal> refunded = groupedAmounts(
+                "select r.payment.invoice.id, r.currency, sum(r.amount) from PaymentRefund r "
+                        + "where r.payment.invoice.id in :ids and r.status=:status group by r.payment.invoice.id, r.currency",
+                invoiceIds, "status", RefundStatus.SUCCEEDED);
+        Map<Long, List<InvoicePaymentReference>> paymentsByInvoice = new HashMap<>();
+        List<Object[]> paymentRows = em.createQuery("select p.invoice.id, p.id, p.status, p.amount, p.currency, "
+                        + "p.providerReference, p.razorpayOrderId, p.razorpayPaymentId, p.gatewayStatus, p.createdAt "
+                        + "from PaymentRecord p where p.invoice.id in :ids order by p.invoice.id, p.id",
+                        Object[].class)
+                .setParameter("ids", invoiceIds).getResultList();
+        for (Object[] row : paymentRows) {
+            Long invoiceId = (Long) row[0];
+            paymentsByInvoice.computeIfAbsent(invoiceId, ignored -> new ArrayList<>()).add(
+                    new InvoicePaymentReference((Long) row[1], ((PaymentStatus) row[2]).name(),
+                            (BigDecimal) row[3], (String) row[4], (String) row[5], (String) row[6],
+                            (String) row[7], (String) row[8], (LocalDateTime) row[9]));
+        }
+        Map<Long, List<InvoiceRefundReference>> refundsByInvoice = new HashMap<>();
+        List<Object[]> refundRows = em.createQuery("select r.payment.invoice.id, r.id, r.payment.id, r.status, "
+                        + "r.amount, r.currency, r.razorpayRefundId, r.gatewayStatus, r.reason, r.createdAt "
+                        + "from PaymentRefund r where r.payment.invoice.id in :ids order by r.payment.invoice.id, r.id",
+                        Object[].class)
+                .setParameter("ids", invoiceIds).getResultList();
+        for (Object[] row : refundRows) {
+            Long invoiceId = (Long) row[0];
+            refundsByInvoice.computeIfAbsent(invoiceId, ignored -> new ArrayList<>()).add(
+                    new InvoiceRefundReference((Long) row[1], (Long) row[2], ((RefundStatus) row[3]).name(),
+                            (BigDecimal) row[4], (String) row[5], (String) row[6], (String) row[7],
+                            (String) row[8], (LocalDateTime) row[9]));
+        }
+
+        List<InvoiceReconciliationView> rows = invoiceRows.stream().map(invoice -> {
+            BigDecimal paid = collected.getOrDefault(amountKey(invoice.getId(), invoice.getCurrency()), BigDecimal.ZERO);
+            BigDecimal refunds = refunded.getOrDefault(amountKey(invoice.getId(), invoice.getCurrency()), BigDecimal.ZERO);
+            BigDecimal balance = invoice.getTotalAmount().subtract(paid).add(refunds);
+            List<InvoicePaymentReference> paymentRefs = paymentsByInvoice.getOrDefault(invoice.getId(), List.of());
+            List<InvoiceRefundReference> refundRefs = refundsByInvoice.getOrDefault(invoice.getId(), List.of());
+            List<String> discrepancies = new ArrayList<>();
+            if (invoice.getStatus() == InvoiceStatus.PAID && balance.compareTo(BigDecimal.ZERO) != 0) {
+                discrepancies.add("PAID_INVOICE_BALANCE_REMAINS");
+            }
+            if (balance.signum() < 0) discrepancies.add("PAYMENTS_EXCEED_INVOICE_TOTAL");
+            if (refunds.compareTo(paid) > 0) discrepancies.add("CONFIRMED_REFUNDS_EXCEED_SUCCESSFUL_PAYMENTS");
+            if (paymentRefs.stream().anyMatch(payment -> !invoice.getCurrency().equalsIgnoreCase(payment.currency()))
+                    || refundRefs.stream().anyMatch(refund -> !invoice.getCurrency().equalsIgnoreCase(refund.currency()))) {
+                discrepancies.add("CURRENCY_MISMATCH");
+            }
+            if (paymentRefs.stream().anyMatch(payment -> PaymentStatus.PROCESSING.name().equals(payment.status()))) {
+                discrepancies.add("PAYMENT_REQUIRES_RECONCILIATION");
+            }
+            if (refundRefs.stream().anyMatch(refund -> RefundStatus.REQUESTED.name().equals(refund.status())
+                    || RefundStatus.PROCESSING.name().equals(refund.status())
+                    || RefundStatus.FAILED.name().equals(refund.status()))) {
+                discrepancies.add("REFUND_REQUIRES_RECONCILIATION");
+            }
+            if (invoice.getStatus() == InvoiceStatus.DRAFT && !paymentRefs.isEmpty()) {
+                discrepancies.add("DRAFT_INVOICE_HAS_PAYMENT_RECORDS");
+            }
+            return new InvoiceReconciliationView(invoice.getId(), invoice.getInvoiceNumber(),
+                    invoice.getCustomer().getId(), invoice.getDescription(), invoice.getStatus().name(),
+                    invoice.getTotalAmount(), paid, refunds, balance, invoice.getCurrency(),
+                    invoice.getIssuedDate(), paymentRefs, refundRefs, discrepancies);
+        }).toList();
+        return new PageView<>(rows, total, (int)Math.ceil(total / (double)bounds.size), bounds.page, bounds.size);
+    }
+
+    private Map<String, BigDecimal> groupedAmounts(String jpql, List<Long> invoiceIds, String parameter, Object value) {
+        TypedQuery<Object[]> query = em.createQuery(jpql, Object[].class).setParameter("ids", invoiceIds);
+        query.setParameter(parameter, value);
+        Map<String, BigDecimal> amounts = new HashMap<>();
+        for (Object[] row : query.getResultList()) {
+            amounts.put(amountKey((Long) row[0], (String) row[1]), (BigDecimal) row[2]);
+        }
+        return amounts;
+    }
+
+    private String amountKey(Long invoiceId, String currency) {
+        return invoiceId + ":" + currency.toUpperCase(Locale.ROOT);
+    }
+
     TransactionView transaction(String id) {
         requireAdmin();
         String[] parts = id == null ? new String[0] : id.trim().toUpperCase(Locale.ROOT).split("-", 2);

@@ -157,7 +157,7 @@ class AdminCustomerService {
             r.getPreferredTimeSlot(), r.getInternalAdminNotes(), r.getCompletedAt(), r.getEstimatedCompletionMinutes(),
             r.getCreatedAt(), r.getUpdatedAt(), r.getCustomer().getFullName(), building == null ? null : building.getBuildingName(),
             building == null ? null : building.getAddress(), lift == null ? null : lift.getName(), lift == null ? null : lift.getLiftNumber(), null, building == null ? null : building.getLatitude(), building == null ? null : building.getLongitude(),
-            r.getStartLatitude(), r.getStartLongitude(), r.getStartedAt(), r.getArrivalEstimateMinutes(), r.getArrivalEstimatedAt());
+            r.getStartLatitude(), r.getStartLongitude(), r.getStartedAt(), r.getArrivalEstimateMinutes(), r.getArrivalEstimatedAt(), "UNKNOWN", "UNCONFIRMED");
     }
     private String clean(String value) { var result=value==null?null:value.trim(); return result==null||result.isEmpty()?null:result; }
     private String setPasswordUrl(String token) { return setPasswordBaseUrl + (setPasswordBaseUrl.contains("?") ? "&" : "?") + "token=" + token; }

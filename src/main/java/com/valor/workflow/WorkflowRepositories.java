@@ -10,6 +10,7 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
 interface RequestRepository extends JpaRepository<ServiceRequest, Long> {
+    Optional<ServiceRequest> findByCustomerIdAndSubmissionKey(Long customerId, String submissionKey);
     List<ServiceRequest> findByStatusOrderByIdAsc(RequestStatus status);
     @Query("select r from ServiceRequest r where r.customer.id=:customerId and (:status is null or r.status=:status) and (:fromDate is null or r.serviceRequestedAt>=:fromDate) and (:toDate is null or r.serviceRequestedAt<:toDate)")
     Page<ServiceRequest> customerRequests(@Param("customerId") Long customerId,@Param("status") RequestStatus status,@Param("fromDate") java.time.LocalDateTime from,@Param("toDate") java.time.LocalDateTime to,Pageable page);

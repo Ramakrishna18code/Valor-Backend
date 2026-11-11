@@ -7,6 +7,7 @@ import com.valor.pricing.PricingException;
 import com.valor.pricing.PricingService;
 import com.valor.workflow.*;
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.persistence.LockModeType;
 import java.io.*;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -68,6 +69,9 @@ class CommerceService {
     private final AmcRenewalRequestRepository renewals;
     @Autowired(required = false)
     private AmcPurchaseOrderRepository amcPurchases;
+    @Autowired(required = false)
+    private CompanyCashLedgerService companyCashLedger;
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private FinanceAccess financeAccess;
     private final AssetDocumentRepository documents;
     private final PaymentRefundRepository refunds;
     private final RazorpayWebhookEventRepository webhookEvents;
@@ -171,6 +175,7 @@ class CommerceService {
         if (!isCustomer(actor)) throw denied();
         CustomerProfile owner = customer(actor);
         Invoice invoice = authorized(invoices.lockById(invoiceId).orElseThrow(() -> missing("Invoice")));
+        if(financeAccess!=null)financeAccess.requirePaymentStageDue(invoice.getId());
         if (invoice.getStatus() != InvoiceStatus.ISSUED) throw new CommerceException(409, "Invoice is not eligible for wallet payment");
         if (!"INR".equalsIgnoreCase(invoice.getCurrency())) throw new CommerceException(400, "Wallet payments are supported only for INR invoices");
         if (payments.findByInvoiceIdAndStatusIn(invoice.getId(), List.of(PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED)).isPresent()) {
@@ -244,6 +249,7 @@ class CommerceService {
             throw new CommerceException(400, "New AMC purchases must use the Razorpay AMC checkout flow");
         }
         Invoice invoice = input.invoiceId() == null ? null : authorized(invoices.findById(input.invoiceId()).orElseThrow(() -> missing("Invoice")));
+        if(invoice!=null&&financeAccess!=null)financeAccess.requirePaymentStageDue(invoice.getId());
         CustomerProfile customer = isCustomer(actor) ? customer(actor)
                 : input.customerProfileId() != null ? customer(input.customerProfileId())
                 : invoice == null ? null : invoice.getCustomer();
@@ -297,6 +303,7 @@ class CommerceService {
         User actor = identities.actor();
         if (!isCustomer(actor) && !isAdmin(actor)) throw denied();
         Invoice invoice = authorized(invoices.lockById(input.invoiceId()).orElseThrow(() -> missing("Invoice")));
+        if(financeAccess!=null)financeAccess.requirePaymentStageDue(invoice.getId());
         if (invoice.getStatus() == InvoiceStatus.PAID || invoice.getStatus() == InvoiceStatus.VOID || invoice.getStatus() == InvoiceStatus.CANCELLED) {
             throw new CommerceException(409, "Invoice is not eligible for payment");
         }
@@ -460,6 +467,7 @@ class CommerceService {
         User actor = identities.actor();
         if (!isCustomer(actor)) throw denied();
         Invoice invoice = authorized(invoices.lockById(input.invoiceId()).orElseThrow(() -> missing("Invoice")));
+        if(financeAccess!=null)financeAccess.requirePaymentStageDue(invoice.getId());
         if (invoice.getStatus() == InvoiceStatus.PAID || invoice.getStatus() == InvoiceStatus.VOID || invoice.getStatus() == InvoiceStatus.CANCELLED) {
             throw new CommerceException(409, "Invoice is not eligible for cash payment");
         }
@@ -497,6 +505,7 @@ class CommerceService {
         payment.setStatus(PaymentStatus.SUCCEEDED); payment.setGatewayStatus("cash_verified"); payment.setGatewaySyncedAt(now);
         payment.setProviderReference("CASH-" + otp.id);
         if (payment.getInvoice() != null) { payment.getInvoice().setStatus(InvoiceStatus.PAID); settleInstallationMilestone(payment); }
+        if (companyCashLedger != null && actor.getRole() == Role.TECHNICIAN) companyCashLedger.recordVerifiedCash(payment, actor);
         emails.paymentResult(payment.getCustomer().getUser().getId(), payment.getCustomer().getFullName(), payment.getId(), payment.getStatus().name());
         return cashOtpView(otp, true, false);
     }
@@ -563,6 +572,7 @@ class CommerceService {
         PaymentRefund reference = refunds.findById(refundId).orElseThrow(() -> missing("Refund"));
         PaymentRecord payment = payments.lockById(reference.getPayment().getId()).orElseThrow(() -> missing("Payment"));
         PaymentRefund refund = refunds.lockById(refundId).orElseThrow(() -> missing("Refund"));
+        entityManager.refresh(refund, LockModeType.PESSIMISTIC_WRITE);
         if (refund.getStatus() != RefundStatus.REQUESTED) throw new CommerceException(409, "Refund is not awaiting approval");
         if (refund.getProviderIdempotencyKey() == null || refund.getProviderIdempotencyKey().isBlank()) {
             refund.setProviderIdempotencyKey("refund-" + UUID.randomUUID());
@@ -623,9 +633,46 @@ class CommerceService {
         return view(payment);
     }
 
+    RefundView rejectRefund(Long refundId, RefundRejection input) {
+        requireAdmin();
+        if (input.refundId() == null || !refundId.equals(input.refundId())) {
+            throw new CommerceException(400, "Refund reference mismatch");
+        }
+        PaymentRefund reference = refunds.findById(refundId).orElseThrow(() -> missing("Refund"));
+        PaymentRecord payment = payments.lockById(reference.getPayment().getId()).orElseThrow(() -> missing("Payment"));
+        PaymentRefund refund = refunds.lockById(refundId).orElseThrow(() -> missing("Refund"));
+        entityManager.refresh(refund, LockModeType.PESSIMISTIC_WRITE);
+        if (refund.getStatus() != RefundStatus.REQUESTED) {
+            throw new CommerceException(409, "Only a refund awaiting approval can be rejected");
+        }
+        User actor = identities.actor();
+        refund.setStatus(RefundStatus.REJECTED);
+        refund.setRejectedBy(actor);
+        refund.setRejectedAt(LocalDateTime.now());
+        refund.setRejectionReason(clean(input.reason(), 500));
+        refunds.saveAndFlush(refund);
+        audit.record("PAYMENT_REFUND_REJECTED", "PAYMENT_REFUND", refundId,
+                "Admin rejected customer refund request amount=" + refund.getAmount(),
+                "status=" + payment.getStatus(), "refundStatus=" + refund.getStatus(), "SUCCESS");
+        return view(refund);
+    }
+
     List<RefundView> paymentRefunds(Long paymentId) {
         authorized(payments.findById(paymentId).orElseThrow(() -> missing("Payment")));
         return refunds.findByPaymentIdOrderByCreatedAtAscIdAsc(paymentId).stream().map(this::view).toList();
+    }
+
+    PageView<RefundView> adminRefundRequests(RefundStatus status, Pageable pageable) {
+        requireAdmin();
+        if (pageable.getPageNumber() < 0 || pageable.getPageSize() < 1 || pageable.getPageSize() > 100) {
+            throw new CommerceException(400, "Invalid paging");
+        }
+        Pageable sorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt"));
+        Page<PaymentRefund> rows = status == null
+                ? refunds.findAll(sorted)
+                : refunds.findByStatus(status, sorted);
+        return page(rows.map(this::view));
     }
 
     Download refundDocument(Long paymentId, String format, boolean includeUnsettled) {
@@ -679,7 +726,9 @@ class CommerceService {
 
     Download paymentReceiptPdf(Long paymentId) {
         PaymentRecord payment = authorized(payments.findById(paymentId).orElseThrow(() -> missing("Payment")));
-        if (payment.getStatus() != PaymentStatus.SUCCEEDED) {
+        if (payment.getStatus() != PaymentStatus.SUCCEEDED
+                && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED
+                && payment.getStatus() != PaymentStatus.REFUNDED) {
             throw new CommerceException(409, "A receipt is available only for a successful payment");
         }
         Invoice invoice = payment.getInvoice();
@@ -707,6 +756,34 @@ class CommerceService {
         byte[] bytes = minimalPdf(text);
         return new Download("receipt-" + payment.getId() + ".pdf", MediaType.APPLICATION_PDF_VALUE, (long) bytes.length,
                 new org.springframework.core.io.ByteArrayResource(bytes));
+    }
+
+    Download invoicePdf(Long invoiceId) {
+        Invoice invoice = authorized(invoices.findById(invoiceId).orElseThrow(() -> missing("Invoice")));
+        if (invoice.getInvoiceNumber() == null || invoice.getCustomer() == null
+                || invoice.getTotalAmount() == null || invoice.getCurrency() == null) {
+            throw new CommerceException(409, "Required invoice information is unavailable");
+        }
+        List<String> invoiceLines = new ArrayList<>(List.of(
+                "VALOR INVOICE",
+                "Invoice: " + invoice.getInvoiceNumber(),
+                "Customer: " + invoice.getCustomer().getFullName(),
+                "Description: " + invoice.getDescription(),
+                "Issued: " + invoice.getIssuedDate(),
+                "Due: " + (invoice.getDueDate() == null ? "Not provided" : invoice.getDueDate())));
+        invoice.getItems().forEach(item -> invoiceLines.add("Item: " + item.getDescription() + " | "
+                + item.getQuantity() + " x " + item.getUnitAmount() + " = " + item.getLineAmount() + " "
+                + invoice.getCurrency()));
+        invoiceLines.add("Subtotal: " + invoice.getSubtotal() + " " + invoice.getCurrency());
+        invoiceLines.add("Tax: " + invoice.getTaxAmount() + " " + invoice.getCurrency());
+        if (!invoice.getItems().isEmpty()) invoiceLines.add("Tax treatment: Included in service prices");
+        invoiceLines.add("Total: " + invoice.getTotalAmount() + " " + invoice.getCurrency());
+        invoiceLines.add("Status: " + invoice.getStatus().name());
+        invoiceLines.add("This document reflects the invoice details recorded by Valor.");
+        String text = String.join("\n", invoiceLines);
+        byte[] bytes = minimalPdf(text);
+        return new Download("invoice-" + invoice.getInvoiceNumber() + ".pdf", MediaType.APPLICATION_PDF_VALUE,
+                (long) bytes.length, new org.springframework.core.io.ByteArrayResource(bytes));
     }
 
     private boolean thresholdConfigured() {
@@ -1131,6 +1208,7 @@ class CommerceService {
         requireAdmin();
         ServiceRequest serviceRequest = requests.lockWithOwner(serviceRequestId).orElseThrow(() -> missing("Service request"));
         if (serviceRequest.getStatus() != RequestStatus.COMPLETED) throw new CommerceException(409, "Service must be completed before invoice");
+        requireItemizedAmcBilling(serviceRequest);
         Optional<Invoice> existing = invoices.findFirstByServiceRequestIdOrderByCreatedAtDesc(serviceRequestId)
                 .filter(i -> i.getStatus() != InvoiceStatus.VOID && i.getStatus() != InvoiceStatus.CANCELLED);
         if (existing.isPresent()) return view(existing.get());
@@ -1151,6 +1229,7 @@ class CommerceService {
         Invoice row = new Invoice();
         row.setCustomer(customer); row.setCreatedBy(identities.actor()); row.setDescription(input.description().trim());
         ServiceRequest serviceRequest = input.serviceRequestId() == null ? null : request(input.serviceRequestId(), customer);
+        if(serviceRequest!=null)requireItemizedAmcBilling(serviceRequest);
         AmcContract amcContract = input.amcContractId() == null ? null : amc(input.amcContractId(), customer);
         row.setServiceRequest(serviceRequest);
         row.setAmcContract(amcContract);
@@ -1350,6 +1429,15 @@ class CommerceService {
         } catch (PricingException ex) {
             throw new CommerceException(400, ex.getMessage());
         }
+    }
+    private void requireItemizedAmcBilling(ServiceRequest request){
+        if(financeAccess==null||request.getLift()==null)return;
+        LocalDate date=request.getPreferredVisitDate()==null?LocalDate.now():request.getPreferredVisitDate();
+        var visitDecision=financeAccess.rows("SELECT service_date FROM service_request_coverage_decisions WHERE service_request_id=? AND scope='VISIT' ORDER BY version_number DESC LIMIT 1",request.getId());
+        if(!visitDecision.isEmpty())date=(LocalDate)visitDecision.get(0).get("serviceDate");
+        if(financeAccess.count("SELECT COUNT(*) FROM amc_contracts WHERE lift_id=? AND status='ACTIVE' AND start_date<=? AND end_date>=?",request.getLift().getId(),date,date)>0
+                ||financeAccess.count("SELECT COUNT(*) FROM service_request_coverage_decisions WHERE service_request_id=? AND scope='VISIT' AND contract_id IS NOT NULL AND version_number=(SELECT MAX(v.version_number) FROM service_request_coverage_decisions v WHERE v.service_request_id=? AND v.scope='VISIT')",request.getId(),request.getId())>0)
+            throw new CommerceException(409,"This lift has a maintenance plan. Review coverage and create an itemized quotation for any work charged to the customer");
     }
     private void processGatewayEvent(String event, JsonNode paymentNode, JsonNode refundNode, String orderId, String paymentId, String refundId) {
         if (event.startsWith("payment.")) {
@@ -1589,7 +1677,7 @@ class CommerceService {
         if (isAdmin(actor)) return true;
         return actor.getRole() == Role.TECHNICIAN && payment.getServiceRequest() != null
                 && assignments.existsByRequestIdAndTechnicianUserIdAndStatusIn(payment.getServiceRequest().getId(), actor.getId(),
-                        List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED));
+                        List.of(AssignmentStatus.ASSIGNED, AssignmentStatus.ACCEPTED, AssignmentStatus.COMPLETED));
     }
     private boolean cashContextMatches(CashPaymentOtp otp, PaymentRecord payment) {
         return otp.invoice != null && payment.getInvoice() != null
@@ -1620,7 +1708,7 @@ class CommerceService {
         if (type.equals("image/jpeg")) return bytes[0] == (byte)0xFF && bytes[1] == (byte)0xD8;
         return type.equals("image/webp") && bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F' && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P';
     }
-    private byte[] minimalPdf(String text) {
+    static byte[] minimalPdf(String text) {
         String safe = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)").replace("\r", "").replace("\n", ") Tj T* (");
         String stream = "BT /F1 11 Tf 50 760 Td (" + safe + ") Tj ET";
         String pdf = "%PDF-1.4\n1 0 obj<<>>endobj\n2 0 obj<</Type/Catalog/Pages 3 0 R>>endobj\n3 0 obj<</Type/Pages/Count 1/Kids[4 0 R]>>endobj\n4 0 obj<</Type/Page/Parent 3 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 5 0 R>>>>/Contents 6 0 R>>endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n6 0 obj<</Length " + stream.length() + ">>stream\n" + stream + "\nendstream\nendobj\ntrailer<</Root 2 0 R>>\n%%EOF\n";
@@ -1628,8 +1716,16 @@ class CommerceService {
     }
     private <T> PageView<T> page(Page<T> p) { return new PageView<>(p.getContent(), p.getTotalElements(), p.getTotalPages(), p.getNumber(), p.getSize()); }
     private PaymentView view(PaymentRecord p) { return new PaymentView(p.getId(), p.getCustomer().getId(), id(p.getServiceRequest()), id(p.getAmcContract()), id(p.getInvoice()), p.getAmount(), p.getCurrency(), p.getPurpose(), p.getStatus(), p.getProviderReference(), p.getRazorpayOrderId(), p.getRazorpayPaymentId(), p.getRazorpayPaymentLinkId(), p.getGatewayStatus(), p.getGatewaySyncedAt(), p.getFailureReason(), p.getCreatedAt(), p.getUpdatedAt()); }
-    private RefundView view(PaymentRefund r) { return new RefundView(r.getId(), r.getPayment().getId(), r.getAmount(), r.getCurrency(), r.getStatus(), r.getRazorpayRefundId(), r.getGatewayStatus(), r.getReason(), r.getCreatedAt(), r.getUpdatedAt()); }
-    private InvoiceView view(Invoice i) { return new InvoiceView(i.getId(), i.getInvoiceNumber(), i.getCustomer().getId(), id(i.getServiceRequest()), id(i.getAmcContract()), i.getDescription(), i.getSubtotal(), i.getTaxAmount(), i.getTotalAmount(), i.getCurrency(), i.getStatus(), i.getIssuedDate(), i.getDueDate(), i.getCreatedAt(), i.getUpdatedAt()); }
+    private RefundView view(PaymentRefund r) { return new RefundView(r.getId(), r.getPayment().getId(), r.getAmount(), r.getCurrency(), r.getStatus(), r.getRazorpayRefundId(), r.getGatewayStatus(), r.getReason(), r.getCreatedAt(), r.getUpdatedAt(), r.getStatus() == RefundStatus.REQUESTED && r.getApprovedBy() != null && r.getSecondApprovedBy() == null, r.getRejectionReason(), r.getRejectedAt()); }
+    private InvoiceView view(Invoice i) {
+        List<InvoiceLineItemView> items = i.getItems().stream()
+                .map(item -> new InvoiceLineItemView(item.getPricingCode(), item.getDescription(), item.getQuantity(),
+                        item.getUnitAmount(), item.getLineAmount()))
+                .toList();
+        return new InvoiceView(i.getId(), i.getInvoiceNumber(), i.getCustomer().getId(), id(i.getServiceRequest()),
+                id(i.getAmcContract()), i.getDescription(), i.getSubtotal(), i.getTaxAmount(), i.getTotalAmount(),
+                i.getCurrency(), i.getStatus(), i.getIssuedDate(), i.getDueDate(), i.getCreatedAt(), i.getUpdatedAt(), items);
+    }
     private SupportTicketView view(SupportTicket t) { return new SupportTicketView(t.getId(), t.getTicketReference(), t.getCreatedBy().getId(), t.getCreatedBy().getRole().name(), id(t.getServiceRequest()), t.getCategory(), t.getPriority(), t.getStatus(), t.getSubject(), t.getDescription(), t.getPreferredContact(), isAdmin(identities.actor()) ? t.getAdminNotes() : null, t.getCreatedAt(), t.getUpdatedAt()); }
     private RenewalView view(AmcRenewalRequest r) { return new RenewalView(r.getId(), r.getContract().getId(), r.getCustomer().getId(), r.getStatus(), r.getRequestedStartDate(), r.getRequestedEndDate(), r.getQuotedAmount(), r.getCurrency(), id(r.getInvoice()), id(r.getPayment()), r.getCustomerNotes(), isAdmin(identities.actor()) ? r.getAdminNotes() : null, r.getCreatedAt(), r.getUpdatedAt()); }
     private AssetDocumentView view(AssetDocument d) { return new AssetDocumentView(d.getId(), d.getOwnerType(), d.getOwnerId(), d.getOriginalFilename(), d.getContentType(), d.getFileSize(), d.getUploadedBy().getId(), d.getCreatedAt()); }

@@ -72,6 +72,7 @@ interface AssetDocumentRepository extends JpaRepository<AssetDocument, Long> {
 }
 interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Long> {
     List<PaymentRefund> findByPaymentIdOrderByCreatedAtAscIdAsc(Long paymentId);
+    Page<PaymentRefund> findByStatus(RefundStatus status, Pageable pageable);
     Optional<PaymentRefund> findByRazorpayRefundId(String razorpayRefundId);
     boolean existsByPaymentIdAndStatusIn(Long paymentId, Collection<RefundStatus> statuses);
     boolean existsByPaymentCustomerIdAndPaymentPurposeAndStatusIn(Long customerId, PaymentPurpose purpose, Collection<RefundStatus> statuses);

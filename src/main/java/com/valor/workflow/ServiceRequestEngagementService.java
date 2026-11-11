@@ -24,6 +24,8 @@ class ServiceRequestEngagementService {
     private final WorkflowIdentityAccess profiles;
     private final RequestAttachmentStorage storage;
     private final AuditService audit;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.valor.commerce.FinanceAccess finance;
     ServiceRequestEngagementService(RequestRepository requests, ServiceRequestAttachmentRepository attachments, AssignmentRepository assignments,
             ServiceRequestFeedbackRepository feedback, AssetIdentityAccess identities, WorkflowIdentityAccess profiles,
             RequestAttachmentStorage storage, AuditService audit) {
@@ -73,8 +75,14 @@ class ServiceRequestEngagementService {
         validateRequestAttachmentWrite(request, actor);
         ServiceRequestAttachment row = attachments.findById(attachmentId).orElseThrow(ServiceRequestEngagementService::missing);
         if (!row.getRequest().getId().equals(request.getId()) || !row.getUploadedBy().getId().equals(actor.getId())) throw missing();
+        if (finance != null) finance.requireAttachmentDeletable(requestId,attachmentId);
         attachments.delete(row);
-        try { storage.delete(row.getStorageKey()); } catch (IOException ignored) { }
+        attachments.flush();
+        // Remove the file only once the database deletion has committed.
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override public void afterCommit() { try { storage.delete(row.getStorageKey()); } catch (IOException ignored) { } }
+                });
         audit.record("DOCUMENT_DELETE", "SERVICE_REQUEST_ATTACHMENT", row.getId(), "Deleted service request attachment request=" + request.getId(),
                 "document=" + row.getId() + ",request=" + request.getId() + ",contentType=" + row.getContentType() + ",size=" + row.getFileSize(),
                 "deleted=true", "SUCCESS");

@@ -1,4 +1,7 @@
 # Valor Lift Services & Maintenance Backend
+
+For the current admin finance and customer dashboard data flow, see [Service finance and customer dashboard](docs/backend/SERVICE_FINANCE_AND_DASHBOARD.md). Record future API, persistence, and policy changes using the [documentation update guide](../DOCUMENTATION_UPDATE_GUIDE.md).
+
 ## Overview
 This Spring Boot 3 backend provides the REST API and persistence layer for the Valor Lift Services & Maintenance platform.
 It covers:
@@ -74,6 +77,38 @@ Spring Boot imports the local `.env` file through `spring.config.import`. Keep
 `.env` local and never commit it. The dev profile can bootstrap a local
 SUPER_ADMIN account when `DEV_BOOTSTRAP_ENABLED=true` and both bootstrap
 credentials are present in `.env`.
+
+### JWT and Razorpay environment configuration
+
+Set `JWT_SECRET` to a cryptographically random value of at least 32 bytes in
+each environment. For local PowerShell, generate one with:
+
+```powershell
+$bytes = New-Object byte[] 64
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+[Convert]::ToBase64String($bytes)
+```
+
+Changing the JWT secret invalidates all access and refresh tokens signed with
+the previous secret. Store the generated value only in `.env` locally and in
+the approved secret manager for UAT/production.
+
+For both UAT and production, provision `SPRING_PROFILES_ACTIVE`, `DB_URL`,
+`DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, `CORS_ALLOWED_ORIGINS`,
+`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, and
+`RAZORPAY_MODE` in the deployment environment. Use distinct database and
+payment credentials per environment; never copy production credentials into
+UAT. Keep only the public API base URL in frontend build configuration.
+
+For Razorpay sandbox, set `RAZORPAY_MODE=test`, use a sandbox key ID beginning
+with `rzp_test_`, set its matching key secret, and set `RAZORPAY_WEBHOOK_SECRET`
+to the exact webhook signing secret configured for the Razorpay dashboard
+webhook. Do not generate a substitute webhook secret: it will not validate
+provider-delivered signatures. Production uses a separately approved
+`RAZORPAY_MODE=live`, matching `rzp_live_` key pair, and production dashboard
+webhook secret. The backend fails at startup when a partial or mode-mismatched
+Razorpay configuration is supplied. Keep all secrets out of frontend variables,
+logs, source control, and payment request payloads.
 
 ### Local dev seed data
 
@@ -553,3 +588,7 @@ The local development reset and demo-seed operations are destructive. They are i
 These operations require an explicit action, verified local database identity, a separate expected database name, an exact confirmation phrase, and an operator-supplied local-only demo password. They are not automatic application-startup behavior and must never be implemented as a Flyway migration. Demo accounts use the reserved `@valor-demo.test` namespace; their credentials are local-only and must never be deployed or written here. Local uploads are temporary development storage, not production-grade durable storage. Production must explicitly configure private durable storage.
 
 Before using `preview`, `reset-and-seed`, `seed-if-empty`, or `delete-demo-seed`, verify the active local profile and target database privately. `preview` is read-only. `reset-and-seed` clears only the explicitly classified local customer/technician dataset before creating the deterministic demo dataset. `seed-if-empty` never clears existing data. `delete-demo-seed` selects only the exact reserved demo identities and their verified dependents. Associated files are cleaned by storage key only; an entire storage root must never be recursively deleted.
+
+### Local signup email inbox
+
+For local testing, use the dev profile with REGISTRATION_LOCAL_INBOX_ENABLED=true in .env. Run node scripts/local-email-inbox.cjs and open http://127.0.0.1:8025 on the same PC. Signup codes are written to the ignored .local-mailbox directory; registration still requires the one-time code. SMTP is unchanged. The local inbox is disabled when prod is active or dev is absent. Set the flag to false when using real email delivery. Never publish mailbox files.
