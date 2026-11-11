@@ -121,7 +121,7 @@ class ServiceFinanceWorkflow {
         if(!in.draft()&&(in.estimatedDurationMinutes()==null||in.estimatedDurationMinutes()<1||in.estimatedDurationMinutes()>43200
                 ||!FinanceAccess.oneOf(in.severity(),"LOW","MEDIUM","HIGH","CRITICAL")||!FinanceAccess.oneOf(in.safetyStatus(),"SAFE","RESTRICTED","UNSAFE")))throw new CommerceException(400,"Invalid inspection details");
         var evidence=in.evidenceIds()==null?List.<Long>of():in.evidenceIds().stream().distinct().toList();
-        if(!in.draft()&&evidence.isEmpty()||evidence.size()>20)throw new CommerceException(400,"One to twenty job evidence attachments are required");
+        if(!in.draft()&&evidence.isEmpty()||evidence.size()>20)throw new CommerceException(400,"Attach between 1 and 20 files as job evidence.");
         for(Long id:evidence){if(id==null)throw new CommerceException(400,"Invalid evidence");a.evidence(job,id);}
         var drafts=a.rows("SELECT id FROM service_inspections WHERE service_request_id=? AND technician_profile_id=? AND status='DRAFT' ORDER BY id DESC",job,tech);
         long id=drafts.isEmpty()?a.insert("INSERT INTO service_inspections(service_request_id,technician_profile_id,reported_problem,observed_problem,root_cause,severity,safety_status,recommended_repair,required_labour,estimated_duration_minutes,status) VALUES(?,?,'','','','UNASSESSED','UNASSESSED','','',0,'DRAFT')",job,tech):((Number)drafts.get(0).get("id")).longValue();

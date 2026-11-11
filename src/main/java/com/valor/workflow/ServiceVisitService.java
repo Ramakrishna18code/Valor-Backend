@@ -297,7 +297,7 @@ public class ServiceVisitService {
         if (!visits.overlaps(technicianId, date, start, end, ACTIVE, excludeId).isEmpty()) throw conflict("Technician has an overlapping visit");
     }
     private static void validateWindow(LocalDate date, LocalTime start, LocalTime end) {
-        if (date == null || start == null || end == null || !start.isBefore(end)) throw new WorkflowException(400, "Invalid visit time range");
+        if (date == null || start == null || end == null || !start.isBefore(end)) throw new WorkflowException(400, "Choose a valid visit date and time range.");
     }
     private VisitHistory record(ServiceVisit visit, User actor, String type, String reason) {
         VisitHistory event = new VisitHistory(visit, actor, type, reason); event.setScheduledDate(visit.getScheduledDate());
@@ -349,11 +349,11 @@ public class ServiceVisitService {
     private void refreshCoverage(ServiceRequest request,LocalDate date){
         if(amcCoverage!=null&&request.getLift()!=null)amcCoverage.capture(request.getId(),"VISIT",date);
     }
-    private Pageable paging(int page, int size) { if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Invalid page"); return PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "scheduledDate", "startTime", "id")); }
-    private Pageable changeRequestPaging(int page, int size) { if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Invalid page"); return PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")); }
-    private static void requireReason(String reason) { if (reason == null || reason.isBlank()) throw new WorkflowException(400, "Reason is required"); }
+    private Pageable paging(int page, int size) { if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Please choose a valid page number."); return PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "scheduledDate", "startTime", "id")); }
+    private Pageable changeRequestPaging(int page, int size) { if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Please choose a valid page number."); return PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")); }
+    private static void requireReason(String reason) { if (reason == null || reason.isBlank()) throw new WorkflowException(400, "Please explain why this change is needed."); }
     private static void admin(User actor) { if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied(); }
-    private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
     private static WorkflowException conflict(String message) { return new WorkflowException(409, message); }
     private static WorkflowException missing(String message) { return new WorkflowException(404, message); }
 }

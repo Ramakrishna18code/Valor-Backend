@@ -67,7 +67,7 @@ public class CommunicationService {
     }
 
     private List<MessageView> enqueueInternalOnce(SendRequest input, boolean mandatory) {
-        User recipient = users.findById(input.recipientUserId()).orElseThrow(() -> new CommunicationException(404, "Recipient not found"));
+        User recipient = users.findById(input.recipientUserId()).orElseThrow(() -> new CommunicationException(404, "We could not find the notification recipient."));
         CommunicationEvent event = events.findByIdempotencyKey(input.idempotencyKey()).orElseGet(() -> {
             CommunicationEvent e = new CommunicationEvent(); e.eventType = input.eventType(); e.recipient = recipient;
             e.idempotencyKey = input.idempotencyKey(); e.payload = payload(input.variables()); return events.save(e);
@@ -126,7 +126,7 @@ public class CommunicationService {
     }
 
     @Transactional(readOnly = true) public PageView list(CommunicationStatus status, int page, int size) {
-        identities.requireAdmin(); if (page < 0 || size < 1 || size > 100) throw new CommunicationException(400, "Invalid page");
+        identities.requireAdmin(); if (page < 0 || size < 1 || size > 100) throw new CommunicationException(400, "Please choose a valid page number.");
         var rows = messages.list(status, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")));
         return new PageView(rows.getContent().stream().map(this::view).toList(), rows.getNumber(), rows.getSize(), rows.getTotalElements(), rows.getTotalPages());
     }

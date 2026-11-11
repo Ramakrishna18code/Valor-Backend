@@ -15,7 +15,7 @@ class CustomerProfileController {
     CustomerProfileController(AssetIdentityAccess identities,CustomerRepo customers,EntityManager em,AuthService auth){this.identities=identities;this.customers=customers;this.em=em;this.auth=auth;}
     record ProfileWrite(@NotBlank @Size(max=160) String fullName,@Size(max=20) String alternatePhone,
                         @Size(max=200) String companyName,@Size(max=500) String address) implements AuthDtos.StrictInput {}
-    private CustomerProfile profile(){User u=identities.actor();if(u.getRole()!=Role.CUSTOMER)throw new org.springframework.security.access.AccessDeniedException("Access denied");identities.requireActiveCustomerUser(u);return customers.findByUserId(u.getId()).orElseThrow();}
+    private CustomerProfile profile(){User u=identities.actor();if(u.getRole()!=Role.CUSTOMER)throw new org.springframework.security.access.AccessDeniedException("You do not have permission to access this information.");identities.requireActiveCustomerUser(u);return customers.findByUserId(u.getId()).orElseThrow();}
     record TechnicianCounts(long districtCount,long stateCount,long pincodeCount) {}
     private AuthDtos.CustomerSummary view(CustomerProfile p){if(p.referralCode==null)p.referralCode=auth.generateReferralCode(p.fullName);return new AuthDtos.CustomerSummary(p.id,p.fullName,p.user.getEmail(),p.user.getPhone(),p.alternatePhone,p.companyName,p.address,p.status,p.active,p.referralCode);}
     @Operation(operationId="getCustomerProfile") @GetMapping("/customers/me")

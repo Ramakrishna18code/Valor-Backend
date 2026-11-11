@@ -47,7 +47,7 @@ class ProtectionErrorHandler {
     ResponseEntity<ApiResponse<Object>> conflict(Exception ignored) { return response(409, "Protection record conflicts with existing data"); }
 
     @ExceptionHandler(AccessDeniedException.class)
-    ResponseEntity<ApiResponse<Object>> denied(Exception ignored) { return response(403, "Access denied"); }
+    ResponseEntity<ApiResponse<Object>> denied(Exception ignored) { return response(403, "You do not have permission to access this information."); }
 
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiResponse<Object>> unexpected(Exception ignored) { return response(500, "Internal server error"); }

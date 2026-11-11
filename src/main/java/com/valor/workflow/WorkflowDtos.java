@@ -11,7 +11,7 @@ public final class WorkflowDtos {
     private WorkflowDtos() {}
     public interface StrictWrite {
         @JsonAnySetter
-        default void rejectUnknown(String field, JsonNode value) { throw new IllegalArgumentException("Unsupported workflow field"); }
+        default void rejectUnknown(String field, JsonNode value) { throw new IllegalArgumentException("This service-request field is not supported."); }
     }
     public record CreateRequest(
             @Schema(description="Admin-only; required for admin creation. CUSTOMER submissions are rejected; customer ownership comes from JWT.") @Positive Long customerProfileId, @Positive Long liftId,

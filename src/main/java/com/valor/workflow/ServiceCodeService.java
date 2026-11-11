@@ -108,7 +108,7 @@ class ServiceCodeService {
         if (current == null) throw new WorkflowException(409, "This job does not use a lift service code");
         if ((action == ServiceCodeAction.START && request.getStatus() != RequestStatus.REACHED_SITE)
                 || (action == ServiceCodeAction.COMPLETE && request.getStatus() != RequestStatus.TESTING)) {
-            throw new WorkflowException(409, "Verification is not available in this state");
+            throw new WorkflowException(409, "Code verification is not available at this stage of the job.");
         }
         if ("VERIFIED".equals(current.status())) return current;
         CodeView customerCode = stateForRequest(requestId, action, true);
@@ -129,14 +129,14 @@ class ServiceCodeService {
         var assignment = assignments.active(requestId).orElseThrow(() -> new WorkflowException(409, "Active assignment required"));
         if (!assignment.getTechnician().getId().equals(technician.getId())) throw denied();
         if ((action == ServiceCodeAction.START && request.getStatus() != RequestStatus.REACHED_SITE)
-                || (action == ServiceCodeAction.COMPLETE && request.getStatus() != RequestStatus.TESTING)) throw new WorkflowException(409, "Verification is not available in this state");
+                || (action == ServiceCodeAction.COMPLETE && request.getStatus() != RequestStatus.TESTING)) throw new WorkflowException(409, "Code verification is not available at this stage of the job.");
         LiftServiceCode code = codes.lockByLiftId(request.getLift().getId()).orElseThrow(() -> new WorkflowException(409, "Customer lift code is not configured"));
         ServiceCodeVerification verification = verifications.lock(requestId, technician.getId(), action).orElseGet(() -> {
             ServiceCodeVerification created = new ServiceCodeVerification(); created.request = request; created.code = code; created.technician = technician; created.action = action; return verifications.save(created);
         });
         LocalDateTime now = LocalDateTime.now();
         if (verification.verifiedAt != null) return stateForRequest(requestId, action, false);
-        if (verification.lockedUntil != null && verification.lockedUntil.isAfter(now)) throw new WorkflowException(429, "Verification is temporarily locked");
+        if (verification.lockedUntil != null && verification.lockedUntil.isAfter(now)) throw new WorkflowException(429, "Verification is temporarily locked. Please try again later.");
         if (submitted == null || !encoder.matches(submitted, code.codeHash)) {
             verification.attempts++;
             if (verification.attempts >= MAX_ATTEMPTS) verification.lockedUntil = now.plusMinutes(15);
@@ -175,6 +175,6 @@ class ServiceCodeService {
         } catch (Exception error) { throw new IllegalStateException("Unable to protect service code", error); }
     }
     private String generate() { return String.format("%06d", 100000 + random.nextInt(900000)); }
-    private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
     record CodeView(Long liftId, String code, String status, LocalDateTime lockedUntil, Integer attempts, LocalDateTime verifiedAt) {}
 }

@@ -31,7 +31,7 @@ public class AssetIdentityAccess {
 
     public void requireAdmin() {
         Role role = actor().getRole();
-        if (role != Role.ADMIN && role != Role.SUPER_ADMIN) throw new AccessDeniedException("Access denied");
+        if (role != Role.ADMIN && role != Role.SUPER_ADMIN) throw new AccessDeniedException("You do not have permission to access this information.");
     }
 
     public CustomerProfile activeCustomer(Long id) {
@@ -44,8 +44,8 @@ public class AssetIdentityAccess {
 
     public void requireActiveCustomerUser(User user) {
         CustomerProfile profile = customers.findByUserId(user.getId())
-                .orElseThrow(() -> new AccessDeniedException("Access denied"));
-        if (!profile.isActive() || !"ACTIVE".equals(profile.getStatus())) throw new AccessDeniedException("Access denied");
+                .orElseThrow(() -> new AccessDeniedException("You do not have permission to access this information."));
+        if (!profile.isActive() || !"ACTIVE".equals(profile.getStatus())) throw new AccessDeniedException("You do not have permission to access this information.");
     }
 
     private boolean usable(User user) {

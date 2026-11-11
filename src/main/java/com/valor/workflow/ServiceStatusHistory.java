@@ -35,7 +35,7 @@ public class ServiceStatusHistory {
 
     protected ServiceStatusHistory() {}
     public ServiceStatusHistory(ServiceRequest request, RequestStatus from, RequestStatus to, User actor, String notes) {
-        if (from == to) throw new IllegalArgumentException("History requires a status transition");
+        if (from == to) throw new IllegalArgumentException("Choose a different status before saving this update.");
         this.request = request; this.fromStatus = from; this.toStatus = to; this.changedBy = actor;
         this.notes = notes; this.changedAt = LocalDateTime.now();
     }

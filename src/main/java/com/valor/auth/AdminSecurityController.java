@@ -93,7 +93,7 @@ class AdminSecurityService {
 
     RoleView updatePermissions(String name, List<String> codes) {
         User actor = identities.actor();
-        if (actor.getRole() != Role.SUPER_ADMIN) throw new org.springframework.security.access.AccessDeniedException("Access denied");
+        if (actor.getRole() != Role.SUPER_ADMIN) throw new org.springframework.security.access.AccessDeniedException("You do not have permission to access this information.");
         ManagedRole role = roleByName(name);
         if (Role.SUPER_ADMIN.name().equals(role.name)) throw new IllegalArgumentException("SUPER_ADMIN permissions are fixed");
         LinkedHashSet<String> requested = new LinkedHashSet<>();

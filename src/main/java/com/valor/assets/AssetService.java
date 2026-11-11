@@ -103,7 +103,7 @@ public class AssetService {
         identities.requireAdmin();
         Building building = activeBuilding(id);
         if (!building.getCustomer().getId().equals(input.customerProfileId())) {
-            throw new AssetException(400, "Building ownership cannot be changed");
+            throw new AssetException(400, "The building owner cannot be changed here.");
         }
         String before = buildingSummary(building);
         apply(building, input);
@@ -175,7 +175,7 @@ public class AssetService {
             rows = contracts.findOwned(actor.getId(), status, request).getContent();
         } else {
             if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) {
-                throw new AccessDeniedException("Access denied");
+                throw new AccessDeniedException("You do not have permission to access this information.");
             }
             rows = contracts.listAssets(status, request).getContent();
         }
@@ -234,7 +234,7 @@ public class AssetService {
     }
 
     private com.valor.auth.User customerActor() {
-        var user=identities.actor();if(user.getRole()!=Role.CUSTOMER)throw new AccessDeniedException("Access denied");
+        var user=identities.actor();if(user.getRole()!=Role.CUSTOMER)throw new AccessDeniedException("You do not have permission to access this information.");
         identities.requireActiveCustomerUser(user);return user;
     }
     public List<BuildingView> customerBuildings(int page, int size) {
@@ -299,7 +299,7 @@ public class AssetService {
         Long actorId = customerActor().getId();
         Lift lift = ownedActiveLift(id, actorId);
         if (!lift.getBuilding().getId().equals(input.buildingId())) {
-            throw new AssetException(400, "Lift building cannot be changed");
+            throw new AssetException(400, "A lift cannot be moved to another building.");
         }
         String before = liftSummary(lift);
         apply(lift, input);
@@ -316,13 +316,13 @@ public class AssetService {
     }
 
     private PageRequest pageRequest(int page, int size) {
-        if (page < 0 || size < 1 || size > MAX_LIST_SIZE) throw new AssetException(400, "Invalid page");
+        if (page < 0 || size < 1 || size > MAX_LIST_SIZE) throw new AssetException(400, "Please choose a valid page number.");
         return PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "id"));
     }
 
     private Building activeBuilding(Long id) {
         Building building = buildings.lockById(id).orElseThrow(() -> missing("Building"));
-        if (!building.isActive()) throw new AssetException(409, "Building is inactive");
+        if (!building.isActive()) throw new AssetException(409, "This building is no longer active.");
         identities.activeCustomer(building.getCustomer().getId());
         return building;
     }
@@ -331,21 +331,21 @@ public class AssetService {
         Lift existing = lifts.findById(id).orElseThrow(() -> missing("Lift"));
         activeBuilding(existing.getBuilding().getId());
         Lift lift = lifts.lockById(id).orElseThrow(() -> missing("Lift"));
-        if (!lift.isActive()) throw new AssetException(409, "Lift is inactive");
+        if (!lift.isActive()) throw new AssetException(409, "This lift is no longer active.");
         return lift;
     }
     private Building ownedActiveBuilding(Long id, Long userId) {
         Building building = buildings.lockById(id).orElseThrow(() -> missing("Building"));
         if (!building.getCustomer().getUser().getId().equals(userId)) throw missing("Building");
-        if (!building.isActive()) throw new AssetException(409, "Building is inactive");
+        if (!building.isActive()) throw new AssetException(409, "This building is no longer active.");
         identities.requireActiveCustomerUser(building.getCustomer().getUser());
         return building;
     }
     private Lift ownedActiveLift(Long id, Long userId) {
         Lift lift = lifts.lockById(id).orElseThrow(() -> missing("Lift"));
         if (!lift.getBuilding().getCustomer().getUser().getId().equals(userId)) throw missing("Lift");
-        if (!lift.getBuilding().isActive()) throw new AssetException(409, "Building is inactive");
-        if (!lift.isActive()) throw new AssetException(409, "Lift is inactive");
+        if (!lift.getBuilding().isActive()) throw new AssetException(409, "This building is no longer active.");
+        if (!lift.isActive()) throw new AssetException(409, "This lift is no longer active.");
         identities.requireActiveCustomerUser(lift.getBuilding().getCustomer().getUser());
         return lift;
     }
@@ -364,7 +364,7 @@ public class AssetService {
 
     private void apply(Building entity, BuildingWrite input) {
         if (input.latitude() == null || input.longitude() == null) {
-            throw new AssetException(400, "Building latitude and longitude are required");
+            throw new AssetException(400, "Please provide the building location.");
         }
         entity.setBuildingName(input.buildingName());
         entity.setBuildingType(input.buildingType());

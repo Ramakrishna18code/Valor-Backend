@@ -42,13 +42,13 @@ class ProfilePhotoController {
         User actor = identities.actor();
         if (actor.getRole() == Role.CUSTOMER) identities.requireActiveCustomerUser(actor);
         else if (actor.getRole() == Role.TECHNICIAN) profiles.technician(actor);
-        else throw new org.springframework.security.access.AccessDeniedException("Access denied");
+        else throw new org.springframework.security.access.AccessDeniedException("You do not have permission to access this information.");
         return root.resolve(actor.getId() + ".jpg");
     }
     private void requireAdmin() {
         User actor = identities.actor();
         if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN)
-            throw new org.springframework.security.access.AccessDeniedException("Access denied");
+            throw new org.springframework.security.access.AccessDeniedException("You do not have permission to access this information.");
     }
     private Path customerTarget(Long customerProfileId) {
         requireAdmin();

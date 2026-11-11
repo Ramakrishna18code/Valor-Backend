@@ -27,7 +27,7 @@ class TechnicianPrivateAttachmentService {
         TechnicianProfile technician = authorize(technicianId); validate(file);
         try {
             byte[] bytes = file.getBytes(); String type = Optional.ofNullable(file.getContentType()).orElse("").toLowerCase(Locale.ROOT);
-            if (!AttachmentContent.matches(type, bytes)) throw new WorkflowException(400, "Attachment content does not match supported file type");
+            if (!AttachmentContent.matches(type, bytes)) throw new WorkflowException(400, "The file does not match its selected type.");
             var stored = storage.store(extension(type), new ByteArrayInputStream(bytes));
             TechnicianPrivateAttachment row = new TechnicianPrivateAttachment(); row.technician = technician; row.uploadedBy = identities.actor();
             row.originalFilename = filename(file.getOriginalFilename()); row.contentType = type; row.fileSize = file.getSize(); row.storageKey = stored.key();
@@ -55,16 +55,16 @@ class TechnicianPrivateAttachmentService {
         if (!row.technician.getId().equals(technicianId)) throw missing(); return row;
     }
     private void validate(MultipartFile file) {
-        if (file == null || file.isEmpty()) throw new WorkflowException(400, "Attachment file is required");
+        if (file == null || file.isEmpty()) throw new WorkflowException(400, "Please attach a file.");
         String type = Optional.ofNullable(file.getContentType()).orElse("").toLowerCase(Locale.ROOT);
-        if (!TYPES.contains(type)) throw new WorkflowException(400, "Unsupported attachment type");
+        if (!TYPES.contains(type)) throw new WorkflowException(400, "This file type is not supported.");
         if (file.getSize() <= 0 || file.getSize() > MAX_BYTES) throw new WorkflowException(400, "Attachment exceeds size limit");
     }
     private View view(TechnicianPrivateAttachment row) { return new View(row.id, row.technician.getId(), row.originalFilename, row.contentType, row.fileSize, row.uploadedBy.getId(), row.createdAt); }
     private String extension(String type) { return switch (type) { case "image/jpeg" -> ".jpg"; case "image/png" -> ".png"; case "image/webp" -> ".webp"; default -> ".pdf"; }; }
     private String filename(String value) { String name = value == null || value.isBlank() ? "attachment" : value.replaceAll("[\\\\/\\r\\n]", "_").trim(); return name.length() > 255 ? name.substring(name.length() - 255) : name; }
     private static WorkflowException missing() { return new WorkflowException(404, "Private attachment not found"); }
-    private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
     record View(Long id, Long technicianProfileId, String originalFilename, String contentType, Long fileSize, Long uploadedByUserId, java.time.LocalDateTime createdAt) {}
     record Download(String filename, String contentType, Long size, Resource resource) {}
 }

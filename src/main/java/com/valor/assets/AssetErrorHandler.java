@@ -25,7 +25,7 @@ class AssetErrorHandler {
     @ExceptionHandler(AuthenticationException.class)
     ResponseEntity<ApiResponse<Object>> unauthenticated(Exception ignored) { return response(401, "Authentication required"); }
     @ExceptionHandler(AccessDeniedException.class)
-    ResponseEntity<ApiResponse<Object>> forbidden(Exception ignored) { return response(403, "Access denied"); }
+    ResponseEntity<ApiResponse<Object>> forbidden(Exception ignored) { return response(403, "You do not have permission to access this information."); }
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiResponse<Object>> unexpected(Exception ignored) { return response(500, "Internal server error"); }
 

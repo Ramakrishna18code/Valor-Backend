@@ -56,7 +56,7 @@ class AuthConfig {
                         .accessDeniedHandler((request, response, exception) -> {
                             response.setStatus(403);
                             response.setContentType("application/json");
-                            json.writeValue(response.getOutputStream(), ApiResponse.error("Access denied", 403));
+                            json.writeValue(response.getOutputStream(), ApiResponse.error("You do not have permission to access this information.", 403));
                         }))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(routes -> routes

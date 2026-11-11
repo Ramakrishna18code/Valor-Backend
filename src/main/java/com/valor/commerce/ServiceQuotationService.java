@@ -82,14 +82,14 @@ class ServiceQuotationService {
         User actor = identities.actor();
         requireCustomer(actor);
         return quotations.findForCustomerById(id, actor.getId()).map(this::view)
-                .orElseThrow(() -> new CommerceException(404, "Quotation not found"));
+                .orElseThrow(() -> new CommerceException(404, "We could not find that quotation."));
     }
 
     @Transactional(readOnly = true)
     View adminQuotation(Long id) {
         identities.requireAdmin();
         return quotations.findById(id).map(this::view)
-                .orElseThrow(() -> new CommerceException(404, "Quotation not found"));
+                .orElseThrow(() -> new CommerceException(404, "We could not find that quotation."));
     }
 
     View createForServiceRequest(Long serviceRequestId, Create input) {
@@ -98,7 +98,7 @@ class ServiceQuotationService {
     View draft(Long serviceRequestId,Create input){return createQuotation(serviceRequestId,input,null,true);}
     View revise(Long id,Revision input){
         identities.requireAdmin();
-        ServiceQuotation parent=quotations.findById(id).orElseThrow(()->new CommerceException(404,"Quotation not found"));
+        ServiceQuotation parent=quotations.findById(id).orElseThrow(()->new CommerceException(404,"We could not find that quotation."));
         FinanceAccess.text(input.reason(),1000);
         return createQuotation(parent.getServiceRequest().getId(),input.quotation(),parent,true,input.reason());
     }
@@ -126,7 +126,7 @@ class ServiceQuotationService {
         }
         BigDecimal taxAmount = BigDecimal.ZERO.setScale(2);
         BigDecimal totalAmount = subtotal;
-        if (totalAmount.signum() <= 0) throw new CommerceException(400, "Quotation total must be greater than zero");
+        if (totalAmount.signum() <= 0) throw new CommerceException(400, "The quotation total must be greater than zero.");
 
         ServiceQuotation row = new ServiceQuotation();
         row.setQuotationNumber("PENDING-"+java.util.UUID.randomUUID().toString().replace("-",""));
@@ -222,7 +222,7 @@ class ServiceQuotationService {
             case RANGE -> {
                 BigDecimal value = amount(requestedAmount, "A unit amount is required for range-priced services");
                 if (value.compareTo(item.minAmount()) < 0 || value.compareTo(item.maxAmount()) > 0) {
-                    throw new CommerceException(400, "Unit amount must be within the published catalogue range");
+                    throw new CommerceException(400, "Enter an amount within the approved catalogue range.");
                 }
                 return value;
             }
@@ -285,9 +285,9 @@ class ServiceQuotationService {
     View decide(Long id, Decision input) {
         User actor = identities.actor();
         requireCustomer(actor);
-        ServiceQuotation initial=quotations.findById(id).orElseThrow(()->new CommerceException(404,"Quotation not found"));
+        ServiceQuotation initial=quotations.findById(id).orElseThrow(()->new CommerceException(404,"We could not find that quotation."));
         requests.lockForQuotation(initial.getServiceRequest().getId()).orElseThrow(()->new CommerceException(404,"Service request not found"));
-        ServiceQuotation row = quotations.lockById(id).orElseThrow(() -> new CommerceException(404, "Quotation not found"));
+        ServiceQuotation row = quotations.lockById(id).orElseThrow(() -> new CommerceException(404, "We could not find that quotation."));
         if (!row.getCustomer().getUser().getId().equals(actor.getId())) throw denied();
         if(!"RELEASED".equals(row.getReleaseStatus()))throw new CommerceException(409,"Quotation is not released for customer approval");
         if (row.getStatus() != ServiceQuotationStatus.ISSUED) {
@@ -350,10 +350,10 @@ class ServiceQuotationService {
     }
 
     View release(Long id){
-        identities.requireAdmin();var initial=quotations.findById(id).orElseThrow(()->new CommerceException(404,"Quotation not found"));
+        identities.requireAdmin();var initial=quotations.findById(id).orElseThrow(()->new CommerceException(404,"We could not find that quotation."));
         requests.lockForQuotation(initial.getServiceRequest().getId()).orElseThrow(()->new CommerceException(404,"Service request not found"));
-        var row=quotations.lockById(id).orElseThrow(()->new CommerceException(404,"Quotation not found"));
-        if(!"DRAFT".equals(row.getReleaseStatus())||row.getStatus()!=ServiceQuotationStatus.ISSUED)throw new CommerceException(409,"Quotation is not awaiting release");
+        var row=quotations.lockById(id).orElseThrow(()->new CommerceException(404,"We could not find that quotation."));
+        if(!"DRAFT".equals(row.getReleaseStatus())||row.getStatus()!=ServiceQuotationStatus.ISSUED)throw new CommerceException(409,"This quotation is not ready to be released.");
         validateCoverage(row.getServiceRequest().getId(),row.getItems().stream().map(i->new CalculatedLine(i.getPricingCode(),i.getDescription(),i.getQuantity(),i.getUnitAmount(),i.getLineAmount(),i.getCoverageScope())).toList());
         if(row.getSupersedesQuotationId()!=null){var parent=quotations.lockById(row.getSupersedesQuotationId()).orElseThrow(()->new CommerceException(404,"Parent quotation not found"));
             if("REPLACEMENT".equals(row.getRevisionKind())){if(parent.getStatus()==ServiceQuotationStatus.ACCEPTED)throw new CommerceException(409,"Accepted terms cannot be replaced; create additional scope instead");parent.setStatus(ServiceQuotationStatus.CANCELLED);}
@@ -361,7 +361,7 @@ class ServiceQuotationService {
         row.setReleaseStatus("RELEASED");row.setReleasedAt(java.time.LocalDateTime.now());quotations.flush();audit.record("SERVICE_QUOTATION_RELEASED","SERVICE_QUOTATION",id,"Released version="+row.getVersionNumber());return view(row);
     }
     View plan(Long id,Plan input){
-        identities.requireAdmin();var row=quotations.lockById(id).orElseThrow(()->new CommerceException(404,"Quotation not found"));
+        identities.requireAdmin();var row=quotations.lockById(id).orElseThrow(()->new CommerceException(404,"We could not find that quotation."));
         if(!"DRAFT".equals(row.getReleaseStatus())||row.getStatus()!=ServiceQuotationStatus.ISSUED||finance==null)throw new CommerceException(409,"Payment stages must be defined on a draft quotation");
         BigDecimal sum=BigDecimal.ZERO;for(var m:input.milestones()){FinanceAccess.money(m.amount(),false);FinanceAccess.text(m.label(),120);if(!List.of("ON_APPROVAL","BEFORE_REPAIR","ON_COMPLETION","SCHEDULED").contains(m.dueCondition())||m.dueCondition().equals("SCHEDULED")&&m.dueDate()==null)throw new CommerceException(400,"Invalid payment stage condition");sum=sum.add(m.amount());}
         if(sum.compareTo(row.getTotalAmount())!=0)throw new CommerceException(400,"Payment stages must equal the quotation total");
@@ -388,7 +388,7 @@ class ServiceQuotationService {
     }
 
     private AccessDeniedException denied() {
-        return new AccessDeniedException("Access denied");
+        return new AccessDeniedException("You do not have permission to access this information.");
     }
 
     private BigDecimal amount(BigDecimal value, String message) {
@@ -398,7 +398,7 @@ class ServiceQuotationService {
 
     private String currency(String value) {
         String normalized = value == null || value.isBlank() ? "INR" : value.trim().toUpperCase(Locale.ROOT);
-        if (!"INR".equals(normalized)) throw new CommerceException(400, "Quotation currency must be INR");
+        if (!"INR".equals(normalized)) throw new CommerceException(400, "Quotations must use Indian rupees (INR).");
         return normalized;
     }
 

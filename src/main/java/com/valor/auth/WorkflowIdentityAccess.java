@@ -15,20 +15,20 @@ public class WorkflowIdentityAccess {
         this.customers = customers; this.technicians = technicians; this.access = access;
     }
     public CustomerProfile customer(User actor) {
-        if (actor.getRole() != Role.CUSTOMER) throw new AccessDeniedException("Access denied");
-        CustomerProfile profile = customers.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedException("Access denied"));
+        if (actor.getRole() != Role.CUSTOMER) throw new AccessDeniedException("You do not have permission to access this information.");
+        CustomerProfile profile = customers.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedException("You do not have permission to access this information."));
         return access.activeCustomer(profile.getId());
     }
     @Transactional
     public CustomerProfile customerForWrite(User actor) {
-        if (actor.getRole() != Role.CUSTOMER) throw new AccessDeniedException("Access denied");
-        CustomerProfile profile = customers.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedException("Access denied"));
-        CustomerProfile locked = customers.lockById(profile.getId()).orElseThrow(() -> new AccessDeniedException("Access denied"));
+        if (actor.getRole() != Role.CUSTOMER) throw new AccessDeniedException("You do not have permission to access this information.");
+        CustomerProfile profile = customers.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedException("You do not have permission to access this information."));
+        CustomerProfile locked = customers.lockById(profile.getId()).orElseThrow(() -> new AccessDeniedException("You do not have permission to access this information."));
         return access.activeCustomer(locked.getId());
     }
     public TechnicianProfile technician(User actor) {
-        if (actor.getRole() != Role.TECHNICIAN) throw new AccessDeniedException("Access denied");
-        TechnicianProfile profile = technicians.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedException("Access denied"));
+        if (actor.getRole() != Role.TECHNICIAN) throw new AccessDeniedException("You do not have permission to access this information.");
+        TechnicianProfile profile = technicians.findByUserId(actor.getId()).orElseThrow(() -> new AccessDeniedException("You do not have permission to access this information."));
         return activeTechnician(profile.getId());
     }
     public TechnicianProfile activeTechnician(Long id) {

@@ -24,7 +24,7 @@ class DirectoryService {
     private <P,T> PageView<T> directory(Class<P> profile,Class<T> view,int page,int size,String q,Boolean active,boolean technician) {
         identities.requireAdmin();
         if(page<0 || size<1 || size>100 || (long)page*size>Integer.MAX_VALUE)
-            throw new IllegalArgumentException("Invalid page");
+            throw new IllegalArgumentException("Please choose a valid page number.");
         String search=q==null ? "" : q.trim().toLowerCase(Locale.ROOT);
         if(search.length()>254) throw new IllegalArgumentException("Invalid search");
         var cb=em.getCriteriaBuilder();

@@ -19,6 +19,6 @@ class TrackingErrorHandler {
     }
     @ExceptionHandler(AccessDeniedException.class)
     ResponseEntity<ApiResponse<Void>> denied() {
-        return ResponseEntity.status(403).body(ApiResponse.error("Access denied", 403));
+        return ResponseEntity.status(403).body(ApiResponse.error("You do not have permission to access this information.", 403));
     }
 }

@@ -858,5 +858,5 @@ public class ProtectionService {
     private ProtectionException missing(String message) { return new ProtectionException(404, message); }
     private ProtectionException conflict(String message) { return new ProtectionException(409, message); }
     private ProtectionException bad(String message) { return new ProtectionException(400, message); }
-    private AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
 }

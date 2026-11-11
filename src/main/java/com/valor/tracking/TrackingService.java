@@ -135,5 +135,5 @@ class TrackingService {
         return earth * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
     private static RuntimeException missing(String name) { return new TrackingException(404, name + " not found"); }
-    private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
 }

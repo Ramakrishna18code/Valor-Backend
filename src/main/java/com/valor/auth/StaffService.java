@@ -24,7 +24,7 @@ class StaffService {
     }
     private User actor() {
         User actor=identities.actor();
-        if(actor.getRole()!=Role.SUPER_ADMIN) throw new AccessDeniedException("Access denied");
+        if(actor.getRole()!=Role.SUPER_ADMIN) throw new AccessDeniedException("You do not have permission to access this information.");
         return actor;
     }
     StaffController.View create(StaffController.Create input) {

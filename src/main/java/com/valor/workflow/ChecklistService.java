@@ -179,7 +179,7 @@ class ChecklistService {
     private void admin() { User actor = identities.actor(); if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied(); }
     private static String clean(String value, int max) { if (value == null || value.isBlank()) return null; String v = value.trim(); return v.length() > max ? v.substring(0, max) : v; }
     private static WorkflowException missing() { return new WorkflowException(404, "Checklist not found"); }
-    private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
 
     static boolean isChecklistInitializationDuplicate(Throwable error) {
         for (Throwable current = error; current != null; current = current.getCause()) {

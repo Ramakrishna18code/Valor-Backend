@@ -1749,6 +1749,6 @@ class CommerceService {
     }
     private static CommerceException missing(String name) { return new CommerceException(404, name + " not found"); }
     private static CommerceException invalidCashOtp() { return new CommerceException(400, "Invalid cash payment OTP"); }
-    private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
     record Download(String filename, String contentType, Long size, Resource resource) {}
 }

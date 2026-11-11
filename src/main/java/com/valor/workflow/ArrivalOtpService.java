@@ -103,6 +103,6 @@ class ArrivalOtpService {
         return new ArrivalOtpView(otp.id, otp.request.getId(), status, otp.expiresAt, otp.attemptsRemaining, otp.lockedUntil, otp.verifiedAt, code);
     }
     static WorkflowException invalid() { return new WorkflowException(400, "Invalid arrival OTP"); }
-    static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
     record ArrivalOtpView(Long id, Long serviceRequestId, String status, LocalDateTime expiresAt, short attemptsRemaining, LocalDateTime lockedUntil, LocalDateTime verifiedAt, String code) {}
 }

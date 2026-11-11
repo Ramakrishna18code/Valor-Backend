@@ -96,7 +96,7 @@ class TechnicianMeController {
 
     private TechnicianProfile current() {
         User actor = identities.actor();
-        if (actor.getRole() != Role.TECHNICIAN) throw new AccessDeniedException("Access denied");
+        if (actor.getRole() != Role.TECHNICIAN) throw new AccessDeniedException("You do not have permission to access this information.");
         return profiles.technician(actor);
     }
     private Profile profile(TechnicianProfile p) {

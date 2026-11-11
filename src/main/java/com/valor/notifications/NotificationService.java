@@ -36,8 +36,8 @@ public class NotificationService {
             throw new NotificationException(400, "Only IN_APP notifications are available");
         }
         var recipient = recipients.findById(input.recipientUserId())
-                .orElseThrow(() -> new NotificationException(404, "Recipient not found"));
-        if (!recipient.isActive()) throw new NotificationException(400, "Recipient is inactive");
+                .orElseThrow(() -> new NotificationException(404, "We could not find the notification recipient."));
+        if (!recipient.isActive()) throw new NotificationException(400, "This recipient is no longer active.");
         Notification notification = new Notification();
         notification.setRecipient(recipient); notification.setTitle(input.title()); notification.setMessage(input.message());
         notification.setScheduledAt(input.scheduledAt());
@@ -62,7 +62,7 @@ public class NotificationService {
         try {
             return idempotentWrite.execute(status -> {
                 var recipient = recipients.findById(recipientUserId)
-                        .orElseThrow(() -> new NotificationException(404, "Recipient not found"));
+                        .orElseThrow(() -> new NotificationException(404, "We could not find the notification recipient."));
                 Notification notification = new Notification();
                 notification.setRecipient(recipient);
                 notification.setTitle(title == null || title.isBlank() ? "Valor update" : title);
@@ -88,7 +88,7 @@ public class NotificationService {
     @Transactional(readOnly = true)
     public PageView inbox(NotificationStatus status, int page, int size) {
         Long recipient = identities.actor().getId();
-        if (page < 0 || size < 1 || size > 100) throw new NotificationException(400, "Invalid page");
+        if (page < 0 || size < 1 || size > 100) throw new NotificationException(400, "Please choose a valid page number.");
         LocalDateTime asOf = now();
         var rows = notifications.inbox(recipient, asOf, status,
                 PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")));
@@ -100,7 +100,7 @@ public class NotificationService {
         Long recipient = identities.actor().getId();
         Notification notification = notifications.forRead(id)
                 .orElseThrow(() -> new NotificationException(404, "Notification not found"));
-        if (!notification.getRecipient().getId().equals(recipient)) throw new AccessDeniedException("Access denied");
+        if (!notification.getRecipient().getId().equals(recipient)) throw new AccessDeniedException("You do not have permission to access this information.");
         LocalDateTime asOf = now();
         if (notification.getChannel() != NotificationChannel.IN_APP
                 || (notification.getScheduledAt() != null && notification.getScheduledAt().isAfter(asOf))) {

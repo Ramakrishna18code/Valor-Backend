@@ -37,6 +37,6 @@ class PermissionService {
     }
 
     void require(String permission) {
-        if (!currentHas(permission)) throw new AccessDeniedException("Access denied");
+        if (!currentHas(permission)) throw new AccessDeniedException("You do not have permission to access this information.");
     }
 }

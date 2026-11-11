@@ -49,12 +49,12 @@ public class WorkflowService {
 
     @Transactional(readOnly=true)
     public PageView<RequestView> customerRequests(RequestStatus status,Integer year,Integer month,int page,int size) {
-        User actor=identities.actor();if(actor.getRole()!=Role.CUSTOMER)throw new org.springframework.security.access.AccessDeniedException("Access denied");
+        User actor=identities.actor();if(actor.getRole()!=Role.CUSTOMER)throw new org.springframework.security.access.AccessDeniedException("You do not have permission to access this information.");
         var profile=profiles.customer(actor);
-        if(page<0||size<1||size>100)throw new WorkflowException(400,"Invalid page");
-        if(month!=null&&year==null)throw new WorkflowException(400,"Year is required when month is provided");
-        if(year!=null&&(year<2000||year>2100))throw new WorkflowException(400,"Invalid year");
-        if(month!=null&&(month<1||month>12))throw new WorkflowException(400,"Invalid month");
+        if(page<0||size<1||size>100)throw new WorkflowException(400,"Please choose a valid page number.");
+        if(month!=null&&year==null)throw new WorkflowException(400,"Enter a year when filtering by month.");
+        if(year!=null&&(year<2000||year>2100))throw new WorkflowException(400,"Enter a year between 2000 and 2100.");
+        if(month!=null&&(month<1||month>12))throw new WorkflowException(400,"Enter a month from 1 to 12.");
         LocalDateTime from=null,to=null;
         if(year!=null){
             from=month==null?LocalDateTime.of(year,1,1,0,0):LocalDateTime.of(year,month,1,0,0);
@@ -69,7 +69,7 @@ public class WorkflowService {
         CustomerProfile owner;
         if (actor.getRole() == Role.CUSTOMER) {
             if (input.customerProfileId() != null || input.internalAdminNotes() != null || input.estimatedCompletionMinutes() != null) {
-                throw new WorkflowException(400, "Customer ownership and admin fields cannot be submitted");
+                throw new WorkflowException(400, "Customer and administrator details cannot be changed here.");
             }
             owner = input.submissionKey() == null ? profiles.customer(actor) : profiles.customerForWrite(actor);
             if (input.submissionKey() != null) {
@@ -83,7 +83,7 @@ public class WorkflowService {
         }
         com.valor.assets.Lift lift = null;
         if (input.serviceType() != WorkflowServiceType.INSTALLATION) {
-            if (input.liftId() == null) throw new WorkflowException(400, "Lift is required");
+            if (input.liftId() == null) throw new WorkflowException(400, "Please select a lift.");
             lift = lifts.forIntake(input.liftId()).orElseThrow(() -> missing());
             if (!lift.getBuilding().getCustomer().getId().equals(owner.getId())) throw denied();
             if (!lift.isActive() || !lift.getBuilding().isActive()) throw new WorkflowException(409, "Asset is inactive");
@@ -201,7 +201,7 @@ public class WorkflowService {
     }
 
     private String autoAssignReason(ServiceRequest request, List<TechnicianProfile> available) {
-        if (available.isEmpty()) return "No active and available technician was found.";
+        if (available.isEmpty()) return "No technician is currently available. Please try again shortly.";
         String service = request.getServiceType() == null ? "service type" : request.getServiceType().name();
         String category = request.getIssueCategory();
         String city = request.getLift() == null || request.getLift().getBuilding() == null ? null : request.getLift().getBuilding().getCity();
@@ -272,7 +272,7 @@ public class WorkflowService {
             if (input.toStatus() != RequestStatus.CANCELLED || !EnumSet.of(RequestStatus.PENDING, RequestStatus.ASSIGNED, RequestStatus.ACCEPTED).contains(request.getStatus())) {
                 throw new WorkflowException(409, "Customer cancellation is not allowed in this state");
             }
-            if (blank(input.notes())) throw new WorkflowException(400, "Transition notes are required");
+            if (blank(input.notes())) throw new WorkflowException(400, "Please add a note explaining this update.");
             visits.cancelActiveForRequest(request, actor, input.notes());
             TechnicianAssignment active = assignments.active(id).orElse(null);
             if (active != null) { active.setStatus(AssignmentStatus.RELEASED); active.setReleasedAt(LocalDateTime.now()); }
@@ -290,10 +290,10 @@ public class WorkflowService {
         else { admin(actor); assignment = assignments.active(id).orElse(null); }
         RequestStatus from = request.getStatus(), to = input.toStatus();
         if (from == to && to == RequestStatus.ON_THE_WAY) return detail(request, actor);
-        if (!next(from).contains(to)) throw new WorkflowException(409, "Invalid status transition");
+        if (!next(from).contains(to)) throw new WorkflowException(409, "This request cannot move to that status yet.");
         if (to == RequestStatus.ASSIGNED) throw new WorkflowException(409, "Use the assignment endpoint");
         if ((to == RequestStatus.CANCELLED || to == RequestStatus.WAITING_FOR_PARTS) && blank(input.notes())) {
-            throw new WorkflowException(400, "Transition notes are required");
+            throw new WorkflowException(400, "Please add a note explaining this update.");
         }
         if (to != RequestStatus.CANCELLED && assignment == null) throw conflict();
         if (to == RequestStatus.ON_THE_WAY && request.getStartedAt() == null) {
@@ -417,11 +417,11 @@ public class WorkflowService {
         if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw denied();
     }
     private static boolean blank(String value) { return value == null || value.isBlank(); }
-    private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
     private static WorkflowException missing() { return new WorkflowException(404, "Request or asset not found"); }
     private static WorkflowException conflict() { return new WorkflowException(409, "Workflow conflict"); }
     private Pageable paging(int page, int size) {
-        if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Invalid page");
+        if (page < 0 || size < 1 || size > 100) throw new WorkflowException(400, "Please choose a valid page number.");
         return PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"));
     }
     private PageView<RequestView> page(Page<ServiceRequest> page, User actor) {

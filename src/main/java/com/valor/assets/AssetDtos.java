@@ -26,7 +26,7 @@ public final class AssetDtos {
             @Size(max = 20) String status) {
         @JsonAnySetter
         public void rejectUnknown(String field, JsonNode value) {
-            throw new IllegalArgumentException("Unsupported asset field");
+            throw new IllegalArgumentException("This lift or building detail is not supported.");
         }
     }
 
@@ -38,7 +38,7 @@ public final class AssetDtos {
         @Size(max=160) String emergencyContactName,
         @Size(max=20) String emergencyContactPhone,
         @Size(max=20) String buildingPreference) {
-        @JsonAnySetter public void rejectUnknown(String field,JsonNode value){throw new IllegalArgumentException("Unsupported asset field");}
+        @JsonAnySetter public void rejectUnknown(String field,JsonNode value){throw new IllegalArgumentException("This lift or building detail is not supported.");}
     }
 
     public record LiftWrite(
@@ -66,7 +66,7 @@ public final class AssetDtos {
             String specifications) {
         @JsonAnySetter
         public void rejectUnknown(String field, JsonNode value) {
-            throw new IllegalArgumentException("Unsupported asset field");
+            throw new IllegalArgumentException("This lift or building detail is not supported.");
         }
     }
 
@@ -80,7 +80,7 @@ public final class AssetDtos {
             LocalDate renewalDate) {
         @JsonAnySetter
         public void rejectUnknown(String field, JsonNode value) {
-            throw new IllegalArgumentException("Unsupported asset field");
+            throw new IllegalArgumentException("This lift or building detail is not supported.");
         }
     }
 
@@ -92,7 +92,7 @@ public final class AssetDtos {
             LocalDate renewalDate) {
         @JsonAnySetter
         public void rejectUnknown(String field, JsonNode value) {
-            throw new IllegalArgumentException("Unsupported asset field");
+            throw new IllegalArgumentException("This lift or building detail is not supported.");
         }
     }
 

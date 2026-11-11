@@ -41,7 +41,7 @@ public class InstallationService {
     @Transactional(readOnly = true)
     public List<View> list(int page, int size) {
         CustomerProfile customer = customer();
-        if (page < 0 || size < 1 || size > MAX_LIST_SIZE) throw new IllegalArgumentException("Invalid page");
+        if (page < 0 || size < 1 || size > MAX_LIST_SIZE) throw new IllegalArgumentException("Please choose a valid page number.");
         return requests.findByCustomerId(customer.getId(), PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")))
                 .stream().map(this::view).toList();
     }
@@ -157,7 +157,7 @@ public class InstallationService {
         row.setSitePostalCode(clean(input.sitePostalCode())); row.setSiteCountry(clean(input.siteCountry())); row.setSitePropertyDescription(clean(input.sitePropertyDescription()));
     }
 
-    private InstallationRequest owned(Long id) { CustomerProfile c = customer(); return requests.findByIdAndCustomerId(id, c.getId()).orElseThrow(() -> new org.springframework.security.access.AccessDeniedException("Access denied")); }
+    private InstallationRequest owned(Long id) { CustomerProfile c = customer(); return requests.findByIdAndCustomerId(id, c.getId()).orElseThrow(() -> new org.springframework.security.access.AccessDeniedException("You do not have permission to access this information.")); }
     private CustomerProfile customer() { return identities.customer(access.actor()); }
     private void editable(InstallationRequest row) { if (row.getStatus() != InstallationStatus.DRAFT) throw conflict("Only draft installations can be edited"); }
     private void transition(InstallationRequest row, InstallationStatus from, InstallationStatus to, String notes) { InstallationRequestHistory h = new InstallationRequestHistory(); h.setRequest(row); h.setChangedBy(access.actor()); h.setFromStatus(from); h.setToStatus(to); h.setNotes(notes); history.save(h); row.setStatus(to); }

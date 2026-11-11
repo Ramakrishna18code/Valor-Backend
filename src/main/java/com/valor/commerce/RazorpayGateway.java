@@ -146,7 +146,7 @@ class RazorpayGateway implements PaymentGateway {
         if (!(testKey || liveKey) || !(configuredMode.equals("test") || configuredMode.equals("live"))
                 || (configuredMode.equals("test") && !testKey)
                 || (configuredMode.equals("live") && !liveKey)) {
-            throw new CommerceException(503, "Razorpay mode is missing or does not match the configured key");
+            throw new CommerceException(503, "The payment service is not configured correctly. Please contact support.");
         }
     }
     private String hmac(String payload, String secret) {
@@ -158,7 +158,7 @@ class RazorpayGateway implements PaymentGateway {
             for (byte b : bytes) out.append("%02x".formatted(b));
             return out.toString();
         } catch (Exception ex) {
-            throw new CommerceException(500, "Webhook signature validation failed");
+            throw new CommerceException(500, "We could not verify this payment update.");
         }
     }
     private boolean constantEquals(String a, String b) {

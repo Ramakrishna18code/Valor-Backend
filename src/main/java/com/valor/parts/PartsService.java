@@ -37,7 +37,7 @@ class PartsService {
     }
     CategoryView saveCategory(Long id, CategoryWrite input) {
         requireAdmin(); PartCategory row = id == null ? new PartCategory() : categories.findById(id).orElseThrow(() -> missing("Category"));
-        categories.findByNameIgnoreCase(input.name().trim()).filter(found -> !found.equals(row)).ifPresent(found -> { throw conflict("Category name already exists"); });
+        categories.findByNameIgnoreCase(input.name().trim()).filter(found -> !found.equals(row)).ifPresent(found -> { throw conflict("That category name is already in use."); });
         row.name=input.name().trim(); row.description=input.description(); if (input.active()!=null) row.active=input.active();
         categories.saveAndFlush(row); audit.record(id == null ? "PART_CATEGORY_CREATE" : "PART_CATEGORY_UPDATE", "PART_CATEGORY", row.id, "Updated part category"); return category(row);
     }
@@ -73,7 +73,7 @@ class PartsService {
         requireAdmin(); PartItem row=items.lockById(id).orElseThrow(() -> missing("Part")); int quantity=input.quantity();
         if (input.movementType() != StockMovementType.RESTOCK && input.movementType() != StockMovementType.RETURN && input.movementType() != StockMovementType.ADJUSTMENT) throw conflict("Use request issue flow for outbound stock");
         int next=input.movementType() == StockMovementType.ADJUSTMENT ? quantity : Math.addExact(row.quantityOnHand, quantity);
-        if (next < 0) throw conflict("Stock cannot be negative"); row.quantityOnHand=next; items.saveAndFlush(row);
+        if (next < 0) throw conflict("Stock cannot be less than zero."); row.quantityOnHand=next; items.saveAndFlush(row);
         PartStockMovement movement=new PartStockMovement(); movement.item=row; movement.movementType=input.movementType(); movement.quantity=quantity; movement.reason=input.reason(); movement.actorUserId=identities.actor().getId(); movements.save(movement);
         audit.record("PART_STOCK_MOVEMENT", "PART_ITEM", id, "Stock movement " + input.movementType()); return fullItem(row);
     }
@@ -128,5 +128,5 @@ class PartsService {
     private void requireAdmin() { Role role=identities.actor().getRole(); if (role!=Role.ADMIN && role!=Role.SUPER_ADMIN) throw denied(); }
     private static RuntimeException missing(String value) { return new IllegalArgumentException(value + " not found"); }
     private static RuntimeException conflict(String value) { return new IllegalStateException(value); }
-    private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
 }

@@ -43,13 +43,13 @@ class ServiceRequestEngagementService {
         User actor = identities.actor();
         ServiceRequest request = authorizedRead(requestId, actor);
         validateRequestAttachmentWrite(request, actor);
-        if (file == null || file.isEmpty()) throw new WorkflowException(400, "Attachment file is required");
+        if (file == null || file.isEmpty()) throw new WorkflowException(400, "Please attach a file.");
         String type = Optional.ofNullable(file.getContentType()).orElse("").toLowerCase(Locale.ROOT);
-        if (!TYPES.contains(type)) throw new WorkflowException(400, "Unsupported attachment type");
+        if (!TYPES.contains(type)) throw new WorkflowException(400, "This file type is not supported.");
         if (file.getSize() <= 0 || file.getSize() > MAX_BYTES) throw new WorkflowException(400, "Attachment exceeds size limit");
         try {
             byte[] bytes = file.getBytes();
-            if (!AttachmentContent.matches(type, bytes)) throw new WorkflowException(400, "Attachment content does not match supported file type");
+            if (!AttachmentContent.matches(type, bytes)) throw new WorkflowException(400, "The file does not match its selected type.");
             var stored = storage.store(extension(type), new java.io.ByteArrayInputStream(bytes));
             ServiceRequestAttachment row = new ServiceRequestAttachment();
             row.setRequest(request); row.setUploadedBy(actor);
@@ -153,6 +153,6 @@ class ServiceRequestEngagementService {
     private String extension(String type) { return switch (type) { case "image/jpeg" -> ".jpg"; case "image/png" -> ".png"; case "image/webp" -> ".webp"; default -> ".pdf"; }; }
     private String filename(String value) { String name = value == null || value.isBlank() ? "attachment" : value.replaceAll("[\\\\/\\r\\n]", "_").trim(); return name.length() > 255 ? name.substring(name.length() - 255) : name; }
     private static WorkflowException missing() { return new WorkflowException(404, "Request attachment or feedback not found"); }
-    private static AccessDeniedException denied() { return new AccessDeniedException("Access denied"); }
+    private static AccessDeniedException denied() { return new AccessDeniedException("You do not have permission to access this information."); }
     record Download(String filename, String contentType, Long size, Resource resource) {}
 }

@@ -10,7 +10,7 @@ import java.util.Map;
 class AuthErrorHandler {
   @ExceptionHandler(StaffNotFoundException.class)
   ResponseEntity<ApiResponse<Object>> missingStaff(Exception ignored) {
-    return ResponseEntity.status(404).body(ApiResponse.error("Staff not found", 404));
+    return ResponseEntity.status(404).body(ApiResponse.error("We couldn't find that staff member.", 404));
   }
   @ExceptionHandler(CustomerNotFoundException.class)
   ResponseEntity<ApiResponse<Object>> missingCustomer(Exception ignored) {
@@ -18,30 +18,30 @@ class AuthErrorHandler {
   }
   @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
   ResponseEntity<ApiResponse<Object>> duplicate(Exception ignored) {
-    return ResponseEntity.status(409).body(ApiResponse.error("Identity already exists", 409));
+    return ResponseEntity.status(409).body(ApiResponse.error("An account with these details already exists.", 409));
   }
   @ExceptionHandler({org.springframework.web.bind.MethodArgumentNotValidException.class,
       org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
   ResponseEntity<ApiResponse<Object>> invalid(Exception ignored) {
-    return ResponseEntity.status(400).body(ApiResponse.error("Invalid request", 400));
+    return ResponseEntity.status(400).body(ApiResponse.error("Some information is missing or invalid.", 400));
   }
   @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
   ResponseEntity<ApiResponse<Object>> authentication(Exception ignored) {
-    return ResponseEntity.status(401).body(ApiResponse.error("Authentication required", 401));
+    return ResponseEntity.status(401).body(ApiResponse.error("Please sign in to continue.", 401));
   }
   @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
   ResponseEntity<ApiResponse<Object>> denied(Exception ignored) {
-    return ResponseEntity.status(403).body(ApiResponse.error("Access denied", 403));
+    return ResponseEntity.status(403).body(ApiResponse.error("You do not have permission to access this information.", 403));
   }
   @ExceptionHandler(IllegalArgumentException.class)
   ResponseEntity<ApiResponse<Map<String,Object>>> illegal(IllegalArgumentException ex) {
     int status=ex.getMessage()!=null && (ex.getMessage().contains("Registration unavailable")||ex.getMessage().contains("already exists"))?409:400;
-    String message = status==409 ? "Identity already exists" : (ex.getMessage()==null || ex.getMessage().isBlank() ? "Request could not be processed" : ex.getMessage());
+    String message = status==409 ? "An account with these details already exists." : (ex.getMessage()==null || ex.getMessage().isBlank() ? "We couldn't complete that request. Please try again." : ex.getMessage());
     return ResponseEntity.status(status).body(new ApiResponse<>(false, message, Map.of(), status));
   }
   @ExceptionHandler(HttpMessageNotReadableException.class)
   ResponseEntity<ApiResponse<Map<String,Object>>> malformed(HttpMessageNotReadableException ex) {
-    return ResponseEntity.badRequest().body(new ApiResponse<>(false, "Malformed request", Map.of(), 400));
+    return ResponseEntity.badRequest().body(new ApiResponse<>(false, "Some information is missing or invalid.", Map.of(), 400));
   }
   @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
   ResponseEntity<ApiResponse<Map<String,Object>>> status(org.springframework.web.server.ResponseStatusException ex) {
@@ -51,6 +51,6 @@ class AuthErrorHandler {
   }
   @ExceptionHandler(Exception.class)
   ResponseEntity<ApiResponse<Map<String,Object>>> error(Exception ignored) {
-    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new ApiResponse<>(false, "Internal server error", Map.of(), 500));
+    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new ApiResponse<>(false, "Something went wrong on our side. Please try again.", Map.of(), 500));
   }
 }

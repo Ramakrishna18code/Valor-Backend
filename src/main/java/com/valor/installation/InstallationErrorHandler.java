@@ -10,7 +10,7 @@ import java.util.NoSuchElementException;
 @RestControllerAdvice(basePackages = "com.valor.installation")
 class InstallationErrorHandler {
     @ExceptionHandler(AccessDeniedException.class)
-    ResponseEntity<ApiResponse<Object>> denied(AccessDeniedException ignored) { return response(403, "Access denied"); }
+    ResponseEntity<ApiResponse<Object>> denied(AccessDeniedException ignored) { return response(403, "You do not have permission to access this information."); }
     @ExceptionHandler(IllegalStateException.class)
     ResponseEntity<ApiResponse<Object>> conflict(IllegalStateException error) { return response(409, error.getMessage()); }
     @ExceptionHandler(NoSuchElementException.class)

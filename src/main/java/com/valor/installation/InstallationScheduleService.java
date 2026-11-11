@@ -27,5 +27,5 @@ class InstallationScheduleService {
     private InstallationRequest request(Long id){return requests.findById(id).orElseThrow(()->new IllegalArgumentException("Installation not found"));}
     private InstallationSchedule schedule(Long id){return schedules.findById(id).orElseThrow(()->new IllegalArgumentException("Schedule not found"));}
     private View view(InstallationSchedule s){return new View(s.getId(),s.getRequest().getId(),s.getScheduleKey(),s.getVersionNo(),s.getStatus(),s.getCurrency(),s.getMilestoneDefinitions(),approvals.existsByScheduleIdAndApprovalType(s.getId(),InstallationScheduleApprovalType.COMPANY),approvals.existsByScheduleIdAndApprovalType(s.getId(),InstallationScheduleApprovalType.CUSTOMER),s.getCreatedAt(),s.getApprovedAt());}
-    private static String clean(String s){return s==null||s.isBlank()?null:s.trim();} private static IllegalStateException conflict(String s){return new IllegalStateException(s);} private static AccessDeniedException denied(){return new AccessDeniedException("Access denied");}
+    private static String clean(String s){return s==null||s.isBlank()?null:s.trim();} private static IllegalStateException conflict(String s){return new IllegalStateException(s);} private static AccessDeniedException denied(){return new AccessDeniedException("You do not have permission to access this information.");}
 }

@@ -70,7 +70,7 @@ interface OnboardingTokenRepo extends JpaRepository<OnboardingToken,Long>{@Lock(
   o.verifiedAt=now;o.user=u;otps.save(o);return u;
  }
  @Transactional void logoutOwned(String raw,Long userId) {
-  tokens.findByTokenHash(hash(raw)).ifPresent(t->{if(!t.getUser().getId().equals(userId))throw new org.springframework.security.access.AccessDeniedException("Access denied");t.setRevokedAt(LocalDateTime.now());});
+  tokens.findByTokenHash(hash(raw)).ifPresent(t->{if(!t.getUser().getId().equals(userId))throw new org.springframework.security.access.AccessDeniedException("You do not have permission to access this information.");t.setRevokedAt(LocalDateTime.now());});
  }
  @Transactional String createOnboardingToken(User user) {
   String raw=UUID.randomUUID().toString()+UUID.randomUUID();

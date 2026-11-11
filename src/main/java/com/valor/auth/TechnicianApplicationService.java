@@ -220,7 +220,7 @@ class TechnicianApplicationService {
         TechnicianProfile profile = new TechnicianProfile(); profile.user = user; profile.specialization = application.specialization; profile.assignedArea = application.preferredLocations; profile.availabilityStatus = "AVAILABLE"; technicians.saveAndFlush(profile); return user;
     }
 
-    private TechnicianApplication admin() { User actor = identities.actor(); if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw new AccessDeniedException("Access denied"); return null; }
+    private TechnicianApplication admin() { User actor = identities.actor(); if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) throw new AccessDeniedException("You do not have permission to access this information."); return null; }
     private TechnicianApplication access(Long id, String token) { if (token == null || token.isBlank()) throw new AccessDeniedException("Application access token required"); return applications.lockById(id).filter(row -> row.tokenHash.equals(hash(token))).orElseThrow(() -> new AccessDeniedException("Application access denied")); }
     private void requireDevelopmentOtp() {
         if (environment.acceptsProfiles(Profiles.of("prod")) || !environment.acceptsProfiles(Profiles.of("dev", "test")))
