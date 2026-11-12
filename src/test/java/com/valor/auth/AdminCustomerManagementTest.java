@@ -47,7 +47,7 @@ class AdminCustomerManagementTest {
         var c=customer();
         mvc.perform(post("/api/v1/admin/customers").header("Authorization","Bearer "+token(Role.SUPER_ADMIN))
                 .contentType("application/json").content("{\"email\":\""+c.user.getEmail()+"\",\"password\":\"Secret123\",\"fullName\":\"Dup\"}"))
-            .andExpect(status().isConflict()).andExpect(jsonPath("$.message").value("Identity already exists"));
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.message").value("An account with these details already exists."));
         mvc.perform(get("/api/v1/admin/customers/"+c.id).header("Authorization","Bearer "+jwt.issue(c.user)))
             .andExpect(status().isForbidden()).andExpect(jsonPath("$.success").value(false));
     }

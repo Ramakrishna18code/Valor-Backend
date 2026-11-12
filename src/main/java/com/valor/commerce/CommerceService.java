@@ -1199,10 +1199,19 @@ class CommerceService {
         User actor = identities.actor();
         if (actor.getRole() != com.valor.auth.Role.TECHNICIAN || !assignments.existsByRequestIdAndTechnicianUserId(requestId, actor.getId())) throw denied();
         Invoice invoice = invoices.findFirstByServiceRequestIdOrderByCreatedAtDesc(requestId).orElse(null);
-        if (invoice == null) return new TechnicianServicePaymentView(requestId, null, null, null);
+        if (invoice == null) return new TechnicianServicePaymentView(requestId, null, null, null, coveredNoCharge(requestId));
         PaymentRecord payment = payments.findFirstByServiceRequestIdOrderByCreatedAtDesc(requestId).orElse(null);
         CashPaymentOtpView cash = payment == null ? null : cashOtps.findTopByPaymentIdOrderByCreatedAtDesc(payment.getId()).map(o -> cashOtpView(o, o.verifiedAt != null, false)).orElse(null);
-        return new TechnicianServicePaymentView(requestId, view(invoice), payment == null ? null : view(payment), cash);
+        return new TechnicianServicePaymentView(requestId, view(invoice), payment == null ? null : view(payment), cash, false);
+    }
+    boolean coveredNoCharge(Long requestId) {
+        if (financeAccess == null) return false;
+        if (financeAccess.count("SELECT COUNT(*) FROM service_requests WHERE id=? AND status='COMPLETED'", requestId) != 1) return false;
+        // A zero balance is explicit only after Valor has confirmed all three AMC scopes.
+        if (financeAccess.count("SELECT COUNT(*) FROM service_request_coverage_decisions d WHERE d.service_request_id=? AND d.scope IN ('VISIT','LABOUR','PARTS') AND d.contract_id IS NOT NULL AND d.outcome='COVERED' AND d.version_number=(SELECT MAX(v.version_number) FROM service_request_coverage_decisions v WHERE v.service_request_id=d.service_request_id AND v.scope=d.scope)", requestId) != 3) return false;
+        return financeAccess.count("SELECT COUNT(*) FROM service_work_approvals WHERE service_request_id=?", requestId) == 0
+            && financeAccess.count("SELECT COUNT(*) FROM service_payment_milestones WHERE service_request_id=?", requestId) == 0
+            && financeAccess.count("SELECT COUNT(*) FROM service_finance_holds WHERE service_request_id=? AND resolved_at IS NULL", requestId) == 0;
     }
     InvoiceView createServiceInvoice(Long serviceRequestId, ServiceInvoiceCreate input) {
         requireAdmin();

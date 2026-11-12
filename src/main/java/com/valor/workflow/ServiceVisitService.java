@@ -2,6 +2,7 @@ package com.valor.workflow;
 
 import com.valor.auth.*;
 import com.valor.communication.EmailEventService;
+import com.valor.realtime.RealtimeEventService;
 import com.valor.response.*;
 import java.time.*;
 import java.util.*;
@@ -27,13 +28,15 @@ public class ServiceVisitService {
     private final AssetIdentityAccess identities;
     private final AuditService audit;
     private final EmailEventService emails;
+    private final RealtimeEventService realtime;
 
     public ServiceVisitService(ServiceVisitRepository visits, VisitChangeRequestRepository changeRequests,
             VisitHistoryRepository history, VisitTechnicianRepository technicians, RequestRepository requests,
-            AssignmentRepository assignments, WorkflowIdentityAccess profiles, AssetIdentityAccess identities, AuditService audit, EmailEventService emails) {
+            AssignmentRepository assignments, WorkflowIdentityAccess profiles, AssetIdentityAccess identities, AuditService audit, EmailEventService emails,
+            RealtimeEventService realtime) {
         this.visits = visits; this.changeRequests = changeRequests; this.history = history;
         this.technicians = technicians; this.requests = requests; this.assignments = assignments;
-        this.profiles = profiles; this.identities = identities; this.audit = audit; this.emails = emails;
+        this.profiles = profiles; this.identities = identities; this.audit = audit; this.emails = emails; this.realtime = realtime;
     }
 
     @Transactional(readOnly = true)
@@ -302,7 +305,10 @@ public class ServiceVisitService {
     private VisitHistory record(ServiceVisit visit, User actor, String type, String reason) {
         VisitHistory event = new VisitHistory(visit, actor, type, reason); event.setScheduledDate(visit.getScheduledDate());
         event.setStartTime(visit.getStartTime()); event.setEndTime(visit.getEndTime()); event.setToStatus(visit.getStatus());
-        event.setToTechnician(visit.getTechnician()); return history.save(event);
+        event.setToTechnician(visit.getTechnician());
+        VisitHistory saved = history.save(event);
+        realtime.publish("SERVICE_VISIT_CHANGED", "SERVICE_VISIT", visit.getId(), visit.getStatus().name(), Set.of());
+        return saved;
     }
     private String visitSummary(ServiceVisit visit) {
         return "request=" + visit.getRequest().getId()

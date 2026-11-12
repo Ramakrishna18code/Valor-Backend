@@ -30,6 +30,7 @@ class FinanceWorkflowIntegrationTest {
     @Autowired FinanceAccess a;
     @Autowired ServiceFinanceWorkflow jobs;
     @Autowired AmcCoverageService coverage;
+    @Autowired CommerceService commerce;
     @Autowired ServiceTeamService team;
     @Autowired TechnicianFinanceService finance;
     @Autowired FinanceEvidenceService evidence;
@@ -65,6 +66,21 @@ class FinanceWorkflowIntegrationTest {
         a.db.update("INSERT INTO payment_records(customer_id,service_request_id,invoice_id,created_by_user_id,amount,currency,purpose,status,created_at,updated_at) VALUES(?,?,?,?,200,'INR','INVOICE','SUCCEEDED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",customerProfile,job,invoice,admin.getId());
         @SuppressWarnings("unchecked") var summary=(Map<String,Object>)jobs.view(job).get("billingSummary");
         assertEquals(0,amount("800.00").compareTo((BigDecimal)summary.get("amountDue")));
+    }
+
+    @Test void completedFullyCoveredAmcJobHasExplicitZeroChargeOnlyWhileLatestScopesAreCovered(){
+        long lift=((Number)a.one("SELECT lift_id FROM service_requests WHERE id=?",job).get("liftId")).longValue();
+        long contract=a.insert("INSERT INTO amc_contracts(lift_id,amc_number,plan,start_date,end_date,status) VALUES(?,?,?, ?,?,'ACTIVE')",lift,UUID.randomUUID().toString(),"Standard",LocalDate.now().minusDays(1),LocalDate.now().plusDays(10));
+        for(String scope:List.of("VISIT","LABOUR","PARTS")){
+            coverage.saveEntitlement(contract,new AmcCoverageService.Entitlement("BREAKDOWN",scope,true,LocalDate.now().minusDays(1),LocalDate.now().plusDays(10),"Included"));
+            coverage.capture(job,scope,LocalDate.now());
+        }
+        assertFalse(commerce.coveredNoCharge(job));
+        complete();
+        assertTrue(commerce.coveredNoCharge(job));
+        coverage.saveEntitlement(contract,new AmcCoverageService.Entitlement("BREAKDOWN","PARTS",false,LocalDate.now().minusDays(1),LocalDate.now().plusDays(10),"Parts charged separately"));
+        coverage.capture(job,"PARTS",LocalDate.now());
+        assertFalse(commerce.coveredNoCharge(job));
     }
 
     @Test void amcCoverageRequiresStructuredTermsAndRequestDecisionKeepsItsSnapshot(){

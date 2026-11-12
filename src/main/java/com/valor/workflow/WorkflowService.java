@@ -313,6 +313,7 @@ public class WorkflowService {
             ServiceReport report = reports.findByRequestId(id).orElseThrow(() -> new WorkflowException(409, "Valid report required"));
             if (!validReport(report, request, assignment)) throw new WorkflowException(409, "Valid report required");
             checklists.requireComplete(id);
+            completionOtps.requireVerified(id);
             serviceCodes.requireVerified(id, ServiceCodeAction.COMPLETE);
             request.setCompletedAt(LocalDateTime.now()); assignment.setStatus(AssignmentStatus.COMPLETED);
         }

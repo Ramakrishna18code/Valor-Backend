@@ -44,6 +44,7 @@ class RealtimeBrokerIntegrationTest {
         assertDoesNotThrow(() -> clientInboundChannel.send(frame(SUBSCRIBE, "/topic/admin", "4", null)));
         assertDoesNotThrow(() -> clientInboundChannel.send(frame(SUBSCRIBE, "/user/queue/valor-events", "1", null)));
         assertDoesNotThrow(() -> clientInboundChannel.send(frame(SUBSCRIBE, "/user/queue/valor-events", "2", null)));
+        assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(frame(SUBSCRIBE, "/user/4/queue/valor-events", "1", null), mock(MessageChannel.class)));
         assertThrows(IllegalArgumentException.class, () -> interceptor.preSend(frame(SUBSCRIBE, "/topic/other", "1", null), mock(MessageChannel.class)));
     }
 

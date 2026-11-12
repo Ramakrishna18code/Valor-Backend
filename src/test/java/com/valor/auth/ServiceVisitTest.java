@@ -3,11 +3,13 @@ package com.valor.auth;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -24,6 +26,7 @@ class ServiceVisitTest {
     @Autowired CustomerRepo customers;
     @Autowired TechRepo technicians;
     @Autowired JwtService jwt;
+    @Autowired JdbcTemplate db;
 
     record Fixture(User admin, User customer, User technician, User otherTechnician, long requestId, long assignedTechnicianId) {}
 
@@ -68,6 +71,13 @@ class ServiceVisitTest {
                 "scheduledDate", date, "startTime", start, "endTime", end, "notes", "Inspection");
     }
     private String visitPath(Fixture fixture) { return "/api/v1/admin/service-visits"; }
+
+    @Test void schedulingNearVisitCreatesAdminReminderAfterCommit() throws Exception {
+        Fixture fixture = fixture();
+        String due = LocalDate.now(ZoneId.of("Asia/Kolkata")).plusDays(5).toString();
+        call(post(visitPath(fixture)), fixture.admin(), visit(fixture, due, "10:00:00", "11:00:00"), 200);
+        assertEquals(1L, db.queryForObject("SELECT COUNT(*) FROM service_reminder_alerts WHERE recipient_user_id=? AND source_type='SERVICE_REQUEST' AND source_id=? AND alert_kind='DUE_SOON' AND status='OPEN'", Long.class, fixture.admin().getId(), fixture.requestId()));
+    }
 
     @Test void installationVisitsWithoutLiftRemainVisibleAndCanBeRescheduled() throws Exception {
         Fixture fixture = fixture(false);

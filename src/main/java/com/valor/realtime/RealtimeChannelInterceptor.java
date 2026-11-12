@@ -23,7 +23,12 @@ public class RealtimeChannelInterceptor implements ExecutorChannelInterceptor {
     private final JwtService jwt; private final UserDetailsService users;
     public RealtimeChannelInterceptor(JwtService jwt, UserDetailsService users) { this.jwt = jwt; this.users = users; }
     @Override public Message<?> preSend(Message<?> message, MessageChannel channel) {
-        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+        StompHeaderAccessor accessor =
+                org.springframework.messaging.support.MessageHeaderAccessor
+                    .getAccessor(message, StompHeaderAccessor.class);
+            if (accessor == null) {
+                throw new IllegalArgumentException("Invalid STOMP headers");
+            }
         try {
             if (StompCommand.CONNECT.equals(accessor.getCommand())) {
                 String header = accessor.getFirstNativeHeader("Authorization");
@@ -31,8 +36,9 @@ public class RealtimeChannelInterceptor implements ExecutorChannelInterceptor {
                 String token = header.substring(7).trim(); String subject = String.valueOf(jwt.subject(token));
                 if (!StringUtils.hasText(subject)) throw new IllegalArgumentException("Authentication failed");
                 UserDetails details = users.loadUserByUsername(subject); if (!subject.equals(details.getUsername())) throw new IllegalArgumentException("Authentication failed");
-                accessor.setUser(new UsernamePasswordAuthenticationToken(details, null, details.getAuthorities()));
-                message = MessageBuilder.createMessage(message.getPayload(), accessor.getMessageHeaders());
+                StompHeaderAccessor mutable = (StompHeaderAccessor) org.springframework.messaging.support.MessageHeaderAccessor.getMutableAccessor(message);
+                mutable.setUser(new UsernamePasswordAuthenticationToken(details, null, details.getAuthorities()));
+                return MessageBuilder.createMessage(message.getPayload(), mutable.getMessageHeaders());
             }
             if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
                 Authentication auth = (Authentication) accessor.getUser(); String destination = accessor.getDestination();
@@ -44,8 +50,7 @@ public class RealtimeChannelInterceptor implements ExecutorChannelInterceptor {
                         || "ROLE_SUPER_ADMIN".equals(authority) || "SUPER_ADMIN".equals(authority);
                 });
                 boolean adminTopic = "/topic/admin".equals(destination);
-                boolean userEventsTopic = "/user/queue/valor-events".equals(destination)
-                        || destination.matches("^/user/[^/]+/queue/valor-events$");
+                boolean userEventsTopic = "/user/queue/valor-events".equals(destination);
                 if (adminTopic && !admin) throw new IllegalArgumentException("Subscription not allowed");
                 if (!adminTopic && !userEventsTopic) throw new IllegalArgumentException("Subscription not allowed");
             }

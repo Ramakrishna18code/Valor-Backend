@@ -64,6 +64,7 @@ class CommercePaymentIntegrityTest {
     @Mock AuditService audit;
     @Mock EmailEventService emails;
     @Mock PricingService pricing;
+    @Mock FinanceAccess financeAccess;
     @Mock PasswordEncoder encoder;
     @Mock EntityManager entityManager;
     @Mock Session hibernateSession;
@@ -114,6 +115,35 @@ class CommercePaymentIntegrityTest {
         invoice.setCurrency("INR");
         invoice.setStatus(InvoiceStatus.ISSUED);
         payment.setInvoice(invoice);
+    }
+
+    @Test void zeroChargeNeedsCompletedJobAndAllConfirmedAmcScopes() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "financeAccess", financeAccess);
+        when(financeAccess.count(anyString(), eq(42L))).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.contains("FROM service_requests")) return 1L;
+            if (sql.contains("FROM service_request_coverage_decisions")) return 3L;
+            return 0L;
+        });
+        assertTrue(service.coveredNoCharge(42L));
+
+        reset(financeAccess);
+        when(financeAccess.count(anyString(), eq(42L))).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.contains("FROM service_requests")) return 1L;
+            if (sql.contains("FROM service_request_coverage_decisions")) return 2L;
+            return 0L;
+        });
+        assertFalse(service.coveredNoCharge(42L));
+
+        reset(financeAccess);
+        when(financeAccess.count(anyString(), eq(42L))).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.contains("FROM service_requests")) return 1L;
+            if (sql.contains("FROM service_request_coverage_decisions")) return 3L;
+            return sql.contains("FROM service_payment_milestones") ? 1L : 0L;
+        });
+        assertFalse(service.coveredNoCharge(42L));
     }
 
     @Test

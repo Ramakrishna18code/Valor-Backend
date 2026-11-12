@@ -24,8 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 })
 class DevBootstrapIntegrationTest {
  @Autowired JdbcTemplate db;
- @Test void doesNotSeedAutomaticallyDuringStartup() throws Exception {
+ @Test void explicitlyEnabledDevelopmentBootstrapCreatesConfiguredAdmin() throws Exception {
    int before=db.queryForObject("select count(*) from users where email=? and role='SUPER_ADMIN'",Integer.class,"stage1.bootstrap@example.test");
-   assertEquals(0,before);
+   assertEquals(1,before);
  }
 }

@@ -53,6 +53,9 @@ public class CommunicationService {
         return enqueueApplication("PAYMENT_INVOICE_REMINDER", recipientUserId,
                 Set.of(CommunicationChannel.IN_APP, CommunicationChannel.EMAIL, CommunicationChannel.SMS), variables, idempotencyKey, false);
     }
+    public List<MessageView> enqueueDailyServiceReport(Long recipientUserId, Map<String,String> variables, String idempotencyKey) {
+        return enqueueApplicationEmail("DAILY_SERVICE_REMINDER_REPORT", recipientUserId, variables, idempotencyKey, false);
+    }
 
     private List<MessageView> enqueueInternal(SendRequest input, boolean mandatory) {
         try {
@@ -216,6 +219,7 @@ public class CommunicationService {
     private static String payload(Map<String,String> variables) { return Optional.ofNullable(variables).orElse(Map.of()).toString(); }
     private static String fallbackSubject(String eventType) {
         return switch (eventType == null ? "" : eventType) {
+            case "DAILY_SERVICE_REMINDER_REPORT" -> "Valor daily pending service report";
             case "CUSTOMER_WELCOME" -> "Welcome to Valor";
             case "REFUND_RESULT" -> "Refund status update";
             default -> eventType == null ? "Valor notification" : eventType;
@@ -223,6 +227,7 @@ public class CommunicationService {
     }
     private static String fallbackBody(String eventType) {
         return switch (eventType == null ? "" : eventType) {
+            case "DAILY_SERVICE_REMINDER_REPORT" -> "Daily service report for {{reportDate}} ({{timezone}}).\nPending: {{totalPending}}\nToday: {{todayScheduled}}\nOverdue: {{overdue}}\nUnassigned: {{unassigned}}\nPending acceptance: {{pendingAcceptance}}\nIn progress: {{inProgress}}\nUpcoming AMC: {{upcomingAmc}}\nCustomer approvals: {{customerApprovals}}";
             case "CUSTOMER_WELCOME" -> "Hello {{name}},\n\nYour Valor account has been created. You can sign in using your existing credentials.\n\nThis email does not contain a password or authentication secret.";
             case "REFUND_RESULT" -> "Hello {{name}},\n\nRefund {{refundId}} is now {{status}} for {{amount}} {{currency}}. The status reflects verified backend records.";
             default -> "{{eventType}}";

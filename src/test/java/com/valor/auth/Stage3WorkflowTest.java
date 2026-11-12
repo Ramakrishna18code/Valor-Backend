@@ -124,6 +124,24 @@ class Stage3WorkflowTest {
         transition(f,target.equals("COMPLETED") ? f.technician() : f.admin(),target,"Terminal reason",200);
     }
 
+    @Test void completionRequiresLatestVerifiedCustomerCode() throws Exception {
+        Fixture f = fixture();
+        reach(f, "TESTING");
+        report(f, f.technician(), 200);
+        verifyServiceCode(f, "COMPLETE", f.technician());
+        // A replacement code invalidates the earlier verified code.
+        call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/completion-otp/request"), f.technician(), Map.of(), 200);
+        int before = events(f);
+        transition(f, f.technician(), "COMPLETED", "Work complete", 409);
+        assertEquals("TESTING", state(f));
+        assertEquals(before, events(f));
+        JsonNode latest = call(get(path(f) + "/completion-otp"), f.customer(), null, 200);
+        call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/completion-otp/verify"), f.technician(),
+                Map.of("otpId", latest.get("id").asLong(), "otp", latest.get("code").asText()), 200);
+        transition(f, f.technician(), "COMPLETED", "Work complete", 200);
+        assertEquals("COMPLETED", state(f));
+    }
+
     @Test void v3AndHibernateValidateUseSignedCanonicalMappingsAndExactMysqlSql() throws Exception {
         assertTrue(Arrays.stream(flyway.info().applied()).anyMatch(m -> "3".equals(m.getVersion().getVersion())));
         assertEquals("validate", environment.getProperty("spring.jpa.hibernate.ddl-auto"));
