@@ -325,8 +325,7 @@ public class WorkflowService {
         request.setStatus(to); event(request, from, actor, input.notes());
         if (to == RequestStatus.REACHED_SITE && request.getLift() != null) {
             var code = serviceCodes.stateForRequest(id, ServiceCodeAction.START, true);
-            notifications.createSystem(request.getCustomer().getUser().getId(), "Arrival service code",
-                    "Service code: " + code.code() + ". Request #" + id + ". Share this with your technician only after they arrive at your site.");
+            serviceCodes.notifyCustomer(request, ServiceCodeAction.START, code);
         }
         requests.flush();
         audit.record("SERVICE_REQUEST_STATUS", "SERVICE_REQUEST", request.getId(), "Changed service request status",

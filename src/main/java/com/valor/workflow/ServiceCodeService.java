@@ -8,6 +8,7 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.HexFormat;
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
@@ -113,11 +114,23 @@ class ServiceCodeService {
         if ("VERIFIED".equals(current.status())) return current;
         CodeView customerCode = stateForRequest(requestId, action, true);
         if (customerCode == null || customerCode.code() == null) throw new WorkflowException(409, "Service code is unavailable");
-        notifications.createSystem(request.getCustomer().getUser().getId(),
-                action == ServiceCodeAction.START ? "Arrival service code" : "Completion service code",
-                "Service code: " + customerCode.code() + ". Request #" + requestId
-                        + (action == ServiceCodeAction.START ? ". Share only after your technician arrives." : ". Share only after testing is complete."));
+        notifyCustomer(request, action, customerCode);
         return technicianState(requestId, action);
+    }
+
+    void notifyCustomer(ServiceRequest request, ServiceCodeAction action, CodeView code) {
+        if (code == null || code.code() == null) return;
+        String key;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update(encryptionKey);
+            byte[] fingerprint = digest.digest((request.getId() + ":" + action + ":" + code.code()).getBytes(StandardCharsets.UTF_8));
+            key = "service-code:" + request.getId() + ":" + action + ":" + HexFormat.of().formatHex(fingerprint, 0, 12);
+        } catch (Exception error) { throw new IllegalStateException("Unable to identify service-code notification", error); }
+        notifications.createSystemOnce(request.getCustomer().getUser().getId(), key,
+                action == ServiceCodeAction.START ? "Arrival service code" : "Completion service code",
+                "Service code: " + code.code() + ". Request #" + request.getId()
+                        + (action == ServiceCodeAction.START ? ". Share only after your technician arrives." : ". Share only after testing is complete."));
     }
 
     @Transactional(noRollbackFor = WorkflowException.class)

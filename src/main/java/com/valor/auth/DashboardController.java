@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 class DashboardController {
     private final EntityManager em;private final AssetIdentityAccess identities;
     DashboardController(EntityManager em,AssetIdentityAccess identities){this.em=em;this.identities=identities;}
-    record Summary(long unassignedRequests,long inProgressRequests,long emergencyJobs,
+    record Summary(long unassignedRequests,long inProgressRequests,long emergencyJobs,long completedRequests,
                    long customerCount,long buildingCount,long liftCount,long amcCount,
                    long standardAmcCount,long premiumAmcCount,long comprehensiveAmcCount,
                    long technicianCount,long availableTechnicianCount,long busyTechnicianCount,
@@ -29,6 +29,7 @@ class DashboardController {
           count("select count(r) from ServiceRequest r where r.status=com.valor.workflow.RequestStatus.PENDING and not exists (select a.id from TechnicianAssignment a where a.request=r and a.status in (com.valor.workflow.AssignmentStatus.ASSIGNED, com.valor.workflow.AssignmentStatus.ACCEPTED))"),
           count("select count(r) from ServiceRequest r where r.status in (com.valor.workflow.RequestStatus.ACCEPTED, com.valor.workflow.RequestStatus.ON_THE_WAY, com.valor.workflow.RequestStatus.REACHED_SITE, com.valor.workflow.RequestStatus.DIAGNOSIS, com.valor.workflow.RequestStatus.REPAIR_IN_PROGRESS, com.valor.workflow.RequestStatus.WAITING_FOR_PARTS, com.valor.workflow.RequestStatus.TESTING)"),
           count("select count(r) from ServiceRequest r where r.priority=com.valor.workflow.RequestPriority.EMERGENCY and r.status not in (com.valor.workflow.RequestStatus.COMPLETED, com.valor.workflow.RequestStatus.CANCELLED)"),
+          count("select count(r) from ServiceRequest r where r.status=com.valor.workflow.RequestStatus.COMPLETED"),
           count("select count(c) from CustomerProfile c"),
           count("select count(b) from Building b"),
           count("select count(l) from Lift l"),

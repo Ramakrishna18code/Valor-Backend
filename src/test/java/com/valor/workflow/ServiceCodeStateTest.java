@@ -33,6 +33,7 @@ class ServiceCodeStateTest {
         when(assignments.active(1L)).thenReturn(Optional.of(assignment));
         when(assignment.getTechnician()).thenReturn(technician);
         when(requests.findById(1L)).thenReturn(Optional.of(request));
+        when(request.getId()).thenReturn(1L);
         Lift lift = mock(Lift.class); when(lift.getId()).thenReturn(10L);
         when(request.getLift()).thenReturn(lift);
         LiftServiceCode code = new LiftServiceCode(); code.lift = lift;
@@ -85,8 +86,26 @@ class ServiceCodeStateTest {
         doReturn(new ServiceCodeService.CodeView(10L, "123456", "AVAILABLE", null, 0, null))
                 .when(sending).stateForRequest(1L, ServiceCodeAction.START, true);
         var result = sending.sendToCustomer(1L, ServiceCodeAction.START);
-        verify(notifications).createSystem(eq(42L), eq("Arrival service code"), contains("Service code: 123456. Request #1"));
+        verify(notifications).createSystemOnce(eq(42L), startsWith("service-code:1:START:"), eq("Arrival service code"), contains("Service code: 123456. Request #1"));
         assertNull(result.code());
+    }
+
+    @Test void arrivalAndManualSendUseTheSameNotificationKey() {
+        var sending = spy(service);
+        when(requests.lockById(1L)).thenReturn(Optional.of(request));
+        when(request.getStatus()).thenReturn(RequestStatus.REACHED_SITE);
+        CustomerProfile customer = mock(CustomerProfile.class);
+        User recipient = mock(User.class);
+        when(request.getCustomer()).thenReturn(customer);
+        when(customer.getUser()).thenReturn(recipient);
+        when(recipient.getId()).thenReturn(42L);
+        var code = new ServiceCodeService.CodeView(10L, "123456", "AVAILABLE", null, 0, null);
+        doReturn(code).when(sending).stateForRequest(1L, ServiceCodeAction.START, true);
+        sending.notifyCustomer(request, ServiceCodeAction.START, code);
+        sending.sendToCustomer(1L, ServiceCodeAction.START);
+        var key = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(notifications, times(2)).createSystemOnce(eq(42L), key.capture(), eq("Arrival service code"), anyString());
+        assertEquals(key.getAllValues().get(0), key.getAllValues().get(1));
     }
 
     @Test void doesNotSendCodeForUnauthorizedTechnician() {
