@@ -4,6 +4,7 @@ import com.valor.protection.ProtectionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
+import java.time.Clock;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -27,9 +28,11 @@ class ProtectionManagementTest {
     @Autowired TechRepo technicians;
     @Autowired JwtService jwt;
     @Autowired ProtectionService protection;
+    @Autowired Clock clock;
 
     @Test
     void protectionFlowKeepsOwnershipAndInsurerAuthorityExplicit() throws Exception {
+        LocalDate today = LocalDate.now(clock);
         User admin = user(Role.ADMIN);
         User owner = customer("Lift owner");
         User otherCustomer = customer("Other customer");
@@ -57,15 +60,15 @@ class ProtectionManagementTest {
         JsonNode liftPolicy = call("POST", "/api/v1/customers/me/protection/lift-policies", owner,
                 Map.of("liftId", liftId, "providerId", providerId, "productId", liftProductId,
                         "insurerPolicyNumber", "EXISTING-LIFT-POLICY-" + UUID.randomUUID(),
-                        "coverageStartDate", LocalDate.now().minusDays(1).toString(),
-                        "coverageEndDate", LocalDate.now().plusDays(30).toString(), "currency", "INR"), 200);
+                        "coverageStartDate", today.minusDays(1).toString(),
+                        "coverageEndDate", today.plusDays(30).toString(), "currency", "INR"), 200);
         long liftPolicyId = liftPolicy.get("id").asLong();
         assertEquals("DECLARED", liftPolicy.get("status").asText());
         assertEquals(0, call("GET", "/api/v1/customers/me/protection/lift-policies", otherCustomer, null, 200).get("items").size());
         call("GET", "/api/v1/protection/lift-policies/" + liftPolicyId, otherCustomer, null, 403);
         call("POST", "/api/v1/customers/me/protection/lift-policies", otherCustomer,
                 Map.of("liftId", liftId, "providerId", providerId, "insurerPolicyNumber", "CROSS-OWNER",
-                        "coverageStartDate", LocalDate.now().toString(), "coverageEndDate", LocalDate.now().plusDays(1).toString()), 403);
+                        "coverageStartDate", today.toString(), "coverageEndDate", today.plusDays(1).toString()), 403);
         call("GET", "/api/v1/customers/me/protection/lift-policies", techOwner, null, 403);
 
         call("PATCH", "/api/v1/admin/protection/lift-policies/" + liftPolicyId + "/insurer-confirmation", admin,
@@ -81,7 +84,7 @@ class ProtectionManagementTest {
                         "coverageRequested", "Request a quote from the insurer"), 200);
         assertEquals("SUBMITTED", application.get("status").asText());
         JsonNode quoted = call("POST", "/api/v1/admin/protection/applications/" + application.get("id").asLong() + "/manual-quote", admin,
-                Map.of("quoteAmount", 12500, "quoteCurrency", "INR", "quoteExpiresOn", LocalDate.now().plusDays(14).toString(),
+                Map.of("quoteAmount", 12500, "quoteCurrency", "INR", "quoteExpiresOn", today.plusDays(14).toString(),
                         "insurerQuoteReference", "EXTERNAL-QUOTE-1", "insurerNotes", "Manual quote communicated by insurer"), 200);
         assertEquals("QUOTE_RECEIVED", quoted.get("status").asText());
         JsonNode decision = call("POST", "/api/v1/customers/me/protection/applications/" + application.get("id").asLong() + "/decision", owner,
@@ -89,7 +92,7 @@ class ProtectionManagementTest {
         assertEquals("CUSTOMER_ACCEPTED", decision.get("status").asText());
 
         JsonNode claim = call("POST", "/api/v1/protection/claims", owner,
-                Map.of("policyType", "LIFT", "policyId", liftPolicyId, "incidentDate", LocalDate.now().toString(),
+                Map.of("policyType", "LIFT", "policyId", liftPolicyId, "incidentDate", today.toString(),
                         "description", "Damage reported for insurer assessment", "claimedAmount", 2500, "currency", "INR"), 200);
         long claimId = claim.get("id").asLong();
         call("POST", "/api/v1/protection/claims/" + claimId + "/documents", owner,
@@ -111,8 +114,8 @@ class ProtectionManagementTest {
         JsonNode technicianPolicy = call("POST", "/api/v1/technicians/me/protection/policies", techOwner,
                 Map.of("providerId", providerId, "productId", technicianProduct.get("id").asLong(),
                         "insurerPolicyNumber", "EXISTING-TECH-POLICY-" + UUID.randomUUID(),
-                        "coverageStartDate", LocalDate.now().minusDays(1).toString(),
-                        "coverageEndDate", LocalDate.now().plusDays(15).toString(), "currency", "INR"), 200);
+                        "coverageStartDate", today.minusDays(1).toString(),
+                        "coverageEndDate", today.plusDays(15).toString(), "currency", "INR"), 200);
         call("GET", "/api/v1/protection/technician-policies/" + technicianPolicy.get("id").asLong(), otherTechnician, null, 403);
         assertEquals(0, call("GET", "/api/v1/technicians/me/protection/policies", otherTechnician, null, 200).get("items").size());
         call("PATCH", "/api/v1/admin/protection/technician-policies/" + technicianPolicy.get("id").asLong() + "/insurer-confirmation", admin,
