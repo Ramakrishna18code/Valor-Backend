@@ -141,6 +141,20 @@ class Phase1CommerceTest {
         assertFalse(result.has("code"));
     }
 
+    private void verifyCompletionOtp(Fixture f) throws Exception {
+        String base = "/api/v1/technician/me/jobs/" + f.requestId() + "/completion-otp";
+        JsonNode issued = call(post(base + "/request"), f.technician(), null, 200);
+        assertFalse(issued.hasNonNull("code"));
+        JsonNode customerCode = call(get("/api/v1/service-requests/" + f.requestId() + "/completion-otp"), f.customer(), null, 200);
+        assertEquals(issued.get("id").asLong(), customerCode.get("id").asLong());
+        String code = customerCode.get("code").asText();
+        assertTrue(code.matches("[1-9][0-9]{5}"));
+        JsonNode verified = call(post(base + "/verify"), f.technician(),
+                Map.of("otpId", issued.get("id").asLong(), "otp", code), 200);
+        assertEquals("VERIFIED", verified.get("status").asText());
+        assertFalse(verified.hasNonNull("code"));
+    }
+
     @Test void technicianCanVerifyStartCodeWithoutReceivingTheCodeBack() throws Exception {
         Fixture f = fixture();
         startTracking(f);
@@ -179,6 +193,8 @@ class Phase1CommerceTest {
         JsonNode repeated = call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/service-code/verify"), f.technician(),
                 Map.of("action", "COMPLETE", "code", "not-returned"), 200);
         assertEquals("VERIFIED", repeated.get("status").asText());
+        call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "COMPLETED"), 409);
+        verifyCompletionOtp(f);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "COMPLETED"), 200);
     }
 
@@ -208,7 +224,7 @@ class Phase1CommerceTest {
         Fixture f=fixture();startTracking(f);
         call(post("/api/v1/service-requests/"+f.requestId()+"/status"),f.technician(),Map.of("toStatus","REACHED_SITE"),200);verifyStartCode(f);
         for(String next:List.of("DIAGNOSIS","REPAIR_IN_PROGRESS","TESTING"))call(post("/api/v1/service-requests/"+f.requestId()+"/status"),f.technician(),Map.of("toStatus",next),200);
-        call(post("/api/v1/technician/me/jobs/"+f.requestId()+"/report"),f.technician(),Map.of("diagnosis","Fault","workPerformed","Repair","testingResult","Passed"),200);verifyCompleteCode(f);
+        call(post("/api/v1/technician/me/jobs/"+f.requestId()+"/report"),f.technician(),Map.of("diagnosis","Fault","workPerformed","Repair","testingResult","Passed"),200);verifyCompleteCode(f);verifyCompletionOtp(f);
         call(post("/api/v1/service-requests/"+f.requestId()+"/status"),f.technician(),Map.of("toStatus","COMPLETED"),200);
         long invoice=call(post("/api/v1/invoices"),f.admin(),Map.of("customerProfileId",f.customerId(),"serviceRequestId",f.requestId(),"description","Completed repair","subtotal",1000),200).get("id").asLong();
         var otp=call(post("/api/v1/payments/cash/otp/request"),f.customer(),Map.of("invoiceId",invoice),200);
@@ -385,6 +401,7 @@ class Phase1CommerceTest {
         call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/report"), f.technician(),
                 Map.of("diagnosis", "Diagnosed", "workPerformed", "Repaired", "testingResult", "Passed"), 200);
         verifyCompleteCode(f);
+        verifyCompletionOtp(f);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "COMPLETED"), 200);
         call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/location"), f.technician(),
                 Map.of("latitude", 12.9716, "longitude", 77.5946), 403);
@@ -505,6 +522,7 @@ class Phase1CommerceTest {
         call(post("/api/v1/technician/me/jobs/" + f.requestId() + "/report"), f.technician(),
                 Map.of("diagnosis", "Diagnosed", "workPerformed", "Repaired", "testingResult", "Passed"), 200);
         verifyCompleteCode(f);
+        verifyCompletionOtp(f);
         call(post("/api/v1/service-requests/" + f.requestId() + "/status"), f.technician(), Map.of("toStatus", "COMPLETED"), 200);
         JsonNode feedback = call(put("/api/v1/service-requests/" + f.requestId() + "/feedback"), f.customer(),
                 Map.of("rating", 5, "comment", "Good work"), 200);

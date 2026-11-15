@@ -1,0 +1,97 @@
+﻿name: valor-local
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?missing}
+      MYSQL_DATABASE: valor_lifts_dev
+      MYSQL_USER: valor_app
+      MYSQL_PASSWORD: ${VALOR_DB_PASSWORD:?missing}
+    volumes:
+      - valor_mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'mysql --user="$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --database="$$MYSQL_DATABASE" --execute="SELECT 1" >/dev/null 2>&1'
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+
+  api:
+    image: valor-backend:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      PORT: "8081"
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      DB_URL: jdbc:mysql://mysql:3306/valor_lifts_dev
+      DB_USERNAME: valor_app
+      DB_PASSWORD: ${VALOR_DB_PASSWORD:?missing}
+      JWT_SECRET: ${JWT_SECRET:?missing}
+      DEV_BOOTSTRAP_ENABLED: ${DEV_BOOTSTRAP_ENABLED:-false}
+      DEV_BOOTSTRAP_SUPER_ADMIN_EMAIL: ${DEV_BOOTSTRAP_SUPER_ADMIN_EMAIL:-}
+      DEV_BOOTSTRAP_SUPER_ADMIN_PASSWORD: ${DEV_BOOTSTRAP_SUPER_ADMIN_PASSWORD:-}
+      DEV_SEED_SAMPLE_DATA_ENABLED: ${DEV_SEED_SAMPLE_DATA_ENABLED:-false}
+      DEV_SEED_SAMPLE_PASSWORD: ${DEV_SEED_SAMPLE_PASSWORD:-}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      RAZORPAY_MODE: ${RAZORPAY_MODE:-}
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002"
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx512m"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  gateway:
+    image: valor-gateway:local
+    build:
+      context: ../gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      PORT: "8080"
+      BACKEND_URL: http://api:8081
+      BACKEND_WS_URL: ws://api:8081
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002"
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+    depends_on:
+      - api
+
+  admin:
+    image: valor-admin-web:local
+    build:
+      context: ../../Valor-Admin-Portal
+      dockerfile: Dockerfile.web
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - gateway
+
+  customer:
+    image: valor-customer-web:local
+    build:
+      context: ../../Valor-Android-APP
+      dockerfile: Dockerfile.web
+    ports:
+      - "127.0.0.1:3001:80"
+    depends_on:
+      - gateway
+
+  technician:
+    image: valor-technician-web:local
+    build:
+      context: ../../Valor-technician
+      dockerfile: Dockerfile.web
+    ports:
+      - "127.0.0.1:3002:80"
+    depends_on:
+      - gateway
+
+volumes:
+  valor_mysql_data:
