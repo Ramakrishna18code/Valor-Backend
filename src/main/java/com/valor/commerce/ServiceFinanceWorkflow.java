@@ -36,6 +36,8 @@ class ServiceFinanceWorkflow {
         BigDecimal refundedOnIssued=a.sum("SELECT COALESCE(SUM(f.amount),0) FROM payment_refunds f JOIN payment_records p ON p.id=f.payment_id JOIN invoices i ON i.id=p.invoice_id WHERE i.service_request_id=? AND i.status='ISSUED' AND i.currency='INR' AND f.currency='INR' AND f.status='SUCCEEDED'",job);
         BigDecimal due=issued.subtract(paidOnIssued).add(refundedOnIssued).max(BigDecimal.ZERO);
         result.put("billingSummary",Map.of("totalInvoiced",total,"confirmedPaid",paid,"refunded",refunded,"netReceived",paid.subtract(refunded),"amountDue",due,"currency","INR"));
+        var pendingQuotations=a.rows("SELECT id,quotation_number,total_amount,currency FROM service_quotations WHERE service_request_id=? AND release_status='RELEASED' AND status='ISSUED' ORDER BY id DESC",job);
+        result.put("pendingQuotations",pendingQuotations);
         result.put("quotationAvailable",a.count("SELECT COUNT(*) FROM service_quotations WHERE service_request_id=? AND release_status='RELEASED' AND status IN ('ISSUED','ACCEPTED')",job)>0);
         result.put("completionTerms",a.rows("SELECT version_number,warranty_details,handover_notes,created_at FROM service_completion_terms WHERE service_request_id=? ORDER BY version_number DESC LIMIT 1",job));
         var inspections=a.rows("SELECT i.*,t.employee_id AS technician_name FROM service_inspections i JOIN technician_profiles t ON t.id=i.technician_profile_id WHERE i.service_request_id=?"+(a.actor().getRole()==Role.CUSTOMER?" AND i.status<>'DRAFT'":"")+" ORDER BY i.id DESC",job);

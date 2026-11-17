@@ -65,7 +65,7 @@ public class FinanceAccess {
     public void requireWorkApproved(long job) {
         if(count("SELECT COUNT(*) FROM service_inspections WHERE service_request_id=? AND safety_status IN ('UNSAFE','RESTRICTED')",job)>0)
             throw new CommerceException(409,"Safety clearance is required before repair or completion");
-        if(count("SELECT COUNT(*) FROM service_work_approvals WHERE service_request_id=? AND status IN ('PENDING_ADMIN','AWAITING_CUSTOMER')",job)>0)
+        if(count("SELECT COUNT(*) FROM service_work_approvals w LEFT JOIN service_quotations q ON q.id=w.quotation_id WHERE w.service_request_id=? AND w.status IN ('PENDING_ADMIN','AWAITING_CUSTOMER') AND (q.id IS NULL OR q.status<>'ACCEPTED')",job)>0)
             throw new CommerceException(409,"Additional work is awaiting approval");
         if(count("SELECT COUNT(*) FROM service_finance_holds WHERE service_request_id=? AND resolved_at IS NULL",job)>0)
             throw new CommerceException(409,"An unresolved service or payment dispute blocks this action");

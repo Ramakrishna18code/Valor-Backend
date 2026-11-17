@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+**/target/
+**/*.log
+data/
+local-stack/
+gateway/
+.idea/
+.vscode/
+*.iml

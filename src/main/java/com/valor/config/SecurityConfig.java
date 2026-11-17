@@ -59,7 +59,8 @@ public class SecurityConfig {
                                 "/api/auth/admin/login",
                                 "/api/auth/technician/login",
                                 "/api/auth/send-otp",
-                                "/api/auth/verify-otp").permitAll()
+                                "/api/auth/verify-otp",
+                                "/api/v1/public/website-enquiries").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())

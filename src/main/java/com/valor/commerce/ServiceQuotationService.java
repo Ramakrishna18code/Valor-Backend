@@ -304,7 +304,7 @@ class ServiceQuotationService {
         row.setRespondedAt(LocalDateTime.now());
         if (input.decision() == ServiceQuotationDecision.DECLINE) {
             row.setStatus(ServiceQuotationStatus.DECLINED);
-            if(finance!=null)finance.db.update("UPDATE service_work_approvals SET status='REJECTED' WHERE quotation_id=? AND status='AWAITING_CUSTOMER'",id);
+            if(finance!=null){relinkReplacementWorkApprovals(row);finance.db.update("UPDATE service_work_approvals SET status='REJECTED' WHERE quotation_id=? AND status='AWAITING_CUSTOMER'",id);}
             audit.record("SERVICE_QUOTATION_DECLINED", "SERVICE_QUOTATION", row.getId(),
                     "Customer declined service quotation");
             return view(row);
@@ -343,7 +343,8 @@ class ServiceQuotationService {
         }
         row.setStatus(ServiceQuotationStatus.ACCEPTED);
         row.setApprovedTermsHash(termsHash(row));
-        if(finance!=null){finance.db.update("UPDATE service_work_approvals SET status='APPROVED' WHERE quotation_id=? AND status='AWAITING_CUSTOMER'",id);finance.event(row.getServiceRequest().getId(),"QUOTATION_ACCEPTED",row.getQuotationNumber()+" terms="+row.getApprovedTermsHash());}
+        quotations.flush();
+        if(finance!=null){relinkReplacementWorkApprovals(row);finance.db.update("UPDATE service_work_approvals SET status='APPROVED' WHERE quotation_id=? AND status='AWAITING_CUSTOMER'",id);finance.event(row.getServiceRequest().getId(),"QUOTATION_ACCEPTED",row.getQuotationNumber()+" terms="+row.getApprovedTermsHash());}
         audit.record("SERVICE_QUOTATION_ACCEPTED", "SERVICE_QUOTATION", row.getId(),
                 "Customer accepted quotation and invoice=" + row.getInvoice().getId());
         return view(row);
@@ -358,7 +359,17 @@ class ServiceQuotationService {
         if(row.getSupersedesQuotationId()!=null){var parent=quotations.lockById(row.getSupersedesQuotationId()).orElseThrow(()->new CommerceException(404,"Parent quotation not found"));
             if("REPLACEMENT".equals(row.getRevisionKind())){if(parent.getStatus()==ServiceQuotationStatus.ACCEPTED)throw new CommerceException(409,"Accepted terms cannot be replaced; create additional scope instead");parent.setStatus(ServiceQuotationStatus.CANCELLED);}
             else if(parent.getStatus()!=ServiceQuotationStatus.ACCEPTED)throw new CommerceException(409,"Additional scope requires accepted original terms");}
+        if(finance!=null)relinkReplacementWorkApprovals(row);
         row.setReleaseStatus("RELEASED");row.setReleasedAt(java.time.LocalDateTime.now());quotations.flush();audit.record("SERVICE_QUOTATION_RELEASED","SERVICE_QUOTATION",id,"Released version="+row.getVersionNumber());return view(row);
+    }
+    private void relinkReplacementWorkApprovals(ServiceQuotation replacement){
+        if(finance==null||!"REPLACEMENT".equals(replacement.getRevisionKind()))return;
+        Long parentId=replacement.getSupersedesQuotationId();
+        while(parentId!=null){
+            var parent=quotations.findById(parentId).orElseThrow(()->new CommerceException(404,"Parent quotation not found"));
+            finance.db.update("UPDATE service_work_approvals SET quotation_id=? WHERE service_request_id=? AND quotation_id=? AND status='AWAITING_CUSTOMER'",replacement.getId(),replacement.getServiceRequest().getId(),parentId);
+            parentId="REPLACEMENT".equals(parent.getRevisionKind())?parent.getSupersedesQuotationId():null;
+        }
     }
     View plan(Long id,Plan input){
         identities.requireAdmin();var row=quotations.lockById(id).orElseThrow(()->new CommerceException(404,"We could not find that quotation."));

@@ -13,6 +13,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.mock.web.MockMultipartFile;
 import static org.junit.jupiter.api.Assertions.*;
@@ -258,7 +260,12 @@ class FinanceWorkflowIntegrationTest {
         actor.set(admin);
         assertThrows(CommerceException.class,()->quotations.plan(draft.id(),new ServiceQuotationDtos.Plan(List.of(new ServiceQuotationDtos.Milestone("Advance","ON_APPROVAL",null,amount("900.00"))))));
         quotations.plan(draft.id(),new ServiceQuotationDtos.Plan(List.of(new ServiceQuotationDtos.Milestone("Advance","ON_APPROVAL",null,amount("300.00")),new ServiceQuotationDtos.Milestone("Final","ON_COMPLETION",null,amount("700.00")))));
-        quotations.release(draft.id());actor.set(customer);var accepted=quotations.decide(draft.id(),new ServiceQuotationDtos.Decision(ServiceQuotationDtos.ServiceQuotationDecision.ACCEPT));
+        quotations.release(draft.id());actor.set(customer);
+        var beforeApproval=jobs.view(job);
+        assertEquals(true,beforeApproval.get("quotationAvailable"));
+        assertEquals(amount("1000.00"),((Map<?,?>)((List<?>)beforeApproval.get("pendingQuotations")).get(0)).get("totalAmount"));
+        assertEquals(0,BigDecimal.ZERO.compareTo((BigDecimal)((Map<?,?>)beforeApproval.get("billingSummary")).get("amountDue")));
+        var accepted=quotations.decide(draft.id(),new ServiceQuotationDtos.Decision(ServiceQuotationDtos.ServiceQuotationDecision.ACCEPT));
         assertNotNull(accepted.approvedTermsHash());assertEquals(64,accepted.approvedTermsHash().length());assertNotNull(accepted.invoiceId());
         assertEquals(2,a.count("SELECT COUNT(*) FROM service_payment_milestones WHERE quotation_id=? AND invoice_id IS NOT NULL",draft.id()));
         long finalInvoice=a.db.queryForObject("SELECT invoice_id FROM service_payment_milestones WHERE quotation_id=? AND due_condition='ON_COMPLETION'",Long.class,draft.id());
@@ -270,6 +277,36 @@ class FinanceWorkflowIntegrationTest {
         actor.set(customer);quotations.decide(revision.id(),new ServiceQuotationDtos.Decision(ServiceQuotationDtos.ServiceQuotationDecision.ACCEPT));
         assertEquals(amount("300.00"),(BigDecimal)a.one("SELECT total_amount FROM invoices WHERE id=?",accepted.invoiceId()).get("totalAmount"));
         assertEquals(ServiceQuotationStatus.ACCEPTED,quotations.customerQuotation(draft.id()).status());
+    }
+
+    @Test void acceptedReplacementUnblocksWorkLinkedToCancelledQuotation(){
+        actor.set(technician);
+        jobs.requestWork(job,new ServiceFinanceWorkflow.Work("Door sensor adjustment","Sensor is misaligned"));
+        long workId=a.db.queryForObject("SELECT MAX(id) FROM service_work_approvals WHERE service_request_id=?",Long.class,job);
+        actor.set(admin);
+        var original=quotations.draft(job,new ServiceQuotationDtos.Create(null,"Door sensor adjustment",amount("2250.00"),BigDecimal.ZERO,"INR",null,null));
+        quotations.release(original.id());
+        jobs.reviewWork(workId,new ServiceFinanceWorkflow.WorkReview(original.id(),false,"Approved for customer quotation"));
+        var replacement=quotations.revise(original.id(),new ServiceQuotationDtos.Revision(new ServiceQuotationDtos.Create(null,"Revised door sensor adjustment",amount("2250.00"),BigDecimal.ZERO,"INR",null,null),"Corrected description"));
+        quotations.release(replacement.id());
+        assertEquals(replacement.id(),((Number)a.one("SELECT quotation_id FROM service_work_approvals WHERE id=?",workId).get("quotationId")).longValue());
+
+        // Existing jobs may still have the approval linked to the cancelled quotation.
+        a.db.update("UPDATE service_work_approvals SET quotation_id=? WHERE id=?",original.id(),workId);
+        actor.set(customer);
+        var accepted=quotations.decide(replacement.id(),new ServiceQuotationDtos.Decision(ServiceQuotationDtos.ServiceQuotationDecision.ACCEPT));
+        assertNotNull(accepted.invoiceId());
+        assertEquals("APPROVED",a.one("SELECT status FROM service_work_approvals WHERE id=?",workId).get("status"));
+        assertEquals(replacement.id(),((Number)a.one("SELECT quotation_id FROM service_work_approvals WHERE id=?",workId).get("quotationId")).longValue());
+        actor.set(technician);
+        assertDoesNotThrow(()->a.requireWorkApproved(job));
+
+        // Apply the data repair to a job left behind by a previously accepted replacement.
+        a.db.update("UPDATE service_work_approvals SET status='AWAITING_CUSTOMER',quotation_id=? WHERE id=?",original.id(),workId);
+        new ResourceDatabasePopulator(new ClassPathResource("db/migration/V77__relink_replacement_work_approvals.sql")).execute(a.db.getDataSource());
+        assertEquals("APPROVED",a.one("SELECT status FROM service_work_approvals WHERE id=?",workId).get("status"));
+        assertEquals(replacement.id(),((Number)a.one("SELECT quotation_id FROM service_work_approvals WHERE id=?",workId).get("quotationId")).longValue());
+        assertDoesNotThrow(()->a.requireWorkApproved(job));
     }
 
     @Test void commissionAndPayoutRequireEligibilityEvidenceAndIndependentConfirmation(){

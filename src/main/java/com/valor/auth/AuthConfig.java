@@ -76,7 +76,8 @@ class AuthConfig {
                                 "/api/v1/auth/otp/resend",
                                 "/api/v1/auth/otp/verify",
                                 "/api/v1/auth/refresh",
-                                "/api/v1/auth/set-password").permitAll()
+                                "/api/v1/auth/set-password",
+                                "/api/v1/public/website-enquiries").permitAll()
                         .requestMatchers("/api/v1/technician-applications", "/api/v1/technician-applications/**").permitAll()
                         .requestMatchers("/api/v1/admin/technician-applications", "/api/v1/admin/technician-applications/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/customers/**").hasRole("CUSTOMER")
@@ -92,6 +93,7 @@ class AuthConfig {
                         .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/admin/roles/*/permissions").hasAuthority("PERM_ROLE_WRITE")
                         .requestMatchers("/api/v1/admin/audit-logs", "/api/v1/admin/audit-logs/**").hasAuthority("PERM_AUDIT_READ")
                         .requestMatchers("/api/v1/admin/communications", "/api/v1/admin/communications/**").hasAnyRole("ADMIN","SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/website-enquiries", "/api/v1/admin/website-enquiries/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/part-categories", "/api/v1/admin/part-categories/**", "/api/v1/admin/parts", "/api/v1/admin/parts/**", "/api/v1/admin/part-requests", "/api/v1/admin/part-requests/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/customers", "/api/v1/admin/customers/**").hasAnyRole("ADMIN","SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/checklist-templates", "/api/v1/admin/checklist-templates/**",

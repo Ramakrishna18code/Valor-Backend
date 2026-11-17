@@ -5,7 +5,7 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /api/health
+    healthCheckPath: /api/v1/health
     envVars:
       - key: SPRING_PROFILES_ACTIVE
         value: prod
