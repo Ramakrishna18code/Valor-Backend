@@ -91,5 +91,6 @@ class StagingCustomerTestBootstrap implements ApplicationRunner {
         profile.status = "ACTIVE";
         profile.active = true;
         customers.saveAndFlush(profile);
+        System.out.println("Staging customer test account created.");
     }
 }
