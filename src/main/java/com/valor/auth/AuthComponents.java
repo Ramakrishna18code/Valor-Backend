@@ -23,6 +23,9 @@ interface OnboardingTokenRepo extends JpaRepository<OnboardingToken,Long>{@Lock(
   User u=key!=null&&key.contains("@")?users.lockEmail(key).orElse(null):users.lockPhone(normPhone(identity)).orElse(null);
   if(u==null)throw new IllegalArgumentException("Authentication failed");
   var now=LocalDateTime.now();
+  if ("stagingcustomer@valor.test".equals(u.getEmail())) {
+    System.out.println("Staging customer login state: role="+u.getRole()+", active="+u.isActive()+", locked="+u.isLocked()+", lockedUntil="+u.getLockedUntil()+", passwordMatches="+(u.getPasswordHash()!=null&&encoder.matches(password,u.getPasswordHash())));
+  }
     if(!allowed.contains(u.getRole())||!u.isActive()||u.isLocked()||u.getLockedUntil()!=null&&u.getLockedUntil().isAfter(now))throw new IllegalArgumentException("Authentication failed");
     if (u.getRole() == Role.TECHNICIAN && applications.findByEmailIgnoreCase(u.getEmail()).map(application -> !"APPROVED".equals(application.status)).orElse(false)) throw new IllegalArgumentException("Authentication failed");
   if(u.getPasswordHash()==null||!encoder.matches(password,u.getPasswordHash())) {
