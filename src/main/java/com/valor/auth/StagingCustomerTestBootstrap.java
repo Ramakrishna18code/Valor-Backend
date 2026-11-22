@@ -83,6 +83,18 @@ class StagingCustomerTestBootstrap implements ApplicationRunner {
             user.setFailedLoginAttempts(0);
             user.setLockedUntil(null);
             users.saveAndFlush(user);
+            if (!encoder.matches(password, user.getPasswordHash())) {
+                throw new IllegalStateException(
+                    "Staging customer password verification failed.");
+            }
+            if (customers.findByUserId(user.getId()).isEmpty()) {
+                CustomerProfile profile = new CustomerProfile();
+                profile.setUser(user);
+                profile.setFullName("Valor Test Customer");
+                profile.status = "ACTIVE";
+                profile.active = true;
+                customers.saveAndFlush(profile);
+            }
             System.out.println("Staging customer test account password updated.");
             return;
         }

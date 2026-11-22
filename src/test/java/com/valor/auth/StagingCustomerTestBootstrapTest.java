@@ -55,6 +55,8 @@ class StagingCustomerTestBootstrapTest {
         when(users.findByEmail("testcustomer@valor.test"))
             .thenReturn(Optional.of(existing));
         when(encoder.encode("Staging-Test-123")).thenReturn("new-hash");
+        when(encoder.matches("Staging-Test-123", "new-hash")).thenReturn(true);
+        when(customers.findByUserId(existing.getId())).thenReturn(Optional.of(new CustomerProfile()));
 
         var bootstrap = new StagingCustomerTestBootstrap(
             users, customers, encoder, STAGING_ENV_ID, true,
