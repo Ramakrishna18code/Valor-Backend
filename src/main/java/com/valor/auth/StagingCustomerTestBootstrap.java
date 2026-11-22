@@ -70,8 +70,20 @@ class StagingCustomerTestBootstrap implements ApplicationRunner {
             );
         }
 
-        if (users.findByEmail(normalizedEmail).isPresent()) {
-            System.out.println("Staging customer test account already exists; skipping creation.");
+        var existing = users.findByEmail(normalizedEmail);
+        if (existing.isPresent()) {
+            User user = existing.get();
+            if (user.getRole() != Role.CUSTOMER) {
+                throw new IllegalStateException(
+                    "Staging test email belongs to a non-customer account.");
+            }
+            user.setPasswordHash(encoder.encode(password));
+            user.setActive(true);
+            user.setLocked(false);
+            user.setFailedLoginAttempts(0);
+            user.setLockedUntil(null);
+            users.saveAndFlush(user);
+            System.out.println("Staging customer test account password updated.");
             return;
         }
 

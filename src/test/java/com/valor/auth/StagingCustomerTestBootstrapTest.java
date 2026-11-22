@@ -48,16 +48,21 @@ class StagingCustomerTestBootstrapTest {
     }
 
     @Test
-    void skipsWhenAccountAlreadyExists() {
+    void updatesReservedCustomerAccountPassword() {
+        var existing = new User();
+        existing.setRole(Role.CUSTOMER);
+        existing.setPasswordHash("old-hash");
         when(users.findByEmail("testcustomer@valor.test"))
-            .thenReturn(Optional.of(new User()));
+            .thenReturn(Optional.of(existing));
+        when(encoder.encode("Staging-Test-123")).thenReturn("new-hash");
 
         var bootstrap = new StagingCustomerTestBootstrap(
             users, customers, encoder, STAGING_ENV_ID, true,
             "testcustomer@valor.test", "Staging-Test-123");
         bootstrap.run(new DefaultApplicationArguments());
 
-        verify(users, never()).saveAndFlush(any());
+        assertEquals("new-hash", existing.getPasswordHash());
+        verify(users).saveAndFlush(existing);
         verify(customers, never()).saveAndFlush(any());
     }
 }
