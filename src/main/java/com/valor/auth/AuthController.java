@@ -35,6 +35,7 @@ class AuthController {
     @PostMapping("/auth/register/email/verify") ApiResponse<Authentication> emailVerify(@Valid @RequestBody EmailRegistrationDtos.Verify r){return ok(auth.verifyEmailRegistration(emailRegistrations.verify(r.challengeId(),r.otp())));}
     @Operation(operationId="loginCustomer")
     @PostMapping("/auth/login/customer") ApiResponse<Authentication> loginCustomer(@Valid @RequestBody CustomerLogin r) {
+        System.out.println("Customer login request reached auth controller.");
         return ok(auth.login(r.identity(),r.password(),Set.of(Role.CUSTOMER)));
     }
     private User emailLogin(EmailLogin r,Set<Role> roles) {
