@@ -21,6 +21,9 @@ interface OnboardingTokenRepo extends JpaRepository<OnboardingToken,Long>{@Lock(
  @Transactional(noRollbackFor=IllegalArgumentException.class) User login(String identity,String password,Set<Role> allowed) {
   String key=normEmail(identity);
   User u=key!=null&&key.contains("@")?users.lockEmail(key).orElse(null):users.lockPhone(normPhone(identity)).orElse(null);
+    if (u==null && "stagingcustomer@valor.test".equals(key)) {
+      System.out.println("Staging customer login lookup missed normalized email.");
+    }
   if(u==null)throw new IllegalArgumentException("Authentication failed");
   var now=LocalDateTime.now();
     boolean passwordMatches=u.getPasswordHash()!=null&&encoder.matches(password,u.getPasswordHash());
