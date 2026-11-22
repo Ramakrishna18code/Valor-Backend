@@ -63,10 +63,10 @@ class StagingCustomerTestBootstrap implements ApplicationRunner {
         }
 
         if (password == null
-            || password.getBytes(StandardCharsets.UTF_8).length < 12
+            || password.getBytes(StandardCharsets.UTF_8).length < 8
             || password.getBytes(StandardCharsets.UTF_8).length > 72) {
             throw new IllegalStateException(
-                "Staging test password must be 12-72 UTF-8 bytes."
+                "Staging test password must be 8-72 UTF-8 bytes."
             );
         }
 
