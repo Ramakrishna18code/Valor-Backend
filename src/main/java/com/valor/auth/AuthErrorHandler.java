@@ -22,11 +22,7 @@ class AuthErrorHandler {
   }
   @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
   ResponseEntity<ApiResponse<Object>> invalid(org.springframework.web.bind.MethodArgumentNotValidException ex) {
-    String fields = ex.getBindingResult().getFieldErrors().stream()
-        .map(error -> error.getField()).distinct().sorted().collect(java.util.stream.Collectors.joining(", "));
-    System.out.println("Auth validation fields: " + fields);
-    String message = fields.isEmpty() ? "Some information is missing or invalid." : "Invalid field: " + fields;
-    return ResponseEntity.status(400).body(ApiResponse.error(message, 400));
+    return ResponseEntity.status(400).body(ApiResponse.error("Some information is missing or invalid.", 400));
   }
   @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
   ResponseEntity<ApiResponse<Object>> invalidType(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex) {
@@ -48,7 +44,6 @@ class AuthErrorHandler {
   }
   @ExceptionHandler(HttpMessageNotReadableException.class)
   ResponseEntity<ApiResponse<Map<String,Object>>> malformed(HttpMessageNotReadableException ex) {
-    System.out.println("Auth request parser rejected payload: " + ex.getMostSpecificCause().getClass().getSimpleName());
     return ResponseEntity.badRequest().body(new ApiResponse<>(false, "Some information is missing or invalid.", Map.of(), 400));
   }
   @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
