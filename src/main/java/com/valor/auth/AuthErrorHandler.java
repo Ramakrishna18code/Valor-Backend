@@ -20,9 +20,15 @@ class AuthErrorHandler {
   ResponseEntity<ApiResponse<Object>> duplicate(Exception ignored) {
     return ResponseEntity.status(409).body(ApiResponse.error("An account with these details already exists.", 409));
   }
-  @ExceptionHandler({org.springframework.web.bind.MethodArgumentNotValidException.class,
-      org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
-  ResponseEntity<ApiResponse<Object>> invalid(Exception ignored) {
+  @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
+  ResponseEntity<ApiResponse<Object>> invalid(org.springframework.web.bind.MethodArgumentNotValidException ex) {
+    String fields = ex.getBindingResult().getFieldErrors().stream()
+        .map(error -> error.getField()).distinct().sorted().collect(java.util.stream.Collectors.joining(", "));
+    String message = fields.isEmpty() ? "Some information is missing or invalid." : "Invalid field: " + fields;
+    return ResponseEntity.status(400).body(ApiResponse.error(message, 400));
+  }
+  @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+  ResponseEntity<ApiResponse<Object>> invalidType(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex) {
     return ResponseEntity.status(400).body(ApiResponse.error("Some information is missing or invalid.", 400));
   }
   @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
