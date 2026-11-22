@@ -34,11 +34,13 @@ class AuthController {
     @PostMapping("/auth/register/email/resend") ApiResponse<EmailRegistrationDtos.Started> emailResend(@Valid @RequestBody EmailRegistrationDtos.Resend r){return ApiResponse.success("Verification email accepted",emailRegistrations.resend(r.challengeId()),200);}
     @PostMapping("/auth/register/email/verify") ApiResponse<Authentication> emailVerify(@Valid @RequestBody EmailRegistrationDtos.Verify r){return ok(auth.verifyEmailRegistration(emailRegistrations.verify(r.challengeId(),r.otp())));}
     @Operation(operationId="loginCustomer")
-    @PostMapping("/auth/login/customer") ApiResponse<Authentication> loginCustomer(@RequestBody CustomerLogin r) {
-        if (r == null || r.identity() == null || r.identity().isBlank() || r.password() == null || r.password().isBlank()) {
+    @PostMapping("/auth/login/customer") ApiResponse<Authentication> loginCustomer(@RequestBody java.util.Map<String,Object> r) {
+        if (r == null || r.size() != 2 || r.containsKey("identity") == false || r.containsKey("password") == false
+            || !(r.get("identity") instanceof String identity) || !(r.get("password") instanceof String password)
+            || identity.isBlank() || password.isBlank()) {
             throw new IllegalArgumentException("Authentication failed");
         }
-        return ok(auth.login(r.identity(),r.password(),Set.of(Role.CUSTOMER)));
+        return ok(auth.login(identity,password,Set.of(Role.CUSTOMER)));
     }
     private User emailLogin(EmailLogin r,Set<Role> roles) {
         String email=auth.normEmail(r.email());
