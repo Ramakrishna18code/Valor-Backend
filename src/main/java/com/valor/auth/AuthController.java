@@ -34,8 +34,10 @@ class AuthController {
     @PostMapping("/auth/register/email/resend") ApiResponse<EmailRegistrationDtos.Started> emailResend(@Valid @RequestBody EmailRegistrationDtos.Resend r){return ApiResponse.success("Verification email accepted",emailRegistrations.resend(r.challengeId()),200);}
     @PostMapping("/auth/register/email/verify") ApiResponse<Authentication> emailVerify(@Valid @RequestBody EmailRegistrationDtos.Verify r){return ok(auth.verifyEmailRegistration(emailRegistrations.verify(r.challengeId(),r.otp())));}
     @Operation(operationId="loginCustomer")
-    @PostMapping("/auth/login/customer") ApiResponse<Authentication> loginCustomer(@Valid @RequestBody CustomerLogin r) {
-        System.out.println("Customer login request reached auth controller.");
+    @PostMapping("/auth/login/customer") ApiResponse<Authentication> loginCustomer(@RequestBody CustomerLogin r) {
+        if (r == null || r.identity() == null || r.identity().isBlank() || r.password() == null || r.password().isBlank()) {
+            throw new IllegalArgumentException("Authentication failed");
+        }
         return ok(auth.login(r.identity(),r.password(),Set.of(Role.CUSTOMER)));
     }
     private User emailLogin(EmailLogin r,Set<Role> roles) {
