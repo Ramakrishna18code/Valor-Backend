@@ -75,6 +75,7 @@ class StagingTechnicianTestBootstrap implements ApplicationRunner {
             user.setFailedLoginAttempts(0);
             user.setLockedUntil(null);
             users.saveAndFlush(user);
+            System.out.println("Staging technician test account password updated.");
         } else {
             user = new User();
             user.setEmail(normalizedEmail);
@@ -85,6 +86,7 @@ class StagingTechnicianTestBootstrap implements ApplicationRunner {
             user.setFailedLoginAttempts(0);
             user.setLockedUntil(null);
             users.saveAndFlush(user);
+            System.out.println("Staging technician test account created.");
         }
 
         if (!encoder.matches(password, user.getPasswordHash())) {
