@@ -34,7 +34,7 @@ class AuthConfig {
         CorsConfiguration cors = new CorsConfiguration();
         cors.setAllowedOrigins(origins);
         cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        cors.setAllowedHeaders(List.of("Content-Type", "Authorization", "Accept", "X-Application-Token"));
+        cors.setAllowedHeaders(List.of("Content-Type", "Authorization", "Accept", "X-Application-Token", "X-Valor-First-Admin-Secret"));
         // The API uses bearer headers, not cross-origin cookies.
         cors.setAllowCredentials(false);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -69,6 +69,7 @@ class AuthConfig {
                                 "/api/v1/auth/register/email/start",
                                 "/api/v1/auth/register/email/resend",
                                 "/api/v1/auth/register/email/verify",
+                                "/api/v1/auth/first-admin",
                                 "/api/v1/auth/login/customer",
                                 "/api/v1/auth/login/admin",
                                 "/api/v1/auth/login/technician",

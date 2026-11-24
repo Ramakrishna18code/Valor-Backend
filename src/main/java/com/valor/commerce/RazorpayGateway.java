@@ -20,6 +20,8 @@ class RazorpayGateway implements PaymentGateway {
     private final String webhookSecret;
     private final String mode;
     private final boolean offlineTestMode;
+    private final boolean enabled;
+    private final boolean required;
     private final RestClient rest;
     private final ObjectMapper mapper;
 
@@ -28,12 +30,16 @@ class RazorpayGateway implements PaymentGateway {
             @Value("${razorpay.webhook-secret:}") String webhookSecret,
             @Value("${razorpay.mode:}") String mode,
             @Value("${razorpay.offline-test-mode:false}") boolean offlineTestMode,
+            @Value("${razorpay.enabled:true}") boolean enabled,
+            @Value("${razorpay.required:false}") boolean required,
             RestClient.Builder builder, ObjectMapper mapper) {
         this.keyId = keyId;
         this.keySecret = keySecret;
         this.webhookSecret = webhookSecret;
         this.mode = mode;
         this.offlineTestMode = offlineTestMode;
+        this.enabled = enabled;
+        this.required = required;
         this.rest = builder.baseUrl("https://api.razorpay.com/v1").build();
         this.mapper = mapper;
     }
@@ -43,11 +49,14 @@ class RazorpayGateway implements PaymentGateway {
 
     @PostConstruct
     void validateConfiguration() {
-        if (offlineTestMode) return;
+        if (offlineTestMode || !enabled) return;
         boolean hasKeyId = !keyId.isBlank();
         boolean hasKeySecret = !keySecret.isBlank();
         boolean hasMode = mode != null && !mode.isBlank();
         boolean hasWebhookSecret = !webhookSecret.isBlank();
+        if (required && !(hasKeyId && hasKeySecret && hasMode && hasWebhookSecret)) {
+            throw new IllegalStateException("Razorpay configuration is incomplete; configure the key pair, mode, and dashboard webhook secret");
+        }
         if (!(hasKeyId || hasKeySecret || hasMode || hasWebhookSecret)) return;
         if (!hasKeyId || !hasKeySecret || !hasMode || !hasWebhookSecret) {
             throw new IllegalStateException("Razorpay configuration is incomplete; configure the key pair, mode, and dashboard webhook secret");
@@ -60,6 +69,7 @@ class RazorpayGateway implements PaymentGateway {
     }
 
     public JsonNode createOrder(BigDecimal amount, String currency, String receipt) {
+        if (!enabled) throw new CommerceException(503, "Payment service is disabled in this environment");
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", "order_test_" + receipt, "status", "created"));
         Map<String,Object> body = Map.of("amount", paise(amount), "currency", currency, "receipt", receipt, "payment_capture", 1);
@@ -67,12 +77,14 @@ class RazorpayGateway implements PaymentGateway {
     }
 
     public JsonNode lookupOrder(String razorpayOrderId) {
+        if (!enabled) throw new CommerceException(503, "Payment service is disabled in this environment");
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", razorpayOrderId, "status", "created"));
         return get("/orders/" + razorpayOrderId);
     }
 
     public JsonNode listOrders(String receipt, long from, long to, int count, int skip) {
+        if (!enabled) throw new CommerceException(503, "Payment service is disabled in this environment");
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("entity", "collection", "count", 0, "items", List.of()));
         return rest.get().uri(uri -> uri.path("/orders")
@@ -82,6 +94,7 @@ class RazorpayGateway implements PaymentGateway {
     }
 
     public JsonNode lookupPayment(String razorpayPaymentId) {
+        if (!enabled) throw new CommerceException(503, "Payment service is disabled in this environment");
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", razorpayPaymentId, "status", "authorized"));
         return get("/payments/" + razorpayPaymentId);
@@ -91,6 +104,7 @@ class RazorpayGateway implements PaymentGateway {
         return createRefund(razorpayPaymentId, amount, notes, null);
     }
     public JsonNode createRefund(String razorpayPaymentId, BigDecimal amount, String notes, String idempotencyKey) {
+        if (!enabled) throw new CommerceException(503, "Payment service is disabled in this environment");
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", "rfnd_test_" + razorpayPaymentId + "_" + paise(amount), "status", "pending"));
         Map<String,Object> body = new HashMap<>();
@@ -101,22 +115,26 @@ class RazorpayGateway implements PaymentGateway {
     }
 
     public JsonNode lookupRefund(String razorpayRefundId) {
+        if (!enabled) throw new CommerceException(503, "Payment service is disabled in this environment");
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("id", razorpayRefundId, "status", "pending"));
         return get("/refunds/" + razorpayRefundId);
     }
     public JsonNode listRefunds(String razorpayPaymentId) {
+        if (!enabled) throw new CommerceException(503, "Payment service is disabled in this environment");
         requireConfigured();
         if (offlineTestMode) return mapper.valueToTree(Map.of("items", List.of()));
         return get("/payments/" + razorpayPaymentId + "/refunds");
     }
 
     public boolean validWebhookSignature(String payload, String signature) {
+        if (!enabled) return false;
         if (webhookSecret.isBlank() || signature == null || signature.isBlank()) return false;
         return constantEquals(hmac(payload, webhookSecret), signature);
     }
 
     public boolean validPaymentSignature(String orderId, String paymentId, String signature) {
+        if (!enabled) return false;
         if (!configured() || signature == null || signature.isBlank()) return false;
         return constantEquals(hmac(orderId + "|" + paymentId, keySecret), signature);
     }

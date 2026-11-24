@@ -81,6 +81,27 @@ class EmailRegistrationIntegrationTest {
     }
 
     @Test
+    void expiredChallengeCanBeStartedAgainWithoutCreatingDuplicateRows() {
+        var started = registrations.start(request("expired@example.test"));
+        var row = challenges.findById(started.challengeId()).orElseThrow();
+        row.expiresAt = LocalDateTime.now().minusSeconds(1);
+        challenges.saveAndFlush(row);
+
+        var restarted = registrations.start(request("expired@example.test"));
+
+        assertEquals(started.challengeId(), restarted.challengeId());
+        assertEquals(1, challenges.findByEmail("expired@example.test").stream().count());
+    }
+
+    @Test
+    void shortPasswordsAreRejectedBeforeEmailDelivery() {
+        var input = new EmailRegistrationDtos.Start("short@example.test", null, "12345", "Pending Customer", null, null, null, null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> registrations.start(input));
+        verify(sender, never()).send(anyString(), anyString());
+    }
+
+    @Test
     void wrongCodesConsumeAttemptsAndExpireSafely() {
         var started = registrations.start(request("locked@example.test"));
         for (int i = 0; i < 3; i++) {

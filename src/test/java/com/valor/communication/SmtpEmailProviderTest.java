@@ -52,7 +52,7 @@ class SmtpEmailProviderTest {
     @Test void invalidTimeoutsFailClosed() {
         JavaMailSender sender = mock(JavaMailSender.class);
         EmailProperties p = new EmailProperties("smtp", "smtp.example.test", 587, "test-user", "test-only-placeholder",
-                "", "no-reply@example.test", "Valor", "", true, 0, 5000, 5000);
+                "", "no-reply@example.test", "Valor", "", true, 0, 5000, 5000, false, 0L);
         ProviderResult result = new SmtpEmailProvider(p, sender).send(REQUEST);
         assertFalse(result.success());
         verifyNoInteractions(sender);
@@ -60,6 +60,6 @@ class SmtpEmailProviderTest {
 
     private static EmailProperties properties(boolean enabled, String host, int port) {
         return new EmailProperties("smtp", host, port, "test-user", "test-only-placeholder", "",
-                "no-reply@example.test", "Valor", "support@example.test", enabled, 5000, 5000, 5000);
+                "no-reply@example.test", "Valor", "support@example.test", enabled, 5000, 5000, 5000, false, 0L);
     }
 }

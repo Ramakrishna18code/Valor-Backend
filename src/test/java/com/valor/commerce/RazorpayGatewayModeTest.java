@@ -65,6 +65,21 @@ class RazorpayGatewayModeTest {
         assertDoesNotThrow(() -> gateway.createOrder(new BigDecimal("10.00"), "INR", "receipt"));
     }
 
+    @Test
+    void disabledDevModeRejectsWithoutUsingRestOrSimulatingSuccess() {
+        RestClient rest = mock(RestClient.class);
+        RestClient.Builder builder = mock(RestClient.Builder.class);
+        when(builder.baseUrl(anyString())).thenReturn(builder);
+        when(builder.build()).thenReturn(rest);
+        RazorpayGateway gateway = new RazorpayGateway("rzp_test_fixture", "secret-fixture",
+                "webhook-fixture", "test", false, false, false, builder, mapper);
+
+        CommerceException error = assertThrows(CommerceException.class,
+                () -> gateway.createOrder(new BigDecimal("10.00"), "INR", "receipt"));
+        assertEquals(503, error.status);
+        verifyNoInteractions(rest);
+    }
+
     private RazorpayGateway gateway(String keyId, String mode, boolean offline) {
         return gateway(keyId, mode, offline, mock(RestClient.class));
     }
@@ -73,6 +88,6 @@ class RazorpayGatewayModeTest {
         RestClient.Builder builder = mock(RestClient.Builder.class);
         when(builder.baseUrl(anyString())).thenReturn(builder);
         when(builder.build()).thenReturn(rest);
-        return new RazorpayGateway(keyId, "secret-fixture", "webhook-fixture", mode, offline, builder, mapper);
+        return new RazorpayGateway(keyId, "secret-fixture", "webhook-fixture", mode, offline, true, false, builder, mapper);
     }
 }

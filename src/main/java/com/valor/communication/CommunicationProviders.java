@@ -11,11 +11,18 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
 import java.util.Properties;
+import io.mailtrap.client.MailtrapClient;
+import io.mailtrap.config.MailtrapConfig;
+import io.mailtrap.factory.MailtrapClientFactory;
+import io.mailtrap.model.request.emails.Address;
+import io.mailtrap.model.request.emails.MailtrapMail;
+import java.util.List;
 
 @ConfigurationProperties(prefix = "email")
 record EmailProperties(String provider, String host, Integer port, String username, String password,
         String apiKey, String from, String fromName, String replyTo, boolean enabled,
-        Integer connectionTimeoutMs, Integer readTimeoutMs, Integer writeTimeoutMs) {
+        Integer connectionTimeoutMs, Integer readTimeoutMs, Integer writeTimeoutMs,
+        boolean sandbox, Long sandboxId) {
     EmailProperties {
         provider = provider == null || provider.isBlank() ? "mock" : provider.trim();
         from = from == null || from.isBlank() ? "no-reply@example.test" : from.trim();
@@ -118,6 +125,47 @@ class SmtpEmailProvider implements EmailProvider {
 
     private static boolean blank(String value) { return value == null || value.isBlank(); }
 }
+
+@Component
+@ConditionalOnProperty(name = "email.provider", havingValue = "mailtrap")
+class MailtrapEmailProvider implements EmailProvider {
+    private final EmailProperties properties;
+
+    MailtrapEmailProvider(EmailProperties properties) { this.properties = properties; }
+
+    @Override
+    public ProviderResult send(ProviderRequest request) {
+        if (!properties.enabled()) return ProviderResult.fail("MAILTRAP", "Mailtrap delivery disabled");
+        if (blank(properties.apiKey()) || blank(properties.from())) {
+            return ProviderResult.fail("MAILTRAP", "Mailtrap configuration missing or invalid");
+        }
+        if (properties.sandbox() && (properties.sandboxId() == null || properties.sandboxId() < 1)) {
+            return ProviderResult.fail("MAILTRAP", "Mailtrap sandbox configuration missing or invalid");
+        }
+        try {
+            var configBuilder = new MailtrapConfig.Builder().token(properties.apiKey().trim());
+            if (properties.sandbox()) configBuilder.sandbox(true).sandboxId(properties.sandboxId());
+            MailtrapClient client = MailtrapClientFactory.createMailtrapClient(configBuilder.build());
+            var mailBuilder = MailtrapMail.builder()
+                    .from(new Address(properties.from().trim(), properties.fromName()))
+                    .to(List.of(new Address(request.recipient())))
+                    .subject(request.subject() == null ? request.eventType() : request.subject())
+                    .text(request.textBody() == null ? "" : request.textBody())
+                    .html(request.htmlBody() == null ? "" : request.htmlBody())
+                    .category(request.templateKey() == null ? request.eventType() : request.templateKey());
+            if (request.replyTo() != null && !request.replyTo().isBlank()) {
+                mailBuilder.replyTo(new Address(request.replyTo().trim()));
+            }
+            client.send(mailBuilder.build());
+            return ProviderResult.ok("MAILTRAP");
+        } catch (RuntimeException ex) {
+            return ProviderResult.fail("MAILTRAP", "Mailtrap delivery failed (" + ex.getClass().getSimpleName() + ")");
+        }
+    }
+
+    private static boolean blank(String value) { return value == null || value.isBlank(); }
+}
+
 @Component class MockSmsProvider implements SmsProvider {
     public ProviderResult send(ProviderRequest request) { return request.body().contains("FORCE_PROVIDER_FAILURE") ? ProviderResult.fail("MOCK_SMS", "provider failed token=hidden") : ProviderResult.ok("MOCK_SMS"); }
 }

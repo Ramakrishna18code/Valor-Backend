@@ -497,6 +497,21 @@ Email delivery is implemented on top of the Phase 17 communication foundation. B
 
 Provider activation is deliberately deferred. The current runtime uses `MockEmailProvider` for development and tests, so no real email is delivered and no real SMTP/API vendor is selected. Future adapters should implement `EmailProvider` without exposing provider SDK models to business services.
 
+The `mailtrap` provider adapter is available through the existing `EmailProvider` abstraction:
+
+```env
+EMAIL_PROVIDER=mailtrap
+EMAIL_ENABLED=true
+MAILTRAP_API_TOKEN=
+MAILTRAP_SANDBOX=false
+MAILTRAP_SANDBOX_ID=
+EMAIL_FROM=no-reply@your-verified-domain.example
+EMAIL_FROM_NAME=Valor
+EMAIL_REPLY_TO=
+```
+
+Use the Mailtrap Email Sandbox while testing by setting `MAILTRAP_SANDBOX=true` and supplying `MAILTRAP_SANDBOX_ID`. Live sending requires `MAILTRAP_SANDBOX=false`, a Mailtrap API token, and a verified Mailtrap sending domain. Sent emails can be inspected at https://mailtrap.io/sending/email_logs.
+
 Generic configuration placeholders:
 
 ```env
