@@ -37,6 +37,8 @@ public class WorkflowService {
     private final EmailEventService emails;
     private final NotificationService notifications;
     private final RealtimeEventService realtime;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private ReassignmentRepository reassignmentRequests;
     @Value("${app.location.estimate-speed-kmh:25}") private double estimateSpeedKmh;
 
     public WorkflowService(RequestRepository requests, AssignmentRepository assignments, AutoAssignTechnicianRepository autoAssignTechnicians, HistoryRepository history,
@@ -144,6 +146,9 @@ public class WorkflowService {
     public Detail assign(Long id, AssignRequest input) {
         User actor = identities.actor(); admin(actor);
         ServiceRequest request = locked(id); nonterminal(request);
+        TechnicianReassignmentRequest pendingReassignment = reassignmentRequests == null ? null
+                : reassignmentRequests.findByServiceRequestIdAndStatus(request.getId(), ReassignmentStatus.PENDING)
+                        .map(row -> reassignmentRequests.lockById(row.getId()).orElse(row)).orElse(null);
         var technician = profiles.activeTechnician(input.technicianProfileId());
         TechnicianAssignment previous = assignments.active(id).orElse(null);
         Long previousTechnicianId = previous == null ? null : previous.getTechnician().getId();
@@ -164,6 +169,15 @@ public class WorkflowService {
                 "Assigned technician request=" + request.getId(),
                 "status=" + from + ",technician=" + previousTechnicianId,
                 "status=" + request.getStatus() + ",technician=" + technician.getId(), "SUCCESS");
+        if (pendingReassignment != null) {
+            pendingReassignment.setStatus(ReassignmentStatus.CANCELLED);
+            pendingReassignment.setReviewedBy(actor);
+            pendingReassignment.setDecisionReason(input.notes() == null ? "Superseded by Admin assignment." : input.notes().trim());
+            pendingReassignment.setCancelledAt(LocalDateTime.now());
+            reassignmentRequests.save(pendingReassignment);
+            audit.record("TECHNICIAN_REASSIGNMENT_CANCEL", "TECHNICIAN_REASSIGNMENT_REQUEST", pendingReassignment.getId(),
+                    "Pending request superseded by Admin assignment", "status=PENDING", "status=CANCELLED", "SUCCESS");
+        }
         emails.technicianAssignment(technician.getUser().getId(), technician.getEmployeeId(), request.getId(), request.getServiceId(), request.getTitle());
         notifications.createSystem(technician.getUser().getId(), "New job assigned",
                 "Request #" + request.getId() + " (" + request.getServiceId() + ") was assigned to you. Open Jobs to review and accept it.");

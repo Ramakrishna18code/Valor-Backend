@@ -1,0 +1,3 @@
+package com.valor.workflow;
+
+public enum ReassignmentReason { UNAVAILABLE, SCHEDULING_CONFLICT, OUT_OF_EXPERTISE, LOCATION_CONSTRAINT, WORKLOAD, EMERGENCY, OTHER }

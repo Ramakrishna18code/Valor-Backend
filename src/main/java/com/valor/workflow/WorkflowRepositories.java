@@ -40,6 +40,7 @@ interface AssignmentRepository extends JpaRepository<TechnicianAssignment, Long>
     boolean existsByRequestIdAndTechnicianId(Long requestId, Long technicianId);
     @Query("select a from TechnicianAssignment a join fetch a.technician t join fetch t.user where a.request.id = :requestId and a.status in (com.valor.workflow.AssignmentStatus.ASSIGNED, com.valor.workflow.AssignmentStatus.ACCEPTED)")
     Optional<TechnicianAssignment> active(@Param("requestId") Long requestId);
+    List<TechnicianAssignment> findByRequestIdOrderByAssignedAtAscIdAsc(Long requestId);
 }
 
 interface AutoAssignTechnicianRepository extends Repository<TechnicianProfile, Long> {
