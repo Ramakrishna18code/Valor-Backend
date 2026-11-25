@@ -1,0 +1,36 @@
+CREATE TABLE technician_reassignment_requests (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    service_request_id BIGINT NOT NULL,
+    requesting_technician_id BIGINT NOT NULL,
+    original_assignment_id BIGINT NOT NULL,
+    reason_code VARCHAR(40) NOT NULL,
+    reason_explanation VARCHAR(2000) NOT NULL,
+    work_completed VARCHAR(2000) NULL,
+    work_pending VARCHAR(2000) NULL,
+    parts_safety_context VARCHAR(2000) NULL,
+    other_handover_context VARCHAR(2000) NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    reviewed_by_user_id BIGINT NULL,
+    decision_reason VARCHAR(2000) NULL,
+    replacement_technician_id BIGINT NULL,
+    new_assignment_id BIGINT NULL,
+    decided_at DATETIME(6) NULL,
+    transferred_at DATETIME(6) NULL,
+    withdrawn_at DATETIME(6) NULL,
+    cancelled_at DATETIME(6) NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    pending_request_id BIGINT GENERATED ALWAYS AS (CASE WHEN status='PENDING' THEN service_request_id ELSE NULL END) STORED,
+    CONSTRAINT fk_reassign_request FOREIGN KEY(service_request_id) REFERENCES service_requests(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_reassign_requesting_tech FOREIGN KEY(requesting_technician_id) REFERENCES technician_profiles(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_reassign_original_assignment FOREIGN KEY(original_assignment_id) REFERENCES technician_assignments(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_reassign_reviewer FOREIGN KEY(reviewed_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_reassign_replacement FOREIGN KEY(replacement_technician_id) REFERENCES technician_profiles(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_reassign_new_assignment FOREIGN KEY(new_assignment_id) REFERENCES technician_assignments(id) ON DELETE RESTRICT,
+    CONSTRAINT ck_reassign_reason CHECK(reason_code IN ('UNAVAILABLE','SCHEDULING_CONFLICT','OUT_OF_EXPERTISE','LOCATION_CONSTRAINT','WORKLOAD','EMERGENCY','OTHER')),
+    CONSTRAINT ck_reassign_status CHECK(status IN ('PENDING','REJECTED','WITHDRAWN','TRANSFERRED','CANCELLED'))
+);
+CREATE UNIQUE INDEX uk_reassign_pending_request ON technician_reassignment_requests(pending_request_id);
+CREATE INDEX idx_reassign_status_created ON technician_reassignment_requests(status,created_at);
+CREATE INDEX idx_reassign_request_created ON technician_reassignment_requests(service_request_id,created_at);

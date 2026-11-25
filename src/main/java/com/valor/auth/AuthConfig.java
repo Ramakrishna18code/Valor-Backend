@@ -105,6 +105,7 @@ class AuthConfig {
                         .requestMatchers("/api/v1/admin/payments/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/company-cash/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/finance-workflow/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/reassignment-requests", "/api/v1/admin/reassignment-requests/**", "/api/v1/admin/service-requests/*/assignment-history").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/amc-contracts/*/entitlements", "/api/v1/admin/service-requests/*/coverage-decisions").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/quotations/**", "/api/v1/admin/service-requests/*/quotation-drafts").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
