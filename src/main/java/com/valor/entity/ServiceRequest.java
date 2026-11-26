@@ -30,6 +30,9 @@ public class ServiceRequest extends AuditableEntity {
     @Column(unique = true, nullable = false)
     private String serviceId;
 
+    @Column(name = "legacy_service_id", length = 80)
+    private String legacyServiceId;
+
     private String title;
     private String description;
     private String issueCategory;

@@ -19,6 +19,7 @@ public interface ServiceRequestRepository extends JpaRepository<ServiceRequest, 
 	@Query("""
 			select s from ServiceRequest s
 			where lower(coalesce(s.serviceId, '')) like lower(concat('%', :term, '%'))
+			   or lower(coalesce(s.legacyServiceId, '')) like lower(concat('%', :term, '%'))
 			   or lower(coalesce(s.title, '')) like lower(concat('%', :term, '%'))
 			   or lower(coalesce(s.issueCategory, '')) like lower(concat('%', :term, '%'))
 			   or lower(coalesce(s.customer.name, '')) like lower(concat('%', :term, '%'))

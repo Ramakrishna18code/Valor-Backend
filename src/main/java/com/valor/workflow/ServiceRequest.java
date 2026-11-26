@@ -22,6 +22,8 @@ public class ServiceRequest extends AssetRecord {
     private Lift lift;
     @Column(name = "service_id", nullable = false, length = 80)
     private String serviceId;
+    @Column(name = "legacy_service_id", length = 80)
+    private String legacyServiceId;
     @Column(name = "title", nullable = false, length = 200)
     private String title;
     @Column(name = "description", nullable = false, columnDefinition = "TEXT")
