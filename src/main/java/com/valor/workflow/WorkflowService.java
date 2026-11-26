@@ -102,7 +102,7 @@ public class WorkflowService {
             description = "Routine service requested";
         }
         ServiceRequest request = new ServiceRequest();
-        request.setCustomer(owner); request.setLift(lift); request.setServiceId("SR-" + UUID.randomUUID());
+        request.setCustomer(owner); request.setLift(lift); request.setServiceId("SR-PENDING-" + UUID.randomUUID());
         request.setTitle(input.title()); request.setDescription(description); request.setIssueCategory(input.issueCategory());
         request.setPriority(input.priority() == null ? RequestPriority.MEDIUM : input.priority());
         request.setServiceType(input.serviceType()); request.setCustomerRemarks(input.customerRemarks());
@@ -110,6 +110,8 @@ public class WorkflowService {
         request.setInternalAdminNotes(input.internalAdminNotes()); request.setEstimatedCompletionMinutes(input.estimatedCompletionMinutes());
         request.setSubmissionKey(actor.getRole() == Role.CUSTOMER ? input.submissionKey() : null);
         requests.saveAndFlush(request);
+        request.setServiceId(ServiceRequestIds.forRequest(lift == null ? null : lift.getId(), request.getId()));
+        requests.flush();
         if(lift!=null&&amcCoverage!=null)amcCoverage.capture(request.getId(),"VISIT",input.preferredVisitDate());
         event(request, null, actor, null);
         audit.record("SERVICE_REQUEST_CREATE", "SERVICE_REQUEST", request.getId(), "Created service request customer=" + owner.getId() + ",lift=" + (lift == null ? null : lift.getId()),

@@ -13,15 +13,16 @@ import com.valor.repository.LiftRepository;
 import com.valor.repository.ServiceRequestRepository;
 import com.valor.repository.TechnicianRepository;
 import com.valor.service.ServiceRequestService;
+import com.valor.workflow.ServiceRequestIds;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.time.LocalDateTime;
 import java.util.UUID;
-import java.time.Year;
 
 @Service
 public class ServiceRequestServiceImpl implements ServiceRequestService {
@@ -48,17 +49,16 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     }
 
     @Override
+    @Transactional
     public ServiceRequest createServiceRequest(ServiceRequest serviceRequest) {
-        if (serviceRequest.getServiceId() == null || serviceRequest.getServiceId().isBlank()) {
-            serviceRequest.setServiceId("VAL-SRQ-" + Year.now() + "-" + UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase());
-        }
+        serviceRequest.setServiceId("SR-PENDING-" + UUID.randomUUID());
         if (serviceRequest.getServiceRequestedAt() == null) serviceRequest.setServiceRequestedAt(LocalDateTime.now());
         if (serviceRequest.getStatus() == null) serviceRequest.setStatus(JobStatus.PENDING);
         if (serviceRequest.getPriority() == null) serviceRequest.setPriority(PriorityLevel.MEDIUM);
         if (serviceRequest.getServiceType() == null) serviceRequest.setServiceType(ServiceType.INSPECTION);
 
         if (serviceRequest.getCustomer() != null && serviceRequest.getCustomer().getId() != null) {
-            if (customerRepository == null) return serviceRequestRepository.save(serviceRequest);
+            if (customerRepository == null) return saveWithPublicId(serviceRequest);
             Customer customer = customerRepository.findById(serviceRequest.getCustomer().getId())
                     .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
             serviceRequest.setCustomer(customer);
@@ -77,7 +77,14 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .orElseThrow(() -> new ResourceNotFoundException("Technician not found"));
             serviceRequest.setAssignedTechnician(technician);
         }
-        return serviceRequestRepository.save(serviceRequest);
+        return saveWithPublicId(serviceRequest);
+    }
+
+    private ServiceRequest saveWithPublicId(ServiceRequest serviceRequest) {
+        ServiceRequest saved = serviceRequestRepository.saveAndFlush(serviceRequest);
+        saved.setServiceId(ServiceRequestIds.forRequest(
+                saved.getLift() == null ? null : saved.getLift().getId(), saved.getId()));
+        return serviceRequestRepository.saveAndFlush(saved);
     }
 
     @Override

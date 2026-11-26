@@ -9,6 +9,7 @@ import com.valor.workflow.AssignmentStatus;
 import com.valor.workflow.RequestPriority;
 import com.valor.workflow.RequestStatus;
 import com.valor.workflow.ServiceRequest;
+import com.valor.workflow.ServiceRequestIds;
 import com.valor.workflow.TechnicianAssignment;
 import com.valor.workflow.WorkflowServiceType;
 import jakarta.persistence.EntityManager;
@@ -24,6 +25,7 @@ import java.time.LocalTime;
 import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 
 @Component
 @Profile("dev & !prod")
@@ -120,7 +122,7 @@ class DevBootstrap {
   }
 
   private void seedPartRequest(String serviceId, TechnicianProfile technician, CustomerProfile customer, String seedNote, String status, String[][] requestedParts) {
-    Number serviceRequestId = (Number) em.createNativeQuery("select id from service_requests where service_id=? limit 1").setParameter(1, serviceId).getResultStream().findFirst().orElse(null);
+    Number serviceRequestId = (Number) em.createNativeQuery("select id from service_requests where service_id=? or legacy_service_id=? limit 1").setParameter(1, serviceId).setParameter(2, serviceId).getResultStream().findFirst().orElse(null);
     if (serviceRequestId == null) serviceRequestId = (Number) em.createNativeQuery("select r.id from service_requests r join customer_profiles c on c.id=r.customer_id where c.id=? order by r.id limit 1").setParameter(1, customer.getId()).getResultStream().findFirst().orElse(null);
     if (serviceRequestId == null) return;
     if (((Number) em.createNativeQuery("select count(*) from service_request_part_requests where notes=?").setParameter(1, seedNote).getSingleResult()).longValue() > 0) return;
@@ -148,7 +150,7 @@ class DevBootstrap {
     CustomerProfile customer = customer("mgopichakradhar@gmail.com", "+919810009999", "Gopi Chakradhar", "Gopi Chakradhar", "Hyderabad, Telangana", password);
     customer.hasLift = true;
     if (customer.referralCode == null || customer.referralCode.isBlank()) customer.referralCode = "VAL-GOPI-2026";
-    if (exists("select count(r) from ServiceRequest r where r.serviceId=:value", "GOPI-SR-2026-001")) return;
+    if (seedRequestExists("GOPI-SR-2026-001")) return;
     String[] names = {"Gopi Heights", "Chakradhar Residency", "MG Orchid", "Valor Gopi Plaza"};
     String[] districts = {"Hyderabad", "Rangareddy", "Medchal", "Warangal"};
     RequestStatus[] statuses = {RequestStatus.PENDING, RequestStatus.ASSIGNED, RequestStatus.ON_THE_WAY, RequestStatus.REACHED_SITE, RequestStatus.COMPLETED, RequestStatus.CANCELLED};
@@ -182,7 +184,7 @@ class DevBootstrap {
     request.setIssueCategory(type == WorkflowServiceType.INSTALLATION ? "Installation" : "Lift service"); request.setPriority(type == WorkflowServiceType.EMERGENCY ? RequestPriority.EMERGENCY : sequence % 2 == 0 ? RequestPriority.HIGH : RequestPriority.MEDIUM);
     request.setStatus(status); request.setServiceType(type); request.setCustomerRemarks("Customer demo data"); request.setTechnicianRemarks(status == RequestStatus.REACHED_SITE ? "Technician arrived at site." : null);
     request.setServiceRequestedAt(LocalDateTime.now().minusDays(8L - sequence)); request.setPreferredVisitDate(LocalDate.now().plusDays(sequence % 3)); request.setPreferredTimeSlot("10:00 AM - 12:00 PM"); request.setEstimatedCompletionMinutes(90);
-    if (status == RequestStatus.COMPLETED) request.setCompletedAt(LocalDateTime.now().minusDays(1)); em.persist(request); em.flush();
+    if (status == RequestStatus.COMPLETED) request.setCompletedAt(LocalDateTime.now().minusDays(1)); persistSeedRequest(request);
     if (status != RequestStatus.PENDING && status != RequestStatus.CANCELLED) {
       TechnicianAssignment assignment = new TechnicianAssignment(); assignment.setRequest(request); assignment.setTechnician(technician); assignment.setAssignedBy(admin);
       assignment.setStatus(status == RequestStatus.COMPLETED ? AssignmentStatus.COMPLETED : AssignmentStatus.ACCEPTED); assignment.setAssignedAt(LocalDateTime.now().minusDays(2)); assignment.setAcceptedAt(LocalDateTime.now().minusDays(1)); assignment.setNotes("Gopi demo assignment."); em.persist(assignment);
@@ -211,7 +213,7 @@ class DevBootstrap {
   }
 
   private void seedAnanyaCustomerDemo(User admin, CustomerProfile customer, TechnicianProfile[] technicians, String password) {
-    if (exists("select count(r) from ServiceRequest r where r.serviceId=:value", "ANANYA-SR-2026-001")) return;
+    if (seedRequestExists("ANANYA-SR-2026-001")) return;
     customer.status = "ACTIVE"; customer.active = true; customer.hasLift = true;
     if (customer.referralCode == null || customer.referralCode.isBlank()) customer.referralCode = "VAL-ANANYA-2026";
     customer.getUser().setActive(true); customer.getUser().setLocked(false); customer.getUser().setLockedUntil(null);
@@ -282,7 +284,7 @@ class DevBootstrap {
     request.setStatus(status); request.setServiceType(type); request.setCustomerRemarks("Seeded Ananya customer note for mobile testing.");
     request.setTechnicianRemarks(EnumSet.of(RequestStatus.REACHED_SITE, RequestStatus.REPAIR_IN_PROGRESS, RequestStatus.TESTING).contains(status) ? "Technician update is visible for this request." : null);
     request.setServiceRequestedAt(visitDate.atTime(9, 15).minusDays(sequence <= 2 ? 1 : 3)); request.setPreferredVisitDate(visitDate); request.setPreferredTimeSlot(sequence % 2 == 0 ? "01:00 PM - 03:00 PM" : "10:00 AM - 12:00 PM"); request.setEstimatedCompletionMinutes(60 + sequence * 10);
-    if (status == RequestStatus.COMPLETED) request.setCompletedAt(visitDate.atTime(16, 30)); em.persist(request); em.flush();
+    if (status == RequestStatus.COMPLETED) request.setCompletedAt(visitDate.atTime(16, 30)); persistSeedRequest(request);
     if (status != RequestStatus.PENDING) {
       TechnicianAssignment assignment = new TechnicianAssignment(); assignment.setRequest(request); assignment.setTechnician(technician); assignment.setAssignedBy(admin);
       assignment.setStatus(status == RequestStatus.COMPLETED ? AssignmentStatus.COMPLETED : status == RequestStatus.CANCELLED ? AssignmentStatus.RELEASED : status == RequestStatus.ASSIGNED ? AssignmentStatus.ASSIGNED : AssignmentStatus.ACCEPTED);
@@ -326,7 +328,7 @@ class DevBootstrap {
   }
 
   private void seedArjunTechnicianDemo(User admin, TechnicianProfile technician, String password) {
-    if (exists("select count(r) from ServiceRequest r where r.serviceId=:value", "ARJUN-SR-2026-001")) {
+    if (seedRequestExists("ARJUN-SR-2026-001")) {
       refreshArjunCashOtps();
       return;
     }
@@ -365,7 +367,7 @@ class DevBootstrap {
     request.setTechnicianRemarks(status == RequestStatus.REACHED_SITE ? "Reached site and waiting for arrival OTP." : null);
     request.setServiceRequestedAt(LocalDateTime.now().minusDays(sequence)); request.setPreferredVisitDate(LocalDate.now().plusDays(sequence % 3));
     request.setPreferredTimeSlot(sequence % 2 == 0 ? "01:00 PM - 02:00 PM" : "10:00 AM - 11:00 AM"); request.setEstimatedCompletionMinutes(90);
-    if (status == RequestStatus.COMPLETED) request.setCompletedAt(LocalDateTime.now().minusHours(6)); em.persist(request); em.flush();
+    if (status == RequestStatus.COMPLETED) request.setCompletedAt(LocalDateTime.now().minusHours(6)); persistSeedRequest(request);
     TechnicianAssignment assignment = new TechnicianAssignment(); assignment.setRequest(request); assignment.setTechnician(technician); assignment.setAssignedBy(admin);
     assignment.setStatus(status == RequestStatus.COMPLETED ? AssignmentStatus.COMPLETED : status == RequestStatus.CANCELLED ? AssignmentStatus.RELEASED : status == RequestStatus.ASSIGNED ? AssignmentStatus.ASSIGNED : AssignmentStatus.ACCEPTED);
     assignment.setAssignedAt(LocalDateTime.now().minusDays(2)); if (assignment.getStatus() == AssignmentStatus.ACCEPTED || assignment.getStatus() == AssignmentStatus.COMPLETED) assignment.setAcceptedAt(LocalDateTime.now().minusDays(1));
@@ -408,7 +410,7 @@ class DevBootstrap {
         update cash_payment_otps otp
         join service_requests request on request.id = otp.service_request_id
         set otp.otp_hash = ?, otp.expires_at = ?, otp.customer_visible_code = ?, otp.customer_visible_until = ?
-        where request.service_id like 'ARJUN-SR-2026-%'
+        where coalesce(request.legacy_service_id, request.service_id) like 'ARJUN-SR-2026-%'
         """)
         .setParameter(1, encoder.encode("1111"))
         .setParameter(2, LocalDateTime.now().plusMinutes(30))
@@ -434,7 +436,7 @@ class DevBootstrap {
 
   private void seedCustomerAssetsAndRequest(User admin, CustomerProfile customer, TechnicianProfile technician, int index) {
     String serviceId="DEV-SR-2026-%03d".formatted(index);
-    if (exists("select count(r) from ServiceRequest r where r.serviceId=:value", serviceId)) return;
+    if (seedRequestExists(serviceId)) return;
     Building building=new Building();building.setCustomer(customer);building.setBuildingName(customer.companyName);building.setBuildingType(index%2==0?"Commercial":"Residential");
     building.setAddress(customer.address);building.setCity("Bengaluru");building.setState("Karnataka");building.setPincode("5600%02d".formatted(index));
     building.setEmergencyContactName(customer.fullName);building.setEmergencyContactPhone(customer.getUser().getPhone());em.persist(building);
@@ -451,7 +453,7 @@ class DevBootstrap {
     request.setDescription("Development seed service request for UI validation.");request.setIssueCategory(index%2==0?"Preventive maintenance":"Door operation");
     request.setPriority(index==3? RequestPriority.HIGH:RequestPriority.MEDIUM);request.setStatus(sampleStatus(index));request.setServiceType(index%2==0? WorkflowServiceType.ROUTINE_MAINTENANCE:WorkflowServiceType.BREAKDOWN);
     request.setCustomerRemarks("Seeded customer note for local testing.");request.setServiceRequestedAt(LocalDateTime.now().minusDays(5L-index));
-    request.setPreferredVisitDate(LocalDate.now().plusDays(index));request.setPreferredTimeSlot("10:00 AM - 12:00 PM");request.setEstimatedCompletionMinutes(90);em.persist(request);
+    request.setPreferredVisitDate(LocalDate.now().plusDays(index));request.setPreferredTimeSlot("10:00 AM - 12:00 PM");request.setEstimatedCompletionMinutes(90);persistSeedRequest(request);
     if (request.getStatus()!=RequestStatus.PENDING) {
       TechnicianAssignment assignment=new TechnicianAssignment();assignment.setRequest(request);assignment.setTechnician(technician);assignment.setAssignedBy(admin);
       assignment.setStatus(request.getStatus()==RequestStatus.COMPLETED?AssignmentStatus.COMPLETED:
@@ -461,8 +463,19 @@ class DevBootstrap {
     }
   }
 
-  private boolean exists(String query, String value) {
-    return em.createQuery(query, Long.class).setParameter("value", value).getSingleResult() > 0;
+  private boolean seedRequestExists(String serviceId) {
+    return ((Number) em.createNativeQuery("select count(*) from service_requests where service_id=? or legacy_service_id=?")
+        .setParameter(1, serviceId).setParameter(2, serviceId).getSingleResult()).longValue() > 0;
+  }
+
+  private void persistSeedRequest(ServiceRequest request) {
+    request.setLegacyServiceId(request.getServiceId());
+    request.setServiceId("SR-PENDING-" + UUID.randomUUID());
+    em.persist(request);
+    em.flush();
+    request.setServiceId(ServiceRequestIds.forRequest(
+        request.getLift() == null ? null : request.getLift().getId(), request.getId()));
+    em.flush();
   }
 
   private String sampleTitle(int index) {
